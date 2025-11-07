@@ -298,16 +298,124 @@ namespace DhanSutra
                         }
                         break;
 
-                    case "DeleteItem":
-                        var itemData = JsonConvert.DeserializeObject<Item>(req.Payload.ToString());
-                        db.DeleteItem(itemData.Id);
-                        webView.CoreWebView2.PostWebMessageAsString("ItemDeleted");
-                        break;
+                    case "deleteItem":
+                        {
+                            var payload = (JObject)req.Payload;
+                            int itemid = payload["Item_Id"].Value<int>();
+                            bool deleted = db.DeleteItemIfNoInventory(itemid);
 
-                    default:
-                         webView.CoreWebView2.PostWebMessageAsString("Unknown action");
-                        break;
-                }
+                            var result = new
+                            {
+                                Type = "deleteItemResponse",
+                                Status = "Success",
+                                Message = deleted
+                                    ? "Item deleted successfully."
+                                    : "Cannot delete — related inventory exists, clear inventory first ."
+                                                                                                   
+                            };
+
+                            // Send response back to React
+                            webView.CoreWebView2.PostWebMessageAsJson(Newtonsoft.Json.JsonConvert.SerializeObject(result));
+                            break;
+                        }
+                    case "searchItems":
+                        {
+                            var payload = JObject.Parse(req.Payload.ToString());
+                            string queryText = payload["query"]?.ToString() ?? "";
+
+                            var items = db.SearchItems(queryText);
+
+                            var result = new
+                            {
+                                action = "searchItemsResponse",
+                                items = items
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                            );
+                            break;
+                        }
+                    case "updateItem":
+                        {
+                            var payload = JObject.Parse(req.Payload.ToString());
+
+                            int itemId = Convert.ToInt32(payload["id"]);
+                            string name = payload["name"]?.ToString();
+                            string itemCode = payload["itemcode"]?.ToString();
+                            int? categoryId = payload["categoryid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["categoryid"]);
+                            string date = payload["date"]?.ToString();
+                            string description = payload["description"]?.ToString();
+                            int? unitId = payload["unitid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["unitid"]);
+                            int? gstId = payload["gstid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["gstid"]);
+
+                            bool updated = db.UpdateItem(itemId, name, itemCode, categoryId, date, description, unitId, gstId);
+
+                            var result = new
+                            {
+                                action = "updateItem",
+                                success = updated,
+                                message = updated ? "✅ Item updated successfully." : "⚠️ Item update failed."
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(Newtonsoft.Json.JsonConvert.SerializeObject(result));
+                            break;
+                        }
+                    case "GetItemList":
+                        {
+                            var items = db.GetItemList(); // your SQLite query
+                            var result = new
+                            {
+                                Type = "GetItemList",
+                                Status = "Success",
+                                Data = items
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(result));
+                            break;
+                        }
+                    case "searchInventory":
+                        {
+                            var payload = JObject.Parse(req.Payload.ToString());
+                            string queryText = payload["query"]?.ToString() ?? "";
+
+                            // Call your database service method
+                            var inventoryList = db.SearchInventory(queryText);
+
+                            var result = new
+                            {
+                                action = "searchInventoryResponse",
+                                items = inventoryList,
+                                Status = "Success"
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                            );
+                            break;
+                        }
+
+                            //case "updateInventory":
+                            //    var result = _db.UpdateInventory(payload);
+                            //    SendJsonToWeb(new
+                            //    {
+                            //        action = "updateInventory",
+                            //        success = result.Success,
+                            //        message = result.Message
+                            //    });
+                            //    break;
+
+                            //case "deleteInventory":
+                            //    var delResult = _db.DeleteInventory(payload);
+                            //    SendJsonToWeb(new
+                            //    {
+                            //        action = "updateInventory",
+                            //        success = delResult.Success,
+                            //        message = delResult.Message
+                            //    });
+                            //    break;
+
+
+                        }
             }
             catch (Exception ex)
             {
