@@ -463,17 +463,12 @@ namespace DhanSutra
                     Dimension
                 FROM ItemDetails
                 WHERE 
-                    IFNULL(HsnCode, '') LIKE @query OR
-                    IFNULL(BatchNo, '') LIKE @query OR
-                    IFNULL(Description, '') LIKE @query OR
-                    IFNULL(Brand, '') LIKE @query OR
-                    IFNULL(ModelNo, '') LIKE @query OR
-                    CAST(Item_Id AS TEXT) LIKE @query
-                ORDER BY Date DESC;";
+                     item_id=@query
+                     ORDER BY Date DESC;";
 
                     using (var cmd = new SQLiteCommand(sql, conn))
                     {
-                        cmd.Parameters.AddWithValue("@query", $"%{queryText}%");
+                        cmd.Parameters.AddWithValue("@query", queryText);
 
                         using (var reader = cmd.ExecuteReader())
                         {
@@ -503,82 +498,90 @@ namespace DhanSutra
         }
 
         // ✅ Update
-        //public DbResult UpdateInventory(JObject payload)
-        //{
-        //    try
-        //    {
-        //        int id = payload["id"]?.Value<int>() ?? 0;
-        //        if (id == 0)
-        //            return new DbResult { Success = false, Message = "Invalid inventory ID." };
+        public bool UpdateInventoryRecord(
+     string itemId,
+     string batchNo,
+     string hsnCode,
+     string date,
+     string quantity,
+     string purchasePrice,
+     string salesPrice,
+     string mrp,
+     string goodsOrServices,
+     string description,
+     string mfgDate,
+     string expDate,
+     string modelNo,
+     string brand,
+     string size,
+     string color,
+     string weight,
+     string dimension,
+       string invbatchno
+ )
+        {
+            try
+            {
+                using (var conn = new SQLiteConnection(_connectionString))
+                {
+                    conn.Open();
 
-        //        using var conn = new SQLiteConnection(_connectionString);
-        //        conn.Open();
-        //        using var tx = conn.BeginTransaction();
+                    string query = @"
+                UPDATE ItemDetails
+                SET 
+                    hsnCode = @HsnCode,
+                    batchNo = @BatchNo,
+                    date = @Date,
+                    quantity = @Quantity,
+                    purchasePrice = @PurchasePrice,
+                    salesPrice = @SalesPrice,
+                    mrp = @Mrp,
+                    goodsOrServices = @GoodsOrServices,
+                    description = @Description,
+                    mfgdate = @MfgDate,
+                    expdate = @ExpDate,
+                    modelno = @ModelNo,
+                    brand = @Brand,
+                    size = @Size,
+                    color = @Color,
+                    weight = @Weight,
+                    dimension = @Dimension
+                WHERE item_Id = @ItemId AND batchNo = @invbatchno;
+            ";
 
-        //        string sql = @"
-        //            UPDATE Inventory SET
-        //                Item_Id = @Item_Id,
-        //                HsnCode = @HsnCode,
-        //                BatchNo = @BatchNo,
-        //                Date = @Date,
-        //                Quantity = @Quantity,
-        //                PurchasePrice = @PurchasePrice,
-        //                SalesPrice = @SalesPrice,
-        //                Mrp = @Mrp,
-        //                GoodsOrServices = @GoodsOrServices,
-        //                Description = @Description,
-        //                MfgDate = @MfgDate,
-        //                ExpDate = @ExpDate,
-        //                ModelNo = @ModelNo,
-        //                Brand = @Brand,
-        //                Size = @Size,
-        //                Color = @Color,
-        //                Weight = @Weight,
-        //                Dimension = @Dimension
-        //            WHERE Id = @Id;";
+                    using (var cmd = new SQLiteCommand(query, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@HsnCode", hsnCode);
+                        cmd.Parameters.AddWithValue("@Date", date);
+                        cmd.Parameters.AddWithValue("@Quantity", quantity);
+                        cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
+                        cmd.Parameters.AddWithValue("@SalesPrice", salesPrice);
+                        cmd.Parameters.AddWithValue("@Mrp", mrp);
+                        cmd.Parameters.AddWithValue("@GoodsOrServices", goodsOrServices);
+                        cmd.Parameters.AddWithValue("@Description", description);
+                        cmd.Parameters.AddWithValue("@MfgDate", mfgDate);
+                        cmd.Parameters.AddWithValue("@ExpDate", expDate);
+                        cmd.Parameters.AddWithValue("@ModelNo", modelNo);
+                        cmd.Parameters.AddWithValue("@Brand", brand);
+                        cmd.Parameters.AddWithValue("@Size", size);
+                        cmd.Parameters.AddWithValue("@Color", color);
+                        cmd.Parameters.AddWithValue("@Weight", weight);
+                        cmd.Parameters.AddWithValue("@Dimension", dimension);
+                        cmd.Parameters.AddWithValue("@ItemId", itemId);
+                        cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+                        cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
 
-        //        using var cmd = new SQLiteCommand(sql, conn);
-        //        cmd.Parameters.AddWithValue("@Item_Id", payload["item_id"]?.Value<int>() ?? 0);
-        //        cmd.Parameters.AddWithValue("@HsnCode", payload["hsnCode"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@BatchNo", payload["batchNo"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@Date", payload["date"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@Quantity", payload["quantity"]?.Value<int>() ?? 0);
-        //        cmd.Parameters.AddWithValue("@PurchasePrice", payload["purchasePrice"]?.Value<double>() ?? 0);
-        //        cmd.Parameters.AddWithValue("@SalesPrice", payload["salesPrice"]?.Value<double>() ?? 0);
-        //        cmd.Parameters.AddWithValue("@Mrp", payload["mrp"]?.Value<double>() ?? 0);
-        //        cmd.Parameters.AddWithValue("@GoodsOrServices", payload["goodsOrServices"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@Description", payload["description"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@MfgDate", payload["mfgDate"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@ExpDate", payload["expDate"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@ModelNo", payload["modelNo"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@Brand", payload["brand"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@Size", payload["size"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@Color", payload["color"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@Weight", payload["weight"]?.Value<double>() ?? 0);
-        //        cmd.Parameters.AddWithValue("@Dimension", payload["dimension"]?.ToString() ?? "");
-        //        cmd.Parameters.AddWithValue("@Id", id);
-
-        //        int rows = cmd.ExecuteNonQuery();
-        //        tx.Commit();
-
-        //        return new DbResult
-        //        {
-        //            Success = rows > 0,
-        //            Message = rows > 0
-        //                ? "✅ Inventory record updated successfully!"
-        //                : "⚠️ No matching record found."
-        //        };
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine($"❌ Update error: {ex.Message}");
-        //        return new DbResult
-        //        {
-        //            Success = false,
-        //            Message = $"Update failed: {ex.Message}"
-        //        };
-        //    }
-        //}
+                        int rows = cmd.ExecuteNonQuery();
+                        return rows > 0;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error updating inventory: " + ex.Message);
+                return false;
+            }
+        }
 
         //// ✅ Delete
         //public DbResult DeleteInventory(JObject payload)
@@ -618,6 +621,34 @@ namespace DhanSutra
         //        };
         //    }
         //}
+        public JObject GetLastItemWithInventory()
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = new SQLiteCommand(@"
+            SELECT i.Item_Id, it.Name 
+FROM itemdetails i
+JOIN Item it ON i.Item_Id = it.Id
+ORDER BY i.CreatedAt DESC
+LIMIT 1;", conn))
+                {
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            return new JObject
+                            {
+                                ["Item_Id"] = reader["Item_Id"].ToString(),
+                                ["ItemName"] = reader["Name"].ToString()
+                            };
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
 
     }
 

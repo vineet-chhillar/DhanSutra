@@ -24,7 +24,7 @@ namespace DhanSutra.Models
         public string Brand { get; set; }
         public string Size { get; set; }
         public string Color { get; set; }
-        public double Weight { get; set; }
+        public string Weight { get; set; }
         public string Dimension { get; set; }
 
         public string CreatedBy { get; set; }

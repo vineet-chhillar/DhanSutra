@@ -394,28 +394,97 @@ namespace DhanSutra
                             break;
                         }
 
-                            //case "updateInventory":
-                            //    var result = _db.UpdateInventory(payload);
-                            //    SendJsonToWeb(new
-                            //    {
-                            //        action = "updateInventory",
-                            //        success = result.Success,
-                            //        message = result.Message
-                            //    });
-                            //    break;
+                    case "updateInventory":
+                        {
+                            var payload = JObject.Parse(req.Payload.ToString());
 
-                            //case "deleteInventory":
-                            //    var delResult = _db.DeleteInventory(payload);
-                            //    SendJsonToWeb(new
-                            //    {
-                            //        action = "updateInventory",
-                            //        success = delResult.Success,
-                            //        message = delResult.Message
-                            //    });
-                            //    break;
+                            var id = payload["id"]?.ToString();
+                            var itemId = payload["item_id"]?.ToString();
+                            var batchNo = payload["batchNo"]?.ToString();
+                            var hsnCode = payload["hsnCode"]?.ToString();
+
+                            string NormalizeDate(string input)
+                            {
+                                if (string.IsNullOrWhiteSpace(input)) return null;
+                                if (DateTime.TryParse(input, out DateTime dt))
+                                    return dt.ToString("yyyy-MM-dd HH:mm:ss");
+                                return null;
+                            }
+
+                            var date = NormalizeDate(payload["date"]?.ToString());
 
 
+                            var quantity = payload["quantity"]?.ToString();
+                            var purchasePrice = payload["purchasePrice"]?.ToString();
+                            var salesPrice = payload["salesPrice"]?.ToString();
+                            var mrp = payload["mrp"]?.ToString();
+                            var goodsOrServices = payload["goodsOrServices"]?.ToString();
+                            var description = payload["description"]?.ToString();
+                            var mfgDate = NormalizeDate(payload["mfgdate"]?.ToString());
+                            var expDate = NormalizeDate(payload["expdate"]?.ToString());
+                            var modelno = payload["modelno"]?.ToString();
+                            var brand = payload["brand"]?.ToString();
+                            var size = payload["size"]?.ToString();
+                            var color = payload["color"]?.ToString();
+                            var weight = payload["weight"]?.ToString();
+                            var dimension = payload["dimension"]?.ToString();
+                            var invbatchno = payload["invbatchno"]?.ToString();
+                            bool success = db.UpdateInventoryRecord(
+                                itemId,
+                                batchNo,
+                                hsnCode,
+                                date,
+                                quantity,
+                                purchasePrice,
+                                salesPrice,
+                                mrp,
+                                goodsOrServices,
+                                description,
+                                mfgDate,
+                                expDate,
+                                modelno,
+                                brand,
+                                size,
+                                color,
+                                weight,
+                                dimension,
+                                invbatchno
+                            );
+
+                            var result = new
+                            {
+                                action = "updateInventoryResponse",
+                                success = success,
+                                message = success ? "Inventory updated successfully." : "Update failed."
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                            );
+
+                            break;
                         }
+                    case "getLastInventoryItem":
+                        {
+                            var lastItem = db.GetLastItemWithInventory();
+
+                            var result = new
+                            {
+                                action = "getLastInventoryItemResponse",
+                                success = lastItem != null,
+                                data = lastItem
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                            );
+
+                            break;
+                        }
+
+
+
+                }
             }
             catch (Exception ex)
             {
