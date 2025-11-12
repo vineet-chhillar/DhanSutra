@@ -191,7 +191,9 @@
     <Compile Include="Models\CategoryMaster.cs" />
     <Compile Include="Models\GstMaster.cs" />
     <Compile Include="Models\Item.cs" />
+    <Compile Include="Models\ItemBalance.cs" />
     <Compile Include="Models\ItemDetails.cs" />
+    <Compile Include="Models\ItemLedger.cs" />
     <Compile Include="Models\UnitMaster.cs" />
     <Compile Include="obj\Debug\.NETFramework,Version=v4.8.AssemblyAttributes.cs" />
     <Compile Include="Program.cs" />

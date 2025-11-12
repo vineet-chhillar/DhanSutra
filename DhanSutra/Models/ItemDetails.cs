@@ -11,9 +11,17 @@ namespace DhanSutra.Models
         public int Item_Id { get; set; }
         public string HsnCode { get; set; }
         public string BatchNo { get; set; }
+        public string refno { get; set; }
         public DateTime Date { get; set; }
-        public int Quantity { get; set; }
+        public double Quantity { get; set; }
         public double PurchasePrice { get; set; }
+
+        public double DiscountPercent { get; set; }
+
+        public double NetPurchasePrice { get; set; }
+
+        public double Amount { get; set; }
+
         public double SalesPrice { get; set; }
         public double Mrp { get; set; }
         public string GoodsOrServices { get; set; }

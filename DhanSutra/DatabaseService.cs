@@ -8,6 +8,7 @@ using System.Data;
 using System.Data.SQLite;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -16,7 +17,7 @@ namespace DhanSutra
 {
     public class DatabaseService
     {
-        private readonly string _connectionString = "Data Source=billing.db;Version=3;";
+        private readonly string _connectionString = "Data Source=billing.db;Version=3;BusyTimeout=5000;";
 
         public DatabaseService()
         {
@@ -112,16 +113,92 @@ namespace DhanSutra
             }
         }
 
-        public void AddItemDetails(ItemDetails details)
+        public bool AddItemDetails(ItemDetails details, SQLiteConnection conn, SQLiteTransaction txn)
         {
-            // 🧾 Log what we are actually inserting
-            Console.WriteLine("📥 AddItem() received:");
-            Console.WriteLine(JsonConvert.SerializeObject(details, Formatting.Indented));
-            using (var connection = new SQLiteConnection(_connectionString))
-                connection.Execute(@"
-            INSERT INTO ItemDetails (item_id, hsnCode, batchNo,[date], quantity, purchasePrice, salesPrice, mrp, goodsOrServices, description, mfgdate, expdate, modelno, brand, size, color, weight, dimension,createdby,createdat)
-                           VALUES (@Item_Id, @HsnCode, @BatchNo,@Date, @Quantity, @PurchasePrice, @SalesPrice, @Mrp, @GoodsOrServices, @Description, @MfgDate, @ExpDate, @ModelNo, @Brand, @Size, @Color, @Weight, @Dimension,@CreatedBy,@CreatedAt)", details);
+            try
+            {
+                // 🧾 Log what we are actually inserting (for debugging)
+                Console.WriteLine("📥 AddItem() received:");
+                Console.WriteLine(JsonConvert.SerializeObject(details, Formatting.Indented));
+
+                //using (var connection = new SQLiteConnection(_connectionString))
+                //{
+                    string sql = @"
+            INSERT INTO ItemDetails 
+                (
+item_id,
+hsnCode, 
+batchNo,
+refno,
+[Date],
+quantity,
+purchasePrice,
+discountPercent,
+netPurchasePrice, 
+amount,
+salesPrice,
+mrp, 
+goodsOrServices,
+description, 
+mfgdate,
+expdate,
+modelno, 
+brand, 
+size,
+color,
+weight,
+dimension,
+createdby,
+createdat)
+            VALUES 
+                (
+@Item_Id,
+@HsnCode,
+@BatchNo,
+@refno,
+@Date,
+@Quantity,
+@PurchasePrice,
+@DiscountPercent, 
+@NetPurchasePrice,
+@Amount,
+@SalesPrice,
+@Mrp,
+@GoodsOrServices,
+@Description, 
+@MfgDate,
+@ExpDate,
+@ModelNo,
+@Brand,
+@Size,
+@Color,
+@Weight,
+@Dimension,
+@CreatedBy,
+@CreatedAt);
+            ";
+                // ✅ Dapper executes inside the provided transaction
+                int rowsAffected = conn.Execute(sql, details, transaction: txn);
+
+                return rowsAffected > 0;
+                //using (var cmd = new SQLiteCommand(sql, conn, txn))
+                //{
+                //    // Dapper returns the number of rows affected
+                //    int rowsAffected = conn.Execute(sql, details);
+
+                //    // ✅ If at least one row was inserted successfully
+                //    return rowsAffected > 0;
+                //}
+                //}
+            }
+            catch (Exception ex)
+            {
+                // ❌ Log the error and return false
+                Console.WriteLine("❌ Error inserting ItemDetails: " + ex.Message);
+                return false;
+            }
         }
+
         public string GetItemNameById(int id)
         {
             using (var connection = new SQLiteConnection(_connectionString))
@@ -446,9 +523,13 @@ namespace DhanSutra
                     Item_Id,
                     HsnCode,
                     BatchNo,
+                    refno,
                     Date,
                     Quantity,
                     PurchasePrice,
+                    discountPercent,
+                    netPurchasePrice,
+                    amount,
                     SalesPrice,
                     Mrp,
                     GoodsOrServices,
@@ -498,28 +579,10 @@ namespace DhanSutra
         }
 
         // ✅ Update
-        public bool UpdateInventoryRecord(
-     string itemId,
-     string batchNo,
-     string hsnCode,
-     string date,
-     string quantity,
-     string purchasePrice,
-     string salesPrice,
-     string mrp,
-     string goodsOrServices,
-     string description,
-     string mfgDate,
-     string expDate,
-     string modelNo,
-     string brand,
-     string size,
-     string color,
-     string weight,
-     string dimension,
-       string invbatchno
- )
-        {
+        public bool UpdateInventoryRecord(string itemId,string batchNo, string refno, string hsnCode, string date, string quantity,string purchasePrice, string discountPercent,
+     string netpurchasePrice,string amount,string salesPrice,string mrp,string goodsOrServices,string description,string mfgDate,string expDate,string modelNo,string brand,
+     string size,string color,string weight,string dimension,string invbatchno
+ )        {
             try
             {
                 using (var conn = new SQLiteConnection(_connectionString))
@@ -527,13 +590,17 @@ namespace DhanSutra
                     conn.Open();
 
                     string query = @"
-                UPDATE ItemDetails
-                SET 
+                    UPDATE ItemDetails
+                    SET 
                     hsnCode = @HsnCode,
                     batchNo = @BatchNo,
+                    refno=@refno,
                     date = @Date,
                     quantity = @Quantity,
                     purchasePrice = @PurchasePrice,
+                    discountPercent=@DiscountPercent,
+                    netpurchasePrice= @NetPurchasePrice,
+                    amount= @Amount,
                     salesPrice = @SalesPrice,
                     mrp = @Mrp,
                     goodsOrServices = @GoodsOrServices,
@@ -555,6 +622,12 @@ namespace DhanSutra
                         cmd.Parameters.AddWithValue("@Date", date);
                         cmd.Parameters.AddWithValue("@Quantity", quantity);
                         cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
+
+                        cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
+                        cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
+                        cmd.Parameters.AddWithValue("@Amount", amount);
+
+
                         cmd.Parameters.AddWithValue("@SalesPrice", salesPrice);
                         cmd.Parameters.AddWithValue("@Mrp", mrp);
                         cmd.Parameters.AddWithValue("@GoodsOrServices", goodsOrServices);
@@ -569,6 +642,7 @@ namespace DhanSutra
                         cmd.Parameters.AddWithValue("@Dimension", dimension);
                         cmd.Parameters.AddWithValue("@ItemId", itemId);
                         cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+                        cmd.Parameters.AddWithValue("@refno", refno);
                         cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
 
                         int rows = cmd.ExecuteNonQuery();
@@ -579,6 +653,91 @@ namespace DhanSutra
             catch (Exception ex)
             {
                 Console.WriteLine("Error updating inventory: " + ex.Message);
+                return false;
+            }
+        }
+
+        public bool UpdateItemLedger(string itemId, string batchNo, string refno, string date, string quantity, string purchasePrice, string discountPercent,
+     string netpurchasePrice, string amount, string description, string invbatchno)
+        {
+            try
+            {
+                using (var conn = new SQLiteConnection(_connectionString))
+                {
+                    conn.Open();
+
+                    string query = @"
+                    UPDATE ItemLedger
+                    SET 
+                    BatchNo = @BatchNo,
+                    refno=@refno,
+                    date = @Date,
+                    Qty = @Quantity,
+                    Rate = @PurchasePrice,
+                    DiscountPercent=@DiscountPercent,
+                    NetRate= @NetPurchasePrice,
+                    TotalAmount= @Amount,
+                    Remarks = @Description
+                    WHERE ItemId = @ItemId AND BatchNo = @invbatchno;
+            ";
+
+                    using (var cmd = new SQLiteCommand(query, conn))
+                    {
+                        
+                        cmd.Parameters.AddWithValue("@Date", date);
+                        cmd.Parameters.AddWithValue("@Quantity", quantity);
+                        cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
+                        cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
+                        cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
+                        cmd.Parameters.AddWithValue("@Amount", amount);                                          
+                        cmd.Parameters.AddWithValue("@Description", description);
+                        cmd.Parameters.AddWithValue("@ItemId", itemId);
+                        cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+                        cmd.Parameters.AddWithValue("@refno", refno);
+                        cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
+
+                        int rows = cmd.ExecuteNonQuery();
+                        return rows > 0;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error updating item ledger: " + ex.Message);
+                return false;
+            }
+        }
+
+        public bool UpdateItemBalanceForBatchNo(string itemId, string batchNo,string invbatchno)
+        {
+            try
+            {
+                using (var conn = new SQLiteConnection(_connectionString))
+                {
+                    conn.Open();
+
+                    string query = @"
+                    UPDATE ItemBalance
+                    SET 
+                    BatchNo = @BatchNo
+                    WHERE ItemId = @ItemId AND BatchNo = @invbatchno;
+            ";
+
+                    using (var cmd = new SQLiteCommand(query, conn))
+                    {
+                                              
+                        cmd.Parameters.AddWithValue("@ItemId", itemId);
+                        cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+                        cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
+
+                        int rows = cmd.ExecuteNonQuery();
+                        return rows > 0;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error updating item balance: " + ex.Message);
                 return false;
             }
         }
@@ -648,7 +807,295 @@ LIMIT 1;", conn))
             }
             return null;
         }
+        public bool UpdateItemBalance(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            try
+            {
+                // 1️⃣ Insert or update batch-wise balance
+                string sql = @"
+        INSERT INTO ItemBalance (ItemId, BatchNo, CurrentQtyBatchWise, CurrentQty)
+        VALUES (@ItemId, @BatchNo, @Qty, @Qty)
+        ON CONFLICT(ItemId, BatchNo)
+        DO UPDATE SET 
+            CurrentQtyBatchWise = CurrentQtyBatchWise + excluded.CurrentQtyBatchWise,
+            LastUpdated = datetime('now','localtime');
+        ";
 
+                using (var cmd = new SQLiteCommand(sql, conn, txn))
+                {
+                    cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+                    cmd.Parameters.AddWithValue("@BatchNo", entry.BatchNo ?? "");
+                    cmd.Parameters.AddWithValue("@Qty", entry.Qty);
+                    cmd.ExecuteNonQuery();
+                }
+
+                // 2️⃣ Update total (CurrentQty) only for the latest record
+                string sqlTotal = @"
+        UPDATE ItemBalance
+        SET 
+            CurrentQty = (
+                SELECT SUM(CurrentQtyBatchWise)
+                FROM ItemBalance AS sub
+                WHERE sub.ItemId = @ItemId
+            ),
+            LastUpdated = datetime('now','localtime')
+        WHERE Id = (
+            SELECT MAX(Id)
+            FROM ItemBalance
+            WHERE ItemId = @ItemId
+        );
+        ";
+
+                using (var cmd = new SQLiteCommand(sqlTotal, conn, txn))
+                {
+                    cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+                    cmd.ExecuteNonQuery();
+                }
+
+                // ✅ If both SQL operations succeed
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("❌ Error in UpdateItemBalance: " + ex.Message);
+                return false;
+            }
+        }
+
+        public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno,string quantity)
+        {
+            try
+            {
+                using (var conn = new SQLiteConnection(_connectionString))
+                {
+                    conn.Open();
+                    using (var txn = conn.BeginTransaction())
+                    {
+                        try
+                        {
+                            // 1️⃣ First SQL update
+                            string query = @"
+                        UPDATE ItemBalance
+                        SET CurrentQtyBatchWise = @Qty,
+                            LastUpdated = datetime('now','localtime')
+                        WHERE ItemId = @ItemId AND BatchNo = @BatchNo;
+                    ";
+
+                            using (var cmd1 = new SQLiteCommand(query, conn, txn))
+                            {
+                                cmd1.Parameters.AddWithValue("@Qty", quantity); // using invbatchno as Qty placeholder?
+                                cmd1.Parameters.AddWithValue("@ItemId", itemId);
+                                cmd1.Parameters.AddWithValue("@BatchNo", batchNo);
+                                cmd1.ExecuteNonQuery();
+                            }
+
+                            // 2️⃣ Second SQL update (can target another batch or same)
+                            string sqlTotal = @"
+                            UPDATE ItemBalance
+                            SET 
+                                CurrentQty = (
+                                    SELECT SUM(CurrentQtyBatchWise)
+                                    FROM ItemBalance AS sub
+                                    WHERE sub.ItemId = @ItemId
+                                ),
+                                LastUpdated = datetime('now','localtime')
+                            WHERE Id = (
+                                SELECT MAX(Id)
+                                FROM ItemBalance
+                                WHERE ItemId = @ItemId
+                            );
+                            ";
+
+                            using (var cmd2 = new SQLiteCommand(sqlTotal, conn, txn))
+                            {
+                                cmd2.Parameters.AddWithValue("@BatchNo", batchNo);
+                                cmd2.ExecuteNonQuery();
+                            }
+
+                            // ✅ If both succeed, commit
+                            txn.Commit();
+                            return true;
+                        }
+                        catch (Exception innerEx)
+                        {
+                            Console.WriteLine("❌ Error in transaction: " + innerEx.Message);
+                            txn.Rollback();
+                            return false;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("❌ Database error: " + ex.Message);
+                return false;
+            }
+        }
+
+
+        //public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno)
+        //{
+        //    try
+        //    {
+        //        using (var conn = new SQLiteConnection(_connectionString))
+        //        {
+        //            conn.Open();
+
+        //            string query = @"
+        //UPDATE ItemBalance
+        //SET CurrentQtyBatchWise = @Qty,
+        //    LastUpdated = datetime('now','localtime')    
+        //        WHERE ItemId = @ItemId and BatchNo=@BatchNo";
+
+        //            using (var cmd = new SQLiteCommand(query, conn))
+        //            {
+
+        //                cmd.Parameters.AddWithValue("@ItemId", itemId);
+        //                cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+        //                cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
+
+        //                int rows = cmd.ExecuteNonQuery();
+        //                return rows > 0;
+        //            }                    
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine("Error updating item balance: " + ex.Message);
+        //        return false;
+        //    }
+        //}
+        //public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno)
+        //{
+        //    try
+        //    {
+        //        // 1️⃣ Insert or update batch-wise balance
+        //        string sql = @"
+        //UPDATE ItemBalance
+        //SET CurrentQtyBatchWise = @Qty,
+        //    LastUpdated = datetime('now','localtime')    
+        //        WHERE ItemId = @ItemId and BatchNo=@BatchNo";
+
+        //        using (var cmd = new SQLiteCommand(sql, conn, txn))
+        //        {
+        //            cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+        //            cmd.Parameters.AddWithValue("@BatchNo", entry.BatchNo ?? "");
+        //            cmd.Parameters.AddWithValue("@Qty", entry.Qty);
+        //            cmd.ExecuteNonQuery();
+        //        }
+
+        //        // 2️⃣ Update total (CurrentQty) only for the latest record
+        //        string sqlTotal = @"
+        //UPDATE ItemBalance
+        //SET 
+        //    CurrentQty = (
+        //        SELECT SUM(CurrentQtyBatchWise)
+        //        FROM ItemBalance AS sub
+        //        WHERE sub.ItemId = @ItemId
+        //    ),
+        //    LastUpdated = datetime('now','localtime')
+        //WHERE Id = (
+        //    SELECT MAX(Id)
+        //    FROM ItemBalance
+        //    WHERE ItemId = @ItemId
+        //);
+        //";
+
+        //        using (var cmd = new SQLiteCommand(sqlTotal, conn, txn))
+        //        {
+        //            cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+        //            cmd.ExecuteNonQuery();
+        //        }
+
+        //        // ✅ If both SQL operations succeed
+        //        return true;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine("❌ Error in UpdateItemBalance: " + ex.Message);
+        //        return false;
+        //    }
+        //}
+
+
+
+        public bool AddItemLedger(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            //using (var conn = new SQLiteConnection(_connectionString))
+            //{
+            //conn.Open();
+            try
+            {
+                string sql = @"
+            INSERT INTO ItemLedger 
+            (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
+            VALUES 
+            (@ItemId, @BatchNo, @Date, @TxnType, @RefNo, @Qty, @Rate, @DiscountPercent, @NetRate ,@Amount, @Remarks, @CreatedBy);
+        ";
+
+                using (var cmd = new SQLiteCommand(sql, conn, txn))
+                {
+
+                    cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+                    cmd.Parameters.AddWithValue("@BatchNo", entry.BatchNo ?? "");
+                    cmd.Parameters.AddWithValue("@Date", entry.Date);
+                    cmd.Parameters.AddWithValue("@TxnType", entry.TxnType);
+                    cmd.Parameters.AddWithValue("@RefNo", entry.RefNo ?? "");
+                    cmd.Parameters.AddWithValue("@Qty", entry.Qty);
+                    cmd.Parameters.AddWithValue("@Rate", entry.Rate);
+                    cmd.Parameters.AddWithValue("@DiscountPercent", entry.DiscountPercent);
+                    cmd.Parameters.AddWithValue("@NetRate", entry.NetRate);
+                    cmd.Parameters.AddWithValue("@Amount", entry.TotalAmount);
+                    cmd.Parameters.AddWithValue("@Remarks", entry.Remarks ?? "");
+                    cmd.Parameters.AddWithValue("@CreatedBy", entry.CreatedBy ?? "System");
+
+                    return cmd.ExecuteNonQuery() > 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("❌ AddItemDetails failed: " + ex.Message);
+                return false;
+            }
+           
+           // }
+        }
+        public ItemBalance GetItemBalance(int itemId, string batchNo = null)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                string sql = batchNo == null
+                    ? "SELECT * FROM ItemBalance WHERE ItemId = @ItemId LIMIT 1;"
+                    : "SELECT * FROM ItemBalance WHERE ItemId = @ItemId AND BatchNo = @BatchNo LIMIT 1;";
+
+                using (var cmd = new SQLiteCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@ItemId", itemId);
+                    if (batchNo != null)
+                        cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            return new ItemBalance
+                            {
+                                Id = Convert.ToInt32(reader["Id"]),
+                                ItemId = Convert.ToInt32(reader["ItemId"]),
+                                BatchNo = reader["BatchNo"].ToString(),
+                                CurrentQty = Convert.ToDouble(reader["CurrentQty"]),
+                                CurrentQtyBatchWise = Convert.ToDouble(reader["CurrentQtyBatchWise"]),
+                                LastUpdated = reader["LastUpdated"].ToString()
+                            };
+                        }
+                    }
+                }
+
+                return null;
+            }
+        }
 
     }
 

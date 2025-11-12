@@ -15,15 +15,40 @@ namespace DhanSutra
 {
     public partial class MainForm : Form
     {
+        private readonly string _connectionString1 = "Data Source=billing.db;Version=3;BusyTimeout=5000;";
         private DatabaseService db = new DatabaseService();
         public MainForm()
         {
+            // ✅ Step 1: Define a safe, user-visible folder
+            string dataFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "DhanSutra\\DhanSutra\\DhanSutraData"
+            );
+
+            // ✅ Step 2: Create folder if missing
+            if (!Directory.Exists(dataFolder))
+            {
+                Directory.CreateDirectory(dataFolder);
+                Console.WriteLine("📁 Created folder: " + dataFolder);
+            }
+
+            // ✅ Step 3: Full database path
+            string dbFile = Path.Combine(dataFolder, "billing.db");
+
+            // ✅ Step 4: Final connection string
+            _connectionString1 = $"Data Source={dbFile};Version=3;";
+            Console.WriteLine("📂 Database path: " + dbFile);
+
             InitializeComponent();
             InitializeWebViewAsync();
+           
         }
+       
         private async void InitializeWebViewAsync()
         {
             await webView.EnsureCoreWebView2Async(null);
+            webView.CoreWebView2.OpenDevToolsWindow();
+
 
             // Handle messages from React (JS)
             webView.CoreWebView2.WebMessageReceived += WebView2_WebMessageReceived;
@@ -82,14 +107,67 @@ namespace DhanSutra
                     case "AddItemDetails":
                         try
                         {
+                            
                             var details = JsonConvert.DeserializeObject<ItemDetails>(req.Payload.ToString());
-                            db.AddItemDetails(details);
+                            
+                            ItemLedger itemledger=new ItemLedger();
+                            itemledger.ItemId = details.Item_Id;
+                            itemledger.BatchNo = details.BatchNo;   
+                            itemledger.Date = details.Date.ToString("yyyy-MM-dd HH:mm:ss");
+                            itemledger.TxnType = "Purchase";
+                            itemledger.RefNo = details.refno;
+                            itemledger.Qty = details.Quantity;
+                            itemledger.Rate = details.PurchasePrice;
+                            itemledger.DiscountPercent = details.DiscountPercent;
+                            itemledger.NetRate = details.NetPurchasePrice;
+                            itemledger.TotalAmount  = details.Amount;
+                            itemledger.Remarks = details.Description;
+                            itemledger.CreatedBy = details.CreatedBy;
+                            itemledger.CreatedAt = details.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
 
+                            string status = "Error";
+                            //string message = "Failed to save inventory details.";
+
+                            using (var conn = new SQLiteConnection(_connectionString1))
+                            {
+                                conn.Open();
+                                Console.WriteLine("🧠 Using DB file: " + conn.FileName);
+                                using (var txn = conn.BeginTransaction())
+                                {
+                                    try
+                                    {
+                                        bool success1 = db.AddItemDetails(details, conn, txn);
+                                        bool success2 = db.AddItemLedger(itemledger, conn, txn);
+                                        bool success3 = db.UpdateItemBalance(itemledger, conn, txn);
+
+                                        if (success1 && success2 && success3)
+                                        {
+                                            txn.Commit();
+                                            status = "Success";
+                                            message = "Inventory details saved successfully.";
+                                        }
+                                        else
+                                        {
+                                            txn.Rollback();
+                                            status = "Error";
+                                            message = "One or more operations failed. Transaction rolled back.";
+                                        }
+                                    }
+                                    catch (Exception innerEx)
+                                    {
+                                        txn.Rollback();
+                                        status = "Error";
+                                        message = "Database error: " + innerEx.Message;
+                                    }
+                                }
+                            }
+
+                            // ✅ Send response to React
                             var response = new
                             {
                                 Type = "AddItemDetails",
-                                Status = "Success",
-                                Message = "Inventory details saved successfully"
+                                Status = status,
+                                Message = message
                             };
 
                             webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
@@ -400,7 +478,9 @@ namespace DhanSutra
 
                             var id = payload["id"]?.ToString();
                             var itemId = payload["item_id"]?.ToString();
+                            var stritemId = payload["item_id"]?.ToString();
                             var batchNo = payload["batchNo"]?.ToString();
+                            var refno = payload["refno"]?.ToString();
                             var hsnCode = payload["hsnCode"]?.ToString();
 
                             string NormalizeDate(string input)
@@ -416,6 +496,12 @@ namespace DhanSutra
 
                             var quantity = payload["quantity"]?.ToString();
                             var purchasePrice = payload["purchasePrice"]?.ToString();
+
+                            var discountPercent = payload["discountPercent"]?.ToString();
+                            var netPurchasePrice = payload["netpurchasePrice"]?.ToString();
+                            var amount = payload["amount"]?.ToString();
+
+
                             var salesPrice = payload["salesPrice"]?.ToString();
                             var mrp = payload["mrp"]?.ToString();
                             var goodsOrServices = payload["goodsOrServices"]?.ToString();
@@ -429,29 +515,54 @@ namespace DhanSutra
                             var weight = payload["weight"]?.ToString();
                             var dimension = payload["dimension"]?.ToString();
                             var invbatchno = payload["invbatchno"]?.ToString();
-                            bool success = db.UpdateInventoryRecord(
-                                itemId,
-                                batchNo,
-                                hsnCode,
-                                date,
-                                quantity,
-                                purchasePrice,
-                                salesPrice,
-                                mrp,
-                                goodsOrServices,
-                                description,
-                                mfgDate,
-                                expDate,
-                                modelno,
-                                brand,
-                                size,
-                                color,
-                                weight,
-                                dimension,
-                                invbatchno
-                            );
 
-                            var result = new
+                            bool success = false;
+
+                            using (var conn = new SQLiteConnection(_connectionString1))
+                            {
+                                conn.Open();
+
+                                using (var transaction = conn.BeginTransaction())
+                                {
+                                    try
+                                    {
+                                        success = db.UpdateInventoryRecord(itemId, batchNo, refno, hsnCode, date, quantity, purchasePrice, discountPercent, netPurchasePrice, amount,
+                                salesPrice, mrp, goodsOrServices, description, mfgDate, expDate, modelno, brand, size, color, weight, dimension, invbatchno);
+
+                                        bool success_ledger = db.UpdateItemLedger(itemId, batchNo, refno, date, quantity, purchasePrice, discountPercent, netPurchasePrice, amount,
+                                            description, invbatchno);
+
+                                        bool success_itembalance_batchno = db.UpdateItemBalanceForBatchNo(itemId, batchNo, invbatchno);
+
+                                        //there should be change in itembalance also if quantity changes
+                                        bool success_itembalance_forquantity = db.UpdateItemBalance_ForChangeInQuantity(stritemId, batchNo, invbatchno, quantity);
+                                        
+
+
+                                        // ✅ If both succeeded, commit
+                                        if (success && success_ledger && success_itembalance_batchno && success_itembalance_forquantity)
+                                        {
+                                            transaction.Commit();
+                                            success = true;
+                                        }
+                                        else
+                                        {
+                                            transaction.Rollback();
+                                            success = false;
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        // ❌ Rollback on any error
+                                        transaction.Rollback();
+                                        Console.WriteLine("Error updating inventory & ledger: " + ex.Message);
+                                        success = false;
+                                    }
+                                }
+
+                                conn.Close();
+                            }
+                                var result = new
                             {
                                 action = "updateInventoryResponse",
                                 success = success,
