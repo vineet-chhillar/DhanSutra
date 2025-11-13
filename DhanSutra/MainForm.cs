@@ -10,6 +10,8 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
+using PdfSharpCore.Pdf;
+using PdfSharpCore.Drawing;
 
 namespace DhanSutra
 {
@@ -71,6 +73,8 @@ namespace DhanSutra
                 var message = e.WebMessageAsJson;
                 var req = JsonConvert.DeserializeObject<WebRequestMessage>(message);
 
+
+                
                 switch (req.Action)
                 {
                     case "AddItem":
@@ -472,11 +476,113 @@ namespace DhanSutra
                             break;
                         }
 
+                    //case "updateInventory":
+                    //    {
+                    //        var payload = JObject.Parse(req.Payload.ToString());
+
+                    //        var id = payload["id"]?.ToString();
+                    //        var itemId = payload["item_id"]?.ToString();
+                    //        var stritemId = payload["item_id"]?.ToString();
+                    //        var batchNo = payload["batchNo"]?.ToString();
+                    //        var refno = payload["refno"]?.ToString();
+                    //        var hsnCode = payload["hsnCode"]?.ToString();
+
+                    //        string NormalizeDate(string input)
+                    //        {
+                    //            if (string.IsNullOrWhiteSpace(input)) return null;
+                    //            if (DateTime.TryParse(input, out DateTime dt))
+                    //                return dt.ToString("yyyy-MM-dd HH:mm:ss");
+                    //            return null;
+                    //        }
+
+                    //        var date = NormalizeDate(payload["date"]?.ToString());
+
+
+                    //        var quantity = payload["quantity"]?.ToString();
+                    //        var purchasePrice = payload["purchasePrice"]?.ToString();
+
+                    //        var discountPercent = payload["discountPercent"]?.ToString();
+                    //        var netPurchasePrice = payload["netpurchasePrice"]?.ToString();
+                    //        var amount = payload["amount"]?.ToString();
+
+
+                    //        var salesPrice = payload["salesPrice"]?.ToString();
+                    //        var mrp = payload["mrp"]?.ToString();
+                    //        var goodsOrServices = payload["goodsOrServices"]?.ToString();
+                    //        var description = payload["description"]?.ToString();
+                    //        var mfgDate = NormalizeDate(payload["mfgdate"]?.ToString());
+                    //        var expDate = NormalizeDate(payload["expdate"]?.ToString());
+                    //        var modelno = payload["modelno"]?.ToString();
+                    //        var brand = payload["brand"]?.ToString();
+                    //        var size = payload["size"]?.ToString();
+                    //        var color = payload["color"]?.ToString();
+                    //        var weight = payload["weight"]?.ToString();
+                    //        var dimension = payload["dimension"]?.ToString();
+                    //        var invbatchno = payload["invbatchno"]?.ToString();
+
+                    //        bool success = false;
+
+                    //        using (var conn = new SQLiteConnection(_connectionString1))
+                    //        {
+                    //            conn.Open();
+
+                    //            using (var transaction = conn.BeginTransaction())
+                    //            {
+                    //                try
+                    //                {
+                    //                    success = db.UpdateInventoryRecord(itemId, batchNo, refno, hsnCode, date, quantity, purchasePrice, discountPercent, netPurchasePrice, amount,
+                    //            salesPrice, mrp, goodsOrServices, description, mfgDate, expDate, modelno, brand, size, color, weight, dimension, invbatchno);
+
+                    //                    bool success_ledger = db.UpdateItemLedger(itemId, batchNo, refno, date, quantity, purchasePrice, discountPercent, netPurchasePrice, amount,
+                    //                        description, invbatchno);
+
+                    //                    bool success_itembalance_batchno = db.UpdateItemBalanceForBatchNo(itemId, batchNo, invbatchno);
+
+                    //                    //there should be change in itembalance also if quantity changes
+                    //                    bool success_itembalance_forquantity = db.UpdateItemBalance_ForChangeInQuantity(stritemId, batchNo, invbatchno, quantity);
+
+
+
+                    //                    // ✅ If both succeeded, commit
+                    //                    if (success && success_ledger && success_itembalance_batchno && success_itembalance_forquantity)
+                    //                    {
+                    //                        transaction.Commit();
+                    //                        success = true;
+                    //                    }
+                    //                    else
+                    //                    {
+                    //                        transaction.Rollback();
+                    //                        success = false;
+                    //                    }
+                    //                }
+                    //                catch (Exception ex)
+                    //                {
+                    //                    // ❌ Rollback on any error
+                    //                    transaction.Rollback();
+                    //                    Console.WriteLine("Error updating inventory & ledger: " + ex.Message);
+                    //                    success = false;
+                    //                }
+                    //            }
+
+                    //            conn.Close();
+                    //        }
+                    //            var result = new
+                    //        {
+                    //            action = "updateInventoryResponse",
+                    //            success = success,
+                    //            message = success ? "Inventory updated successfully." : "Update failed."
+                    //        };
+
+                    //        webView.CoreWebView2.PostWebMessageAsJson(
+                    //            Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                    //        );
+
+                    //        break;
+                    //    }
                     case "updateInventory":
                         {
                             var payload = JObject.Parse(req.Payload.ToString());
 
-                            var id = payload["id"]?.ToString();
                             var itemId = payload["item_id"]?.ToString();
                             var stritemId = payload["item_id"]?.ToString();
                             var batchNo = payload["batchNo"]?.ToString();
@@ -493,15 +599,11 @@ namespace DhanSutra
 
                             var date = NormalizeDate(payload["date"]?.ToString());
 
-
                             var quantity = payload["quantity"]?.ToString();
                             var purchasePrice = payload["purchasePrice"]?.ToString();
-
                             var discountPercent = payload["discountPercent"]?.ToString();
                             var netPurchasePrice = payload["netpurchasePrice"]?.ToString();
                             var amount = payload["amount"]?.ToString();
-
-
                             var salesPrice = payload["salesPrice"]?.ToString();
                             var mrp = payload["mrp"]?.ToString();
                             var goodsOrServices = payload["goodsOrServices"]?.ToString();
@@ -526,20 +628,25 @@ namespace DhanSutra
                                 {
                                     try
                                     {
-                                        success = db.UpdateInventoryRecord(itemId, batchNo, refno, hsnCode, date, quantity, purchasePrice, discountPercent, netPurchasePrice, amount,
-                                salesPrice, mrp, goodsOrServices, description, mfgDate, expDate, modelno, brand, size, color, weight, dimension, invbatchno);
+                                        success = db.UpdateInventoryRecord(
+                                            conn, transaction,
+                                            itemId, batchNo, refno, hsnCode, date, quantity, purchasePrice,
+                                            discountPercent, netPurchasePrice, amount, salesPrice, mrp,
+                                            goodsOrServices, description, mfgDate, expDate, modelno,
+                                            brand, size, color, weight, dimension, invbatchno);
 
-                                        bool success_ledger = db.UpdateItemLedger(itemId, batchNo, refno, date, quantity, purchasePrice, discountPercent, netPurchasePrice, amount,
-                                            description, invbatchno);
+                                        bool success_ledger = db.UpdateItemLedger(
+                                            conn, transaction,
+                                            itemId, batchNo, refno, date, quantity, purchasePrice,
+                                            discountPercent, netPurchasePrice, amount, description, invbatchno);
 
-                                        bool success_itembalance_batchno = db.UpdateItemBalanceForBatchNo(itemId, batchNo, invbatchno);
+                                        bool success_itembalance_batchno =
+                                            db.UpdateItemBalanceForBatchNo(conn, transaction, itemId, batchNo, invbatchno);
 
-                                        //there should be change in itembalance also if quantity changes
-                                        bool success_itembalance_forquantity = db.UpdateItemBalance_ForChangeInQuantity(stritemId, batchNo, invbatchno, quantity);
-                                        
+                                        bool success_itembalance_forquantity =
+                                            db.UpdateItemBalance_ForChangeInQuantity(conn, transaction,
+                                                stritemId, batchNo, invbatchno, quantity);
 
-
-                                        // ✅ If both succeeded, commit
                                         if (success && success_ledger && success_itembalance_batchno && success_itembalance_forquantity)
                                         {
                                             transaction.Commit();
@@ -553,16 +660,14 @@ namespace DhanSutra
                                     }
                                     catch (Exception ex)
                                     {
-                                        // ❌ Rollback on any error
                                         transaction.Rollback();
                                         Console.WriteLine("Error updating inventory & ledger: " + ex.Message);
                                         success = false;
                                     }
                                 }
-
-                                conn.Close();
                             }
-                                var result = new
+
+                            var result = new
                             {
                                 action = "updateInventoryResponse",
                                 success = success,
@@ -575,6 +680,7 @@ namespace DhanSutra
 
                             break;
                         }
+
                     case "getLastInventoryItem":
                         {
                             var lastItem = db.GetLastItemWithInventory();
@@ -592,6 +698,198 @@ namespace DhanSutra
 
                             break;
                         }
+                    case "GetCompanyProfile":
+                        {
+                            var profile = db.GetCompanyProfile();
+
+                            // Convert logo blob → base64
+                            string logoBase64 = null;
+                            if (profile?.Logo != null)
+                            {
+                                try { logoBase64 = Convert.ToBase64String(profile.Logo); }
+                                catch { logoBase64 = null; }
+                            }
+
+                            var resp = new
+                            {
+                                action = "GetCompanyProfileResponse",
+                                success = profile != null,
+                                profile = profile != null ? new
+                                {
+                                    Id = profile.Id,
+                                    CompanyName = profile.CompanyName,
+                                    AddressLine1 = profile.AddressLine1,
+                                    AddressLine2 = profile.AddressLine2,
+                                    City = profile.City,
+                                    State = profile.State,
+                                    Pincode = profile.Pincode,
+                                    Country = profile.Country,
+
+                                    GSTIN = profile.GSTIN,
+                                    PAN = profile.PAN,
+
+                                    Email = profile.Email,
+                                    Phone = profile.Phone,
+
+                                    BankName = profile.BankName,
+                                    BankAccount = profile.BankAccount,
+                                    IFSC = profile.IFSC,
+                                    BranchName = profile.BranchName,
+
+                                    InvoicePrefix = profile.InvoicePrefix,
+                                    InvoiceStartNo = profile.InvoiceStartNo,
+                                    CurrentInvoiceNo = profile.CurrentInvoiceNo,
+
+                                    LogoBase64 = logoBase64,
+
+                                    CreatedBy = profile.CreatedBy,
+                                    CreatedAt = profile.CreatedAt
+                                } : null
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(resp)
+                            );
+
+                            break;
+                        }
+
+                    case "SaveCompanyProfile":
+                        {
+                            // Convert payload to JObject
+                            var p = JObject.FromObject(req.Payload);
+
+                            // Extract profile JSON
+                            //var p = payload["profile"];
+
+                            // Build model from payload
+                            var model = new CompanyProfile
+                            {
+                                Id = p["Id"]?.ToObject<int>() ?? 0,
+                                CompanyName = p["CompanyName"]?.ToString(),
+                                AddressLine1 = p["AddressLine1"]?.ToString(),
+                                AddressLine2 = p["AddressLine2"]?.ToString(),
+                                City = p["City"]?.ToString(),
+                                State = p["State"]?.ToString(),
+                                Pincode = p["Pincode"]?.ToString(),
+                                Country = p["Country"]?.ToString(),
+                                GSTIN = p["GSTIN"]?.ToString(),
+                                PAN = p["PAN"]?.ToString(),
+                                Email = p["Email"]?.ToString(),
+                                Phone = p["Phone"]?.ToString(),
+                                BankName = p["BankName"]?.ToString(),
+                                BankAccount = p["BankAccount"]?.ToString(),
+                                IFSC = p["IFSC"]?.ToString(),
+                                BranchName = p["BranchName"]?.ToString(),
+                                InvoicePrefix = p["InvoicePrefix"]?.ToString(),
+                                InvoiceStartNo = p["InvoiceStartNo"]?.ToObject<int>() ?? 1,
+                                CurrentInvoiceNo = p["CurrentInvoiceNo"]?.ToObject<int>() ?? 1,
+                                CreatedBy = p["CreatedBy"]?.ToString()
+                            };
+
+                            // ⭐ CORRECT PLACE FOR LOGO BASE64 HANDLING ⭐
+                            var logoBase64 = p["LogoBase64"]?.ToString();
+                            if (!string.IsNullOrEmpty(logoBase64))
+                            {
+                                try { model.Logo = Convert.FromBase64String(logoBase64); }
+                                catch { model.Logo = null; }
+                            }
+                            else
+                            {
+                                model.Logo = null;
+                            }
+
+                            // Save into database
+                            bool ok = db.SaveCompanyProfile(model);
+
+                            // Send response back
+                            var saved = db.GetCompanyProfile();
+                            string logoOut = saved?.Logo != null ? Convert.ToBase64String(saved.Logo) : null;
+
+                            var response = new
+                            {
+                                action = "SaveCompanyProfileResponse",
+                                success = ok,
+                                message = ok ? "Company profile saved." : "Save failed.",
+                                profile = new
+                                {
+                                    Id = saved.Id,
+                                    CompanyName = saved.CompanyName,
+                                    AddressLine1 = saved.AddressLine1,
+                                    AddressLine2 = saved.AddressLine2,
+                                    City = saved.City,
+                                    State = saved.State,
+                                    Pincode = saved.Pincode,
+                                    Country = saved.Country,
+                                    GSTIN = saved.GSTIN,
+                                    PAN = saved.PAN,
+                                    Email = saved.Email,
+                                    Phone = saved.Phone,
+                                    BankName = saved.BankName,
+                                    BankAccount = saved.BankAccount,
+                                    IFSC = saved.IFSC,
+                                    BranchName = saved.BranchName,
+                                    InvoicePrefix = saved.InvoicePrefix,
+                                    InvoiceStartNo = saved.InvoiceStartNo,
+                                    CurrentInvoiceNo = saved.CurrentInvoiceNo,
+                                    LogoBase64 = logoOut,
+                                    CreatedBy = saved.CreatedBy,
+                                    CreatedAt = saved.CreatedAt
+                                }
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    case "CreateInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+                            var invoiceDto = payload.ToObject<InvoiceDto>(); // DTO class in C#
+                                                                             // Or build manually if needed
+                            bool ok = db.SaveInvoice(invoiceDto);
+                            var resp = new { action = "CreateInvoiceResponse", success = ok, message = ok ? "Invoice saved" : "Save failed" };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
+                            break;
+                        }
+                    case "GetInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            int id = payload["Id"]?.ToObject<int>() ?? 0;
+
+                            var invoice = db.GetInvoice(id);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "GetInvoiceResponse",
+                                    success = invoice != null,
+                                    invoice
+                                })
+                            );
+                            break;
+                        }
+
+                    case "PrintInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+                            var id = payload?["Id"]?.ToObject<int>() ?? 0;
+                            var invoice = db.GetInvoice(id);
+                            if (invoice != null)
+                            {
+                                var pdfBytes = GenerateInvoicePdfBytes(invoice); // implement PdfService
+                                                                                            // You can either save to disk and return path or return base64
+                                var base64 = Convert.ToBase64String(pdfBytes);
+                                var resp = new { action = "PrintInvoiceResponse", success = true, pdfBase64 = base64 };
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
+                            }
+                            else
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(new { action = "PrintInvoiceResponse", success = false }));
+                            }
+                            break;
+                        }
 
 
 
@@ -605,6 +903,69 @@ namespace DhanSutra
         private void webView_Click(object sender, EventArgs e)
         {
 
+        }
+        public static byte[] GenerateInvoicePdfBytes(InvoiceFullDto invoice)
+        {
+            using (var ms = new MemoryStream())
+            {
+                var doc = new PdfDocument();
+                var page = doc.AddPage();
+                page.Size = PdfSharpCore.PageSize.A4;
+                var gfx = XGraphics.FromPdfPage(page);
+
+                // Fonts
+                var fontH = new XFont("Arial", 14, XFontStyle.Bold);
+                var font = new XFont("Arial", 10, XFontStyle.Regular);
+
+                // Logo
+                if (invoice.CompanyLogo != null)
+                {
+                    using (var lms = new MemoryStream(invoice.CompanyLogo))
+                    {
+                        var img = XImage.FromStream(() => lms);
+                        gfx.DrawImage(img, 20, 20, 100, 60);
+                    }
+                }
+
+                // Company name at top
+                gfx.DrawString(invoice.CompanyName, fontH, XBrushes.Black, new XPoint(140, 40));
+                gfx.DrawString(invoice.CompanyAddressLine1 ?? "", font, XBrushes.Black, new XPoint(140, 60));
+                gfx.DrawString($"GSTIN: {invoice.CompanyGstin ?? ""}", font, XBrushes.Black, new XPoint(140, 75));
+
+                // Invoice header
+                gfx.DrawString($"Invoice: {invoice.InvoiceNo}", fontH, XBrushes.Black, new XPoint(400, 40));
+                gfx.DrawString($"Date: {invoice.InvoiceDate:yyyy-MM-dd}", font, XBrushes.Black, new XPoint(400, 60));
+
+                // Items header + table (you will need to write row drawing logic)
+                double y = 110;
+                gfx.DrawString("S.No", font, XBrushes.Black, new XPoint(30, y));
+                gfx.DrawString("Item", font, XBrushes.Black, new XPoint(80, y));
+                gfx.DrawString("Qty", font, XBrushes.Black, new XPoint(320, y));
+                gfx.DrawString("Rate", font, XBrushes.Black, new XPoint(360, y));
+                gfx.DrawString("Amount", font, XBrushes.Black, new XPoint(430, y));
+                y += 18;
+
+                int i = 1;
+                foreach (var line in invoice.Items)
+                {
+                    gfx.DrawString(i.ToString(), font, XBrushes.Black, new XPoint(30, y));
+                    gfx.DrawString(line.ItemName, font, XBrushes.Black, new XPoint(80, y));
+                    gfx.DrawString(line.Qty.ToString("0.##"), font, XBrushes.Black, new XPoint(320, y));
+                    gfx.DrawString(line.Rate.ToString("0.00"), font, XBrushes.Black, new XPoint(360, y));
+                    gfx.DrawString(line.Amount.ToString("0.00"), font, XBrushes.Black, new XPoint(430, y));
+                    y += 16;
+                    i++;
+                    if (y > page.Height - 120) { page = doc.AddPage(); gfx = XGraphics.FromPdfPage(page); y = 40; }
+                }
+
+                // Totals
+                gfx.DrawString($"Subtotal: {invoice.SubTotal:0.00}", fontH, XBrushes.Black, new XPoint(350, y + 20));
+                gfx.DrawString($"Total Tax: {invoice.TotalTax:0.00}", fontH, XBrushes.Black, new XPoint(350, y + 40));
+                gfx.DrawString($"Total Amount: {invoice.TotalAmount:0.00}", fontH, XBrushes.Black, new XPoint(350, y + 60));
+
+                doc.Save(ms);
+                return ms.ToArray();
+            }
         }
     }
     public class WebRequestMessage

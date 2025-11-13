@@ -6,12 +6,15 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using PdfSharpCore.Pdf;
+using PdfSharpCore.Drawing;
 
 namespace DhanSutra
 {
@@ -397,8 +400,11 @@ createdat)
                 i.itemcode,
                 i.date,
                 i.description,
+                c.id as CategoryId,
                 c.categoryname AS CategoryName,
+                u.id as UnitId,                
                 u.UnitName AS UnitName,
+                g.id as GstId,
                 g.gstpercent AS GstPercent
             FROM Item i
             LEFT JOIN categoryMaster c ON i.categoryId = c.Id
@@ -433,8 +439,11 @@ createdat)
                                 ItemCode = reader["itemcode"],
                                 Date = reader["date"],
                                 Description = reader["description"],
+                                CategoryId = reader["CategoryId"],
                                 CategoryName = reader["CategoryName"],
+                                UnitId = reader["UnitId"],
                                 UnitName = reader["UnitName"],
+                                GstId = reader["GstId"],
                                 GstPercent = reader["GstPercent"]
                             });
                         }
@@ -579,75 +588,152 @@ createdat)
         }
 
         // ✅ Update
-        public bool UpdateInventoryRecord(string itemId,string batchNo, string refno, string hsnCode, string date, string quantity,string purchasePrice, string discountPercent,
-     string netpurchasePrice,string amount,string salesPrice,string mrp,string goodsOrServices,string description,string mfgDate,string expDate,string modelNo,string brand,
-     string size,string color,string weight,string dimension,string invbatchno
- )        {
+        //       public bool UpdateInventoryRecord(string itemId,string batchNo, string refno, string hsnCode, string date, string quantity,string purchasePrice, string discountPercent,
+        //    string netpurchasePrice,string amount,string salesPrice,string mrp,string goodsOrServices,string description,string mfgDate,string expDate,string modelNo,string brand,
+        //    string size,string color,string weight,string dimension,string invbatchno
+        //)        {
+        //           try
+        //           {
+        //               using (var conn = new SQLiteConnection(_connectionString))
+        //               {
+        //                   conn.Open();
+
+        //                   string query = @"
+        //                   UPDATE ItemDetails
+        //                   SET 
+        //                   hsnCode = @HsnCode,
+        //                   batchNo = @BatchNo,
+        //                   refno=@refno,
+        //                   date = @Date,
+        //                   quantity = @Quantity,
+        //                   purchasePrice = @PurchasePrice,
+        //                   discountPercent=@DiscountPercent,
+        //                   netpurchasePrice= @NetPurchasePrice,
+        //                   amount= @Amount,
+        //                   salesPrice = @SalesPrice,
+        //                   mrp = @Mrp,
+        //                   goodsOrServices = @GoodsOrServices,
+        //                   description = @Description,
+        //                   mfgdate = @MfgDate,
+        //                   expdate = @ExpDate,
+        //                   modelno = @ModelNo,
+        //                   brand = @Brand,
+        //                   size = @Size,
+        //                   color = @Color,
+        //                   weight = @Weight,
+        //                   dimension = @Dimension
+        //               WHERE item_Id = @ItemId AND batchNo = @invbatchno;
+        //           ";
+
+        //                   using (var cmd = new SQLiteCommand(query, conn))
+        //                   {
+        //                       cmd.Parameters.AddWithValue("@HsnCode", hsnCode);
+        //                       cmd.Parameters.AddWithValue("@Date", date);
+        //                       cmd.Parameters.AddWithValue("@Quantity", quantity);
+        //                       cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
+
+        //                       cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
+        //                       cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
+        //                       cmd.Parameters.AddWithValue("@Amount", amount);
+
+
+        //                       cmd.Parameters.AddWithValue("@SalesPrice", salesPrice);
+        //                       cmd.Parameters.AddWithValue("@Mrp", mrp);
+        //                       cmd.Parameters.AddWithValue("@GoodsOrServices", goodsOrServices);
+        //                       cmd.Parameters.AddWithValue("@Description", description);
+        //                       cmd.Parameters.AddWithValue("@MfgDate", mfgDate);
+        //                       cmd.Parameters.AddWithValue("@ExpDate", expDate);
+        //                       cmd.Parameters.AddWithValue("@ModelNo", modelNo);
+        //                       cmd.Parameters.AddWithValue("@Brand", brand);
+        //                       cmd.Parameters.AddWithValue("@Size", size);
+        //                       cmd.Parameters.AddWithValue("@Color", color);
+        //                       cmd.Parameters.AddWithValue("@Weight", weight);
+        //                       cmd.Parameters.AddWithValue("@Dimension", dimension);
+        //                       cmd.Parameters.AddWithValue("@ItemId", itemId);
+        //                       cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+        //                       cmd.Parameters.AddWithValue("@refno", refno);
+        //                       cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
+
+        //                       int rows = cmd.ExecuteNonQuery();
+        //                       return rows > 0;
+        //                   }
+        //               }
+        //           }
+        //           catch (Exception ex)
+        //           {
+        //               Console.WriteLine("Error updating inventory: " + ex.Message);
+        //               return false;
+        //           }
+        //       }
+        public bool UpdateInventoryRecord(
+           SQLiteConnection conn,
+           SQLiteTransaction tran,
+           string itemId, string batchNo, string refno, string hsnCode, string date,
+           string quantity, string purchasePrice, string discountPercent,
+           string netpurchasePrice, string amount, string salesPrice, string mrp,
+           string goodsOrServices, string description, string mfgDate, string expDate,
+           string modelNo, string brand, string size, string color, string weight,
+           string dimension, string invbatchno)
+        {
             try
             {
-                using (var conn = new SQLiteConnection(_connectionString))
+                string query = @"
+            UPDATE ItemDetails
+            SET 
+                hsnCode = @HsnCode,
+                batchNo = @BatchNo,
+                refno=@refno,
+                date = @Date,
+                quantity = @Quantity,
+                purchasePrice = @PurchasePrice,
+                discountPercent=@DiscountPercent,
+                netpurchasePrice= @NetPurchasePrice,
+                amount= @Amount,
+                salesPrice = @SalesPrice,
+                mrp = @Mrp,
+                goodsOrServices = @GoodsOrServices,
+                description = @Description,
+                mfgdate = @MfgDate,
+                expdate = @ExpDate,
+                modelno = @ModelNo,
+                brand = @Brand,
+                size = @Size,
+                color = @Color,
+                weight = @Weight,
+                dimension = @Dimension
+            WHERE item_Id = @ItemId 
+              AND batchNo = @invbatchno;
+        ";
+
+                using (var cmd = new SQLiteCommand(query, conn, tran))
                 {
-                    conn.Open();
+                    cmd.Parameters.AddWithValue("@HsnCode", hsnCode);
+                    cmd.Parameters.AddWithValue("@Date", date);
+                    cmd.Parameters.AddWithValue("@Quantity", quantity);
+                    cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
+                    cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
+                    cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
+                    cmd.Parameters.AddWithValue("@Amount", amount);
+                    cmd.Parameters.AddWithValue("@SalesPrice", salesPrice);
+                    cmd.Parameters.AddWithValue("@Mrp", mrp);
+                    cmd.Parameters.AddWithValue("@GoodsOrServices", goodsOrServices);
+                    cmd.Parameters.AddWithValue("@Description", description);
+                    cmd.Parameters.AddWithValue("@MfgDate", mfgDate);
+                    cmd.Parameters.AddWithValue("@ExpDate", expDate);
+                    cmd.Parameters.AddWithValue("@ModelNo", modelNo);
+                    cmd.Parameters.AddWithValue("@Brand", brand);
+                    cmd.Parameters.AddWithValue("@Size", size);
+                    cmd.Parameters.AddWithValue("@Color", color);
+                    cmd.Parameters.AddWithValue("@Weight", weight);
+                    cmd.Parameters.AddWithValue("@Dimension", dimension);
 
-                    string query = @"
-                    UPDATE ItemDetails
-                    SET 
-                    hsnCode = @HsnCode,
-                    batchNo = @BatchNo,
-                    refno=@refno,
-                    date = @Date,
-                    quantity = @Quantity,
-                    purchasePrice = @PurchasePrice,
-                    discountPercent=@DiscountPercent,
-                    netpurchasePrice= @NetPurchasePrice,
-                    amount= @Amount,
-                    salesPrice = @SalesPrice,
-                    mrp = @Mrp,
-                    goodsOrServices = @GoodsOrServices,
-                    description = @Description,
-                    mfgdate = @MfgDate,
-                    expdate = @ExpDate,
-                    modelno = @ModelNo,
-                    brand = @Brand,
-                    size = @Size,
-                    color = @Color,
-                    weight = @Weight,
-                    dimension = @Dimension
-                WHERE item_Id = @ItemId AND batchNo = @invbatchno;
-            ";
+                    cmd.Parameters.AddWithValue("@ItemId", itemId);
+                    cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+                    cmd.Parameters.AddWithValue("@refno", refno);
+                    cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
 
-                    using (var cmd = new SQLiteCommand(query, conn))
-                    {
-                        cmd.Parameters.AddWithValue("@HsnCode", hsnCode);
-                        cmd.Parameters.AddWithValue("@Date", date);
-                        cmd.Parameters.AddWithValue("@Quantity", quantity);
-                        cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
-
-                        cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
-                        cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
-                        cmd.Parameters.AddWithValue("@Amount", amount);
-
-
-                        cmd.Parameters.AddWithValue("@SalesPrice", salesPrice);
-                        cmd.Parameters.AddWithValue("@Mrp", mrp);
-                        cmd.Parameters.AddWithValue("@GoodsOrServices", goodsOrServices);
-                        cmd.Parameters.AddWithValue("@Description", description);
-                        cmd.Parameters.AddWithValue("@MfgDate", mfgDate);
-                        cmd.Parameters.AddWithValue("@ExpDate", expDate);
-                        cmd.Parameters.AddWithValue("@ModelNo", modelNo);
-                        cmd.Parameters.AddWithValue("@Brand", brand);
-                        cmd.Parameters.AddWithValue("@Size", size);
-                        cmd.Parameters.AddWithValue("@Color", color);
-                        cmd.Parameters.AddWithValue("@Weight", weight);
-                        cmd.Parameters.AddWithValue("@Dimension", dimension);
-                        cmd.Parameters.AddWithValue("@ItemId", itemId);
-                        cmd.Parameters.AddWithValue("@BatchNo", batchNo);
-                        cmd.Parameters.AddWithValue("@refno", refno);
-                        cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
-
-                        int rows = cmd.ExecuteNonQuery();
-                        return rows > 0;
-                    }
+                    int rows = cmd.ExecuteNonQuery();
+                    return rows > 0;
                 }
             }
             catch (Exception ex)
@@ -657,48 +743,106 @@ createdat)
             }
         }
 
-        public bool UpdateItemLedger(string itemId, string batchNo, string refno, string date, string quantity, string purchasePrice, string discountPercent,
-     string netpurchasePrice, string amount, string description, string invbatchno)
+        //   public bool UpdateItemLedger(string itemId, string batchNo, string refno, string date, string quantity, string purchasePrice, string discountPercent,
+        //string netpurchasePrice, string amount, string description, string invbatchno)
+        //   {
+        //       try
+        //       {
+        //           using (var conn = new SQLiteConnection(_connectionString))
+        //           {
+        //               conn.Open();
+
+        //               string query = @"
+        //               UPDATE ItemLedger
+        //               SET 
+        //               BatchNo = @BatchNo,
+        //               refno=@refno,
+        //               date = @Date,
+        //               Qty = @Quantity,
+        //               Rate = @PurchasePrice,
+        //               DiscountPercent=@DiscountPercent,
+        //               NetRate= @NetPurchasePrice,
+        //               TotalAmount= @Amount,
+        //               Remarks = @Description
+        //               WHERE ItemId = @ItemId AND BatchNo = @invbatchno;
+        //       ";
+
+        //               using (var cmd = new SQLiteCommand(query, conn))
+        //               {
+
+        //                   cmd.Parameters.AddWithValue("@Date", date);
+        //                   cmd.Parameters.AddWithValue("@Quantity", quantity);
+        //                   cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
+        //                   cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
+        //                   cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
+        //                   cmd.Parameters.AddWithValue("@Amount", amount);                                          
+        //                   cmd.Parameters.AddWithValue("@Description", description);
+        //                   cmd.Parameters.AddWithValue("@ItemId", itemId);
+        //                   cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+        //                   cmd.Parameters.AddWithValue("@refno", refno);
+        //                   cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
+
+        //                   int rows = cmd.ExecuteNonQuery();
+        //                   return rows > 0;
+        //               }
+        //           }
+        //       }
+        //       catch (Exception ex)
+        //       {
+        //           Console.WriteLine("Error updating item ledger: " + ex.Message);
+        //           return false;
+        //       }
+        //   }
+        public bool UpdateItemLedger(
+       SQLiteConnection conn,
+       SQLiteTransaction tran,
+       string itemId,
+       string batchNo,
+       string refno,
+       string date,
+       string quantity,
+       string purchasePrice,
+       string discountPercent,
+       string netpurchasePrice,
+       string amount,
+       string description,
+       string invbatchno)
         {
             try
             {
-                using (var conn = new SQLiteConnection(_connectionString))
+                string query = @"
+            UPDATE ItemLedger
+            SET 
+                BatchNo = @BatchNo,
+                refno=@refno,
+                date = @Date,
+                Qty = @Quantity,
+                Rate = @PurchasePrice,
+                DiscountPercent=@DiscountPercent,
+                NetRate= @NetPurchasePrice,
+                TotalAmount= @Amount,
+                Remarks = @Description
+            WHERE ItemId = @ItemId 
+              AND BatchNo = @invbatchno;
+        ";
+
+                using (var cmd = new SQLiteCommand(query, conn, tran))
                 {
-                    conn.Open();
+                    cmd.Parameters.AddWithValue("@Date", date);
+                    cmd.Parameters.AddWithValue("@Quantity", quantity);
+                    cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
+                    cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
+                    cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
+                    cmd.Parameters.AddWithValue("@Amount", amount);
+                    cmd.Parameters.AddWithValue("@Description", description);
 
-                    string query = @"
-                    UPDATE ItemLedger
-                    SET 
-                    BatchNo = @BatchNo,
-                    refno=@refno,
-                    date = @Date,
-                    Qty = @Quantity,
-                    Rate = @PurchasePrice,
-                    DiscountPercent=@DiscountPercent,
-                    NetRate= @NetPurchasePrice,
-                    TotalAmount= @Amount,
-                    Remarks = @Description
-                    WHERE ItemId = @ItemId AND BatchNo = @invbatchno;
-            ";
+                    cmd.Parameters.AddWithValue("@ItemId", itemId);
+                    cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+                    cmd.Parameters.AddWithValue("@refno", refno);
+                    cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
 
-                    using (var cmd = new SQLiteCommand(query, conn))
-                    {
-                        
-                        cmd.Parameters.AddWithValue("@Date", date);
-                        cmd.Parameters.AddWithValue("@Quantity", quantity);
-                        cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
-                        cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
-                        cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
-                        cmd.Parameters.AddWithValue("@Amount", amount);                                          
-                        cmd.Parameters.AddWithValue("@Description", description);
-                        cmd.Parameters.AddWithValue("@ItemId", itemId);
-                        cmd.Parameters.AddWithValue("@BatchNo", batchNo);
-                        cmd.Parameters.AddWithValue("@refno", refno);
-                        cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
-
-                        int rows = cmd.ExecuteNonQuery();
-                        return rows > 0;
-                    }
+                    int rows = cmd.ExecuteNonQuery();
+                    return rows > 0;
                 }
             }
             catch (Exception ex)
@@ -708,31 +852,64 @@ createdat)
             }
         }
 
-        public bool UpdateItemBalanceForBatchNo(string itemId, string batchNo,string invbatchno)
+        //public bool UpdateItemBalanceForBatchNo(string itemId, string batchNo,string invbatchno)
+        //{
+        //    try
+        //    {
+        //        using (var conn = new SQLiteConnection(_connectionString))
+        //        {
+        //            conn.Open();
+
+        //            string query = @"
+        //            UPDATE ItemBalance
+        //            SET 
+        //            BatchNo = @BatchNo
+        //            WHERE ItemId = @ItemId AND BatchNo = @invbatchno;
+        //    ";
+
+        //            using (var cmd = new SQLiteCommand(query, conn))
+        //            {
+
+        //                cmd.Parameters.AddWithValue("@ItemId", itemId);
+        //                cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+        //                cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
+
+        //                int rows = cmd.ExecuteNonQuery();
+        //                return rows > 0;
+        //            }
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine("Error updating item balance: " + ex.Message);
+        //        return false;
+        //    }
+        //}
+        public bool UpdateItemBalanceForBatchNo(
+    SQLiteConnection conn,
+    SQLiteTransaction tran,
+    string itemId,
+    string batchNo,
+    string invbatchno)
         {
             try
             {
-                using (var conn = new SQLiteConnection(_connectionString))
+                string query = @"
+            UPDATE ItemBalance
+            SET 
+                BatchNo = @BatchNo
+            WHERE ItemId = @ItemId 
+              AND BatchNo = @invbatchno;
+        ";
+
+                using (var cmd = new SQLiteCommand(query, conn, tran))
                 {
-                    conn.Open();
+                    cmd.Parameters.AddWithValue("@ItemId", itemId);
+                    cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+                    cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
 
-                    string query = @"
-                    UPDATE ItemBalance
-                    SET 
-                    BatchNo = @BatchNo
-                    WHERE ItemId = @ItemId AND BatchNo = @invbatchno;
-            ";
-
-                    using (var cmd = new SQLiteCommand(query, conn))
-                    {
-                                              
-                        cmd.Parameters.AddWithValue("@ItemId", itemId);
-                        cmd.Parameters.AddWithValue("@BatchNo", batchNo);
-                        cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
-
-                        int rows = cmd.ExecuteNonQuery();
-                        return rows > 0;
-                    }
+                    int rows = cmd.ExecuteNonQuery();
+                    return rows > 0;
                 }
             }
             catch (Exception ex)
@@ -862,72 +1039,132 @@ LIMIT 1;", conn))
             }
         }
 
-        public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno,string quantity)
+        //public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno,string quantity)
+        //{
+        //    try
+        //    {
+        //        using (var conn = new SQLiteConnection(_connectionString))
+        //        {
+        //            conn.Open();
+        //            using (var txn = conn.BeginTransaction())
+        //            {
+        //                try
+        //                {
+        //                    // 1️⃣ First SQL update
+        //                    string query = @"
+        //                UPDATE ItemBalance
+        //                SET CurrentQtyBatchWise = @Qty,
+        //                    LastUpdated = datetime('now','localtime')
+        //                WHERE ItemId = @ItemId AND BatchNo = @BatchNo;
+        //            ";
+
+        //                    using (var cmd1 = new SQLiteCommand(query, conn, txn))
+        //                    {
+        //                        cmd1.Parameters.AddWithValue("@Qty", quantity); // using invbatchno as Qty placeholder?
+        //                        cmd1.Parameters.AddWithValue("@ItemId", itemId);
+        //                        cmd1.Parameters.AddWithValue("@BatchNo", batchNo);
+        //                        cmd1.ExecuteNonQuery();
+        //                    }
+
+        //                    // 2️⃣ Second SQL update (can target another batch or same)
+        //                    string sqlTotal = @"
+        //                    UPDATE ItemBalance
+        //                    SET 
+        //                        CurrentQty = (
+        //                            SELECT SUM(CurrentQtyBatchWise)
+        //                            FROM ItemBalance AS sub
+        //                            WHERE sub.ItemId = @ItemId
+        //                        ),
+        //                        LastUpdated = datetime('now','localtime')
+        //                    WHERE Id = (
+        //                        SELECT MAX(Id)
+        //                        FROM ItemBalance
+        //                        WHERE ItemId = @ItemId
+        //                    );
+        //                    ";
+
+        //                    using (var cmd2 = new SQLiteCommand(sqlTotal, conn, txn))
+        //                    {
+        //                        cmd2.Parameters.AddWithValue("@BatchNo", batchNo);
+        //                        cmd2.ExecuteNonQuery();
+        //                    }
+
+        //                    // ✅ If both succeed, commit
+        //                    txn.Commit();
+        //                    return true;
+        //                }
+        //                catch (Exception innerEx)
+        //                {
+        //                    Console.WriteLine("❌ Error in transaction: " + innerEx.Message);
+        //                    txn.Rollback();
+        //                    return false;
+        //                }
+        //            }
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine("❌ Database error: " + ex.Message);
+        //        return false;
+        //    }
+        //}
+        public bool UpdateItemBalance_ForChangeInQuantity(
+    SQLiteConnection conn,
+    SQLiteTransaction tran,
+    string itemId,
+    string batchNo,
+    string invbatchno,
+    string quantity)
         {
             try
             {
-                using (var conn = new SQLiteConnection(_connectionString))
+                // 1️⃣ Update quantity for specific batch
+                string query = @"
+            UPDATE ItemBalance
+            SET 
+                CurrentQtyBatchWise = @Qty,
+                LastUpdated = datetime('now','localtime')
+            WHERE ItemId = @ItemId 
+              AND BatchNo = @BatchNo;
+        ";
+
+                using (var cmd1 = new SQLiteCommand(query, conn, tran))
                 {
-                    conn.Open();
-                    using (var txn = conn.BeginTransaction())
-                    {
-                        try
-                        {
-                            // 1️⃣ First SQL update
-                            string query = @"
-                        UPDATE ItemBalance
-                        SET CurrentQtyBatchWise = @Qty,
-                            LastUpdated = datetime('now','localtime')
-                        WHERE ItemId = @ItemId AND BatchNo = @BatchNo;
-                    ";
+                    cmd1.Parameters.AddWithValue("@Qty", quantity);
+                    cmd1.Parameters.AddWithValue("@ItemId", itemId);
+                    cmd1.Parameters.AddWithValue("@BatchNo", batchNo);
 
-                            using (var cmd1 = new SQLiteCommand(query, conn, txn))
-                            {
-                                cmd1.Parameters.AddWithValue("@Qty", quantity); // using invbatchno as Qty placeholder?
-                                cmd1.Parameters.AddWithValue("@ItemId", itemId);
-                                cmd1.Parameters.AddWithValue("@BatchNo", batchNo);
-                                cmd1.ExecuteNonQuery();
-                            }
-
-                            // 2️⃣ Second SQL update (can target another batch or same)
-                            string sqlTotal = @"
-                            UPDATE ItemBalance
-                            SET 
-                                CurrentQty = (
-                                    SELECT SUM(CurrentQtyBatchWise)
-                                    FROM ItemBalance AS sub
-                                    WHERE sub.ItemId = @ItemId
-                                ),
-                                LastUpdated = datetime('now','localtime')
-                            WHERE Id = (
-                                SELECT MAX(Id)
-                                FROM ItemBalance
-                                WHERE ItemId = @ItemId
-                            );
-                            ";
-
-                            using (var cmd2 = new SQLiteCommand(sqlTotal, conn, txn))
-                            {
-                                cmd2.Parameters.AddWithValue("@BatchNo", batchNo);
-                                cmd2.ExecuteNonQuery();
-                            }
-
-                            // ✅ If both succeed, commit
-                            txn.Commit();
-                            return true;
-                        }
-                        catch (Exception innerEx)
-                        {
-                            Console.WriteLine("❌ Error in transaction: " + innerEx.Message);
-                            txn.Rollback();
-                            return false;
-                        }
-                    }
+                    cmd1.ExecuteNonQuery();
                 }
+
+                // 2️⃣ Update total quantity (summed across all batches)
+                string sqlTotal = @"
+            UPDATE ItemBalance
+            SET 
+                CurrentQty = (
+                    SELECT SUM(CurrentQtyBatchWise)
+                    FROM ItemBalance AS sub
+                    WHERE sub.ItemId = @ItemId
+                ),
+                LastUpdated = datetime('now','localtime')
+            WHERE Id = (
+                SELECT MAX(Id)
+                FROM ItemBalance
+                WHERE ItemId = @ItemId
+            );
+        ";
+
+                using (var cmd2 = new SQLiteCommand(sqlTotal, conn, tran))
+                {
+                    cmd2.Parameters.AddWithValue("@ItemId", itemId);
+                    cmd2.ExecuteNonQuery();
+                }
+
+                return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine("❌ Database error: " + ex.Message);
+                Console.WriteLine("Error updating ItemBalance quantities: " + ex.Message);
                 return false;
             }
         }
@@ -1095,6 +1332,502 @@ LIMIT 1;", conn))
 
                 return null;
             }
+        }
+        public CompanyProfile GetCompanyProfile()
+        {
+            CompanyProfile profile = null;
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                string query = "SELECT * FROM CompanyProfile LIMIT 1";
+
+                using (var cmd = new SQLiteCommand(query, conn))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        profile = new CompanyProfile
+                        {
+                            Id = Convert.ToInt32(reader["Id"]),
+                            CompanyName = reader["CompanyName"]?.ToString(),
+                            AddressLine1 = reader["AddressLine1"]?.ToString(),
+                            AddressLine2 = reader["AddressLine2"]?.ToString(),
+                            City = reader["City"]?.ToString(),
+                            State = reader["State"]?.ToString(),
+                            Pincode = reader["Pincode"]?.ToString(),
+                            Country = reader["Country"]?.ToString(),
+
+                            GSTIN = reader["GSTIN"]?.ToString(),
+                            PAN = reader["PAN"]?.ToString(),
+
+                            Email = reader["Email"]?.ToString(),
+                            Phone = reader["Phone"]?.ToString(),
+
+                            BankName = reader["BankName"]?.ToString(),
+                            BankAccount = reader["BankAccount"]?.ToString(),
+                            IFSC = reader["IFSC"]?.ToString(),
+                            BranchName = reader["BranchName"]?.ToString(),
+
+                            InvoicePrefix = reader["InvoicePrefix"]?.ToString(),
+                            InvoiceStartNo = Convert.ToInt32(reader["InvoiceStartNo"]),
+                            CurrentInvoiceNo = Convert.ToInt32(reader["CurrentInvoiceNo"]),
+
+                            Logo = reader["Logo"] as byte[],
+
+                            CreatedBy = reader["CreatedBy"]?.ToString(),
+                            CreatedAt = reader["CreatedAt"]?.ToString()
+                        };
+                    }
+                }
+            }
+
+            return profile;
+        }
+        public bool SaveCompanyProfile(CompanyProfile data)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // Check if record exists
+                string countQuery = "SELECT COUNT(*) FROM CompanyProfile";
+                int count = Convert.ToInt32(new SQLiteCommand(countQuery, conn).ExecuteScalar());
+
+                if (count == 0)
+                {
+                    // INSERT
+                    string insertQuery = @"
+                INSERT INTO CompanyProfile 
+                (CompanyName, AddressLine1, AddressLine2, City, State, Pincode, Country,
+                 GSTIN, PAN, Email, Phone, BankName, BankAccount, IFSC, BranchName, 
+                 InvoicePrefix, InvoiceStartNo, CurrentInvoiceNo, Logo, CreatedBy, CreatedAt)
+                VALUES 
+                (@CompanyName, @AddressLine1, @AddressLine2, @City, @State, @Pincode, @Country,
+                 @GSTIN, @PAN, @Email, @Phone, @BankName, @BankAccount, @IFSC, @BranchName,
+                 @InvoicePrefix, @InvoiceStartNo, @CurrentInvoiceNo, @Logo, @CreatedBy, datetime('now', 'localtime'));
+            ";
+
+                    using (var cmd = new SQLiteCommand(insertQuery, conn))
+                    {
+                        BindCompanyParams(cmd, data);
+                        return cmd.ExecuteNonQuery() > 0;
+                    }
+                }
+                else
+                {
+                    // UPDATE
+                    string updateQuery = @"
+                UPDATE CompanyProfile SET
+                    CompanyName=@CompanyName,
+                    AddressLine1=@AddressLine1, AddressLine2=@AddressLine2,
+                    City=@City, State=@State, Pincode=@Pincode, Country=@Country,
+                    GSTIN=@GSTIN, PAN=@PAN, Email=@Email, Phone=@Phone,
+                    BankName=@BankName, BankAccount=@BankAccount, IFSC=@IFSC, BranchName=@BranchName,
+                    InvoicePrefix=@InvoicePrefix, InvoiceStartNo=@InvoiceStartNo, CurrentInvoiceNo=@CurrentInvoiceNo,
+                    Logo=@Logo, CreatedBy=@CreatedBy
+                WHERE Id = @Id;
+            ";
+
+                    using (var cmd = new SQLiteCommand(updateQuery, conn))
+                    {
+                        BindCompanyParams(cmd, data);
+                        cmd.Parameters.AddWithValue("@Id", data.Id);
+                        return cmd.ExecuteNonQuery() > 0;
+                    }
+                }
+            }
+        }
+        public void BindCompanyParams(SQLiteCommand cmd, CompanyProfile data)
+        {
+            cmd.Parameters.AddWithValue("@CompanyName", data.CompanyName);
+            cmd.Parameters.AddWithValue("@AddressLine1", data.AddressLine1);
+            cmd.Parameters.AddWithValue("@AddressLine2", data.AddressLine2);
+            cmd.Parameters.AddWithValue("@City", data.City);
+            cmd.Parameters.AddWithValue("@State", data.State);
+            cmd.Parameters.AddWithValue("@Pincode", data.Pincode);
+            cmd.Parameters.AddWithValue("@Country", data.Country);
+
+            cmd.Parameters.AddWithValue("@GSTIN", data.GSTIN);
+            cmd.Parameters.AddWithValue("@PAN", data.PAN);
+
+            cmd.Parameters.AddWithValue("@Email", data.Email);
+            cmd.Parameters.AddWithValue("@Phone", data.Phone);
+
+            cmd.Parameters.AddWithValue("@BankName", data.BankName);
+            cmd.Parameters.AddWithValue("@BankAccount", data.BankAccount);
+            cmd.Parameters.AddWithValue("@IFSC", data.IFSC);
+            cmd.Parameters.AddWithValue("@BranchName", data.BranchName);
+
+            cmd.Parameters.AddWithValue("@InvoicePrefix", data.InvoicePrefix);
+            cmd.Parameters.AddWithValue("@InvoiceStartNo", data.InvoiceStartNo);
+            cmd.Parameters.AddWithValue("@CurrentInvoiceNo", data.CurrentInvoiceNo);
+
+            cmd.Parameters.AddWithValue("@Logo", data.Logo ?? (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedBy", data.CreatedBy);
+        }
+        public void IncrementInvoiceNo()
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = "UPDATE CompanyProfile SET CurrentInvoiceNo = CurrentInvoiceNo + 1";
+                new SQLiteCommand(sql, conn).ExecuteNonQuery();
+            }
+        }
+        // Helper: convert base64 string -> byte[]
+        //private byte[] Base64ToBytes(string base64)
+        //{
+        //    if (string.IsNullOrEmpty(base64)) return null;
+        //    try { return Convert.FromBase64String(base64); }
+        //    catch { return null; }
+        //}
+        public (string InvoiceNo, int InvoiceNum) GetNextInvoiceNumber(int companyProfileId = 1)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var txn = conn.BeginTransaction())
+                {
+                    // read current
+                    string q = "SELECT InvoicePrefix, CurrentInvoiceNo FROM CompanyProfile WHERE Id = @Id LIMIT 1";
+                    using (var cmd = new SQLiteCommand(q, conn, txn))
+                    {
+                        cmd.Parameters.AddWithValue("@Id", companyProfileId);
+                        using (var r = cmd.ExecuteReader())
+                        {
+                            if (!r.Read()) throw new Exception("CompanyProfile missing");
+                            string prefix = (r["InvoicePrefix"]?.ToString()) ?? "INV-";
+                            int cur = r["CurrentInvoiceNo"] == DBNull.Value ? 1 : Convert.ToInt32(r["CurrentInvoiceNo"]);
+                            int next = cur;
+
+                            // format with leading zeros (customize digits)
+                            string formatted = $"{prefix}{next:00000}";
+
+                            // increment and save
+                            string upd = "UPDATE CompanyProfile SET CurrentInvoiceNo = @Next WHERE Id = @Id";
+                            using (var cmd2 = new SQLiteCommand(upd, conn, txn))
+                            {
+                                cmd2.Parameters.AddWithValue("@Next", next + 1);
+                                cmd2.Parameters.AddWithValue("@Id", companyProfileId);
+                                cmd2.ExecuteNonQuery();
+                            }
+
+                            txn.Commit();
+                            return (formatted, next);
+                        }
+                    }
+                }
+            }
+        }
+        public bool SaveInvoice(InvoiceDto invoiceDto) // define InvoiceDto class matching payload
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var txn = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1) Insert invoice header
+                        string insertHeader = @"
+INSERT INTO Invoice (InvoiceNo, InvoiceNum, InvoiceDate, CompanyProfileId, CustomerId, CustomerName, CustomerPhone, CustomerAddress, SubTotal, TotalTax, TotalAmount, RoundOff, CreatedBy, CreatedAt)
+VALUES (@InvoiceNo, @InvoiceNum, @InvoiceDate, @CompanyProfileId, @CustomerId, @CustomerName, @CustomerPhone, @CustomerAddress, @SubTotal, @TotalTax, @TotalAmount, @RoundOff, @CreatedBy, datetime('now','localtime'));
+SELECT last_insert_rowid();
+";
+                        using (var cmd = new SQLiteCommand(insertHeader, conn, txn))
+                        {
+                            cmd.Parameters.AddWithValue("@InvoiceNo", invoiceDto.InvoiceNo);
+                            cmd.Parameters.AddWithValue("@InvoiceNum", invoiceDto.InvoiceNum);
+                            cmd.Parameters.AddWithValue("@InvoiceDate", invoiceDto.InvoiceDate);
+                            cmd.Parameters.AddWithValue("@CompanyProfileId", invoiceDto.CompanyProfileId);
+                            cmd.Parameters.AddWithValue("@CustomerId", invoiceDto.CustomerId == 0 ? (object)DBNull.Value : invoiceDto.CustomerId);
+                            cmd.Parameters.AddWithValue("@CustomerName", invoiceDto.CustomerName);
+                            cmd.Parameters.AddWithValue("@CustomerPhone", invoiceDto.CustomerPhone);
+                            cmd.Parameters.AddWithValue("@CustomerAddress", invoiceDto.CustomerAddress);
+                            cmd.Parameters.AddWithValue("@SubTotal", invoiceDto.SubTotal);
+                            cmd.Parameters.AddWithValue("@TotalTax", invoiceDto.TotalTax);
+                            cmd.Parameters.AddWithValue("@TotalAmount", invoiceDto.TotalAmount);
+                            cmd.Parameters.AddWithValue("@RoundOff", invoiceDto.RoundOff);
+                            cmd.Parameters.AddWithValue("@CreatedBy", invoiceDto.CreatedBy);
+                            long invoiceId = (long)cmd.ExecuteScalar();
+
+                            // 2) Insert invoice items and update inventory
+                            string insertItem = @"
+INSERT INTO InvoiceItem (InvoiceId, ItemId, ItemName, HsnCode, BatchNo, Qty, Unit, Rate, Amount, GstPercent, TaxAmount, Cgst, Sgst, Igst, Discount)
+VALUES (@InvoiceId,@ItemId,@ItemName,@HsnCode,@BatchNo,@Qty,@Unit,@Rate,@Amount,@GstPercent,@TaxAmount,@Cgst,@Sgst,@Igst,@Discount);
+";
+                            using (var cmdItem = new SQLiteCommand(insertItem, conn, txn))
+                            {
+                                foreach (var line in invoiceDto.Items)
+                                {
+                                    cmdItem.Parameters.Clear();
+                                    cmdItem.Parameters.AddWithValue("@InvoiceId", invoiceId);
+                                    cmdItem.Parameters.AddWithValue("@ItemId", line.ItemId == 0 ? (object)DBNull.Value : line.ItemId);
+                                    cmdItem.Parameters.AddWithValue("@ItemName", line.ItemName);
+                                    cmdItem.Parameters.AddWithValue("@HsnCode", line.HsnCode ?? "");
+                                    cmdItem.Parameters.AddWithValue("@BatchNo", line.BatchNo ?? "");
+                                    cmdItem.Parameters.AddWithValue("@Qty", line.Qty);
+                                    cmdItem.Parameters.AddWithValue("@Unit", line.Unit ?? "");
+                                    cmdItem.Parameters.AddWithValue("@Rate", line.Rate);
+                                    cmdItem.Parameters.AddWithValue("@Amount", line.Amount);
+                                    cmdItem.Parameters.AddWithValue("@GstPercent", line.GstPercent);
+                                    cmdItem.Parameters.AddWithValue("@TaxAmount", line.TaxAmount);
+                                    cmdItem.Parameters.AddWithValue("@Cgst", line.Cgst);
+                                    cmdItem.Parameters.AddWithValue("@Sgst", line.Sgst);
+                                    cmdItem.Parameters.AddWithValue("@Igst", line.Igst);
+                                    cmdItem.Parameters.AddWithValue("@Discount", line.Discount);
+                                    cmdItem.ExecuteNonQuery();
+
+                                    //3 insert into ItemLedger
+                                    string sql = @"
+            INSERT INTO ItemLedger 
+            (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
+            VALUES 
+            (@ItemId, @BatchNo, @Date, @TxnType, @RefNo, @Qty, @Rate, @DiscountPercent, @NetRate ,@Amount, @Remarks, @CreatedBy);
+        ";
+
+                                    using (var cmditemledger = new SQLiteCommand(sql, conn, txn))
+                                    {
+
+                                        cmd.Parameters.AddWithValue("@ItemId", line.ItemId);
+                                        cmd.Parameters.AddWithValue("@BatchNo", line.BatchNo ?? "");
+                                        cmd.Parameters.AddWithValue("@Date", invoiceDto.InvoiceDate);
+                                        cmd.Parameters.AddWithValue("@TxnType", "Sale");
+                                        cmd.Parameters.AddWithValue("@RefNo", invoiceDto.InvoiceNum);
+                                        cmd.Parameters.AddWithValue("@Qty", line.Qty);
+                                        cmd.Parameters.AddWithValue("@Rate", line.Rate);
+                                        cmd.Parameters.AddWithValue("@DiscountPercent", line.Discount);
+                                        cmd.Parameters.AddWithValue("@NetRate", line.Amount);
+                                        cmd.Parameters.AddWithValue("@Amount", line.Amount + line.TaxAmount);
+                                        cmd.Parameters.AddWithValue("@Remarks", "Sale");
+                                        cmd.Parameters.AddWithValue("@CreatedBy", invoiceDto.CreatedBy ?? "System");
+
+                                        cmditemledger.ExecuteNonQuery();
+                                    }
+                                    // 4) Deduct inventory - implement carefully to match your ItemBalance table
+                                    // Example: subtract from CurrentQtyBatchWise when batch matches, and update total CurrentQty
+                                    string updateBatchQty = @"
+UPDATE ItemBalance 
+SET CurrentQtyBatchWise = CurrentQtyBatchWise - @Qty,
+    LastUpdated = datetime('now','localtime')
+WHERE ItemId = @ItemId AND BatchNo = @BatchNo;
+";
+                                    using (var cmdInv = new SQLiteCommand(updateBatchQty, conn, txn))
+                                    {
+                                        cmdInv.Parameters.AddWithValue("@Qty", line.Qty);
+                                        cmdInv.Parameters.AddWithValue("@ItemId", line.ItemId);
+                                        cmdInv.Parameters.AddWithValue("@BatchNo", line.BatchNo ?? "");
+                                        cmdInv.ExecuteNonQuery();
+                                    }
+
+                                    // Update aggregated CurrentQty
+                                    string updateTotal = @"
+UPDATE ItemBalance
+SET CurrentQty = (
+    SELECT SUM(CurrentQtyBatchWise) FROM ItemBalance sub WHERE sub.ItemId = @ItemId
+),
+LastUpdated = datetime('now','localtime')
+WHERE Id = (SELECT MAX(Id) FROM ItemBalance WHERE ItemId = @ItemId);
+";
+                                    using (var cmdTotal = new SQLiteCommand(updateTotal, conn, txn))
+                                    {
+                                        cmdTotal.Parameters.AddWithValue("@ItemId", line.ItemId);
+                                        cmdTotal.ExecuteNonQuery();
+                                    }
+
+                                    // Optional: insert ledger entry for each line (if you maintain ledger)
+                                    // db.AddLedgerEntry(...) or similar
+                                }
+                            }
+
+                            txn.Commit();
+                            return true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("SaveInvoice failed: " + ex.Message);
+                        try { txn.Rollback(); } catch { }
+                        return false;
+                    }
+                }
+       
+            }
+        }
+        
+        public InvoiceFullDto GetInvoice(int invoiceId)
+        {
+            var invoice = new InvoiceFullDto();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // =============================
+                // 1️⃣ FETCH INVOICE HEADER
+                // =============================
+                string sqlHeader = @"
+            SELECT 
+                Id AS InvoiceNum,
+                InvoiceNo,
+                InvoiceDate,
+                CompanyProfileId,
+                CustomerId,
+                CustomerName,
+                CustomerPhone,
+                CustomerAddress,
+                SubTotal,
+                TotalTax,
+                TotalAmount,
+                RoundOff,
+                CreatedBy,
+                CreatedAt
+            FROM Invoice
+            WHERE Id = @Id;
+        ";
+
+                using (var cmd = new SQLiteCommand(sqlHeader, conn))
+                {
+                    cmd.Parameters.AddWithValue("@Id", invoiceId);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            invoice.InvoiceNum = reader.GetInt32(0);
+                            invoice.InvoiceNo = reader["InvoiceNo"]?.ToString();
+                            invoice.InvoiceDate = reader.GetDateTime(reader.GetOrdinal("InvoiceDate"));
+                            invoice.CompanyProfileId = Convert.ToInt32(reader["CompanyProfileId"]);
+
+                            invoice.CustomerId = reader["CustomerId"] as int?;
+                            invoice.CustomerName = reader["CustomerName"]?.ToString();
+                            invoice.CustomerPhone = reader["CustomerPhone"]?.ToString();
+                            invoice.CustomerAddress = reader["CustomerAddress"]?.ToString();
+
+                            invoice.SubTotal = Convert.ToDecimal(reader["SubTotal"]);
+                            invoice.TotalTax = Convert.ToDecimal(reader["TotalTax"]);
+                            invoice.TotalAmount = Convert.ToDecimal(reader["TotalAmount"]);
+                            invoice.RoundOff = Convert.ToDecimal(reader["RoundOff"]);
+
+                            invoice.CreatedBy = reader["CreatedBy"]?.ToString();
+                            invoice.CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt"));
+                        }
+                        else
+                        {
+                            return null;
+                        }
+                    }
+                }
+
+                // =============================
+                // 2️⃣ FETCH INVOICE ITEMS
+                // =============================
+                string sqlItems = @"
+            SELECT 
+                ii.ItemId,
+                i.Name AS ItemName,
+                i.HsnCode,
+                ii.BatchNo,
+                ii.Qty,
+                ii.Unit,
+                ii.Rate,
+                ii.Amount,
+                ii.GstPercent,
+                ii.TaxAmount,
+                ii.Cgst,
+                ii.Sgst,
+                ii.Igst,
+                ii.Discount
+            FROM InvoiceItem ii
+            LEFT JOIN Item i ON i.Id = ii.ItemId
+            WHERE ii.InvoiceId = @Id;
+        ";
+
+                using (var cmd = new SQLiteCommand(sqlItems, conn))
+                {
+                    cmd.Parameters.AddWithValue("@Id", invoiceId);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            invoice.Items.Add(new InvoiceItemDto
+                            {
+                                ItemId = Convert.ToInt32(reader["ItemId"]),
+                                ItemName = reader["ItemName"]?.ToString(),
+                                HsnCode = reader["HsnCode"]?.ToString(),
+                                BatchNo = reader["BatchNo"]?.ToString(),
+                                Qty = Convert.ToDecimal(reader["Qty"]),
+                                Unit = reader["Unit"]?.ToString(),
+                                Rate = Convert.ToDecimal(reader["Rate"]),
+                                Amount = Convert.ToDecimal(reader["Amount"]),
+                                GstPercent = Convert.ToDecimal(reader["GstPercent"]),
+                                TaxAmount = Convert.ToDecimal(reader["TaxAmount"]),
+                                Cgst = Convert.ToDecimal(reader["Cgst"]),
+                                Sgst = Convert.ToDecimal(reader["Sgst"]),
+                                Igst = Convert.ToDecimal(reader["Igst"]),
+                                Discount = Convert.ToDecimal(reader["Discount"])
+                            });
+                        }
+                    }
+                }
+
+                // =============================
+                // 3️⃣ FETCH COMPANY PROFILE
+                // =============================
+                string sqlCompany = @"
+            SELECT 
+                Logo,
+                CompanyName,
+                AddressLine1,
+                AddressLine2,
+                City,
+                State,
+                Pincode,
+                Country,
+                GSTIN,
+                PAN,
+                Email,
+                Phone,
+                BankName,
+                BankAccount,
+                IFSC,
+                BranchName
+            FROM CompanyProfile
+            WHERE Id = @Id;
+        ";
+
+                using (var cmd = new SQLiteCommand(sqlCompany, conn))
+                {
+                    cmd.Parameters.AddWithValue("@Id", invoice.CompanyProfileId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (r.Read())
+                        {
+                            invoice.CompanyLogo = r["Logo"] != DBNull.Value ? (byte[])r["Logo"] : null;
+                            invoice.CompanyName = r["CompanyName"]?.ToString();
+                            invoice.CompanyAddressLine1 = r["AddressLine1"]?.ToString();
+                            invoice.CompanyAddressLine2 = r["AddressLine2"]?.ToString();
+                            invoice.CompanyCity = r["City"]?.ToString();
+                            invoice.CompanyState = r["State"]?.ToString();
+                            invoice.CompanyPincode = r["Pincode"]?.ToString();
+                            invoice.CompanyCountry = r["Country"]?.ToString();
+                            invoice.CompanyGstin = r["GSTIN"]?.ToString();
+                            invoice.CompanyPan = r["PAN"]?.ToString();
+                            invoice.CompanyEmail = r["Email"]?.ToString();
+                            invoice.CompanyPhone = r["Phone"]?.ToString();
+                            invoice.CompanyBankName = r["BankName"]?.ToString();
+                            invoice.CompanyBankAccount = r["BankAccount"]?.ToString();
+                            invoice.CompanyIfsc = r["IFSC"]?.ToString();
+                            invoice.CompanyBranchName = r["BranchName"]?.ToString();
+                        }
+                    }
+                }
+            }
+
+            return invoice;
         }
 
     }
