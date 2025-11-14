@@ -216,7 +216,33 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(error));
                         }
                         break;
+                    case "GetItemsForInvoice":
+                        try
+                        {
+                            var items = db.GetItemsForInvoice();
 
+                            var response = new
+                            {
+                                Type = "GetItemsForInvoice",
+                                Status = "Success",
+                                Message = "Fetched all items successfully",
+                                Data = items
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
+                        }
+                        catch (Exception ex)
+                        {
+                            var error = new
+                            {
+                                Type = "GetItemsForInvoice",
+                                Status = "Error",
+                                Message = ex.Message
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(error));
+                        }
+                        break;
                     case "GetItemNameById":
                         {
                             var payload = (JObject)req.Payload;
@@ -844,13 +870,37 @@ namespace DhanSutra
                     case "CreateInvoice":
                         {
                             var payload = req.Payload as JObject;
-                            var invoiceDto = payload.ToObject<InvoiceDto>(); // DTO class in C#
-                                                                             // Or build manually if needed
+                            var invoiceDto = payload.ToObject<InvoiceDto>();
+
+                            // Extract customer object
+                            var cust = invoiceDto.Customer;
+                            int customerId = cust?.Id ?? 0;
+
+                            // Save customer if new or missing
+                            if (cust != null)
+                            {
+                                customerId = db.InsertOrUpdateCustomer(cust);
+                            }
+
+                            // assign resolved ID back
+                            invoiceDto.CustomerId = customerId;
+                            invoiceDto.CustomerName = cust?.Name ?? "";
+                            invoiceDto.CustomerPhone = cust?.Phone ?? "";
+                            invoiceDto.CustomerAddress = cust?.Address ?? "";
+
                             bool ok = db.SaveInvoice(invoiceDto);
-                            var resp = new { action = "CreateInvoiceResponse", success = ok, message = ok ? "Invoice saved" : "Save failed" };
+
+                            var resp = new
+                            {
+                                action = "CreateInvoiceResponse",
+                                success = ok,
+                                message = ok ? "Invoice saved" : "Save failed"
+                            };
+
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
                             break;
                         }
+
                     case "GetInvoice":
                         {
                             var payload = req.Payload as JObject;
@@ -890,7 +940,17 @@ namespace DhanSutra
                             }
                             break;
                         }
-
+                    case "GetCustomers":
+                        {
+                            var customers = db.GetCustomers();
+                            var response = new
+                            {
+                                action = "GetCustomersResponse",
+                                customers = customers
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
 
 
                 }
@@ -966,6 +1026,7 @@ namespace DhanSutra
                 doc.Save(ms);
                 return ms.ToArray();
             }
+
         }
     }
     public class WebRequestMessage

@@ -91,6 +91,13 @@ namespace DhanSutra
                     " u.UnitName, g.GstPercent, i.Description, i.[Date]\r\nFROM Item i\r\nLEFT JOIN CategoryMaster c" +
                     " ON i.CategoryId = c.Id\r\nLEFT JOIN UnitMaster u ON i.UnitId = u.Id\r\nLEFT JOIN GstMaster g ON i.GstId = g.Id;");
         }
+        public IEnumerable<ItemForInvoice> GetItemsForInvoice()
+        {
+            using (var connection = new SQLiteConnection(_connectionString))
+                return connection.Query<ItemForInvoice>("select i.Id, i.Name, i.ItemCode, d.batchno, \r\n      " +
+                    " d.hsncode, d.salesprice , u.unitname, g.gstpercent \r\nfrom itemdetails d\r\ninner join item i" +
+                    " on i.id=d.item_id\r\nLEFT JOIN UnitMaster u ON i.UnitId = u.Id\r\nLEFT JOIN GstMaster g ON i.GstId = g.Id\r\n order by i.id;");
+        }
         public IEnumerable<ItemDetails> GetItemDetails(int itemId)
         {
             using (var connection = new SQLiteConnection(_connectionString))
@@ -1828,6 +1835,82 @@ WHERE Id = (SELECT MAX(Id) FROM ItemBalance WHERE ItemId = @ItemId);
             }
 
             return invoice;
+            
+        }
+        public List<CustomerDto> GetCustomers()
+        {
+            var list = new List<CustomerDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                string sql = @"
+            SELECT 
+                Id,
+                Name,
+                Phone,
+                Address
+            FROM Customers
+            ORDER BY Name ASC;
+        ";
+
+                using (var cmd = new SQLiteCommand(sql, conn))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        list.Add(new CustomerDto
+                        {
+                            Id = reader.GetInt32(0),
+                            Name = reader.GetString(1),
+                            Phone = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                            Address = reader.IsDBNull(3) ? "" : reader.GetString(3)
+                        });
+                    }
+                }
+            }
+
+            return list;
+        }
+        public int InsertOrUpdateCustomer(CustomerDto c)
+        {
+            if (c == null) return 0;
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // 1. If phone exists, update + return ID
+                if (!string.IsNullOrWhiteSpace(c.Phone))
+                {
+                    string sqlFind = "SELECT Id FROM Customers WHERE Phone = @phone LIMIT 1;";
+                    using (var cmd = new SQLiteCommand(sqlFind, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@phone", c.Phone);
+                        var existingId = cmd.ExecuteScalar();
+                        if (existingId != null)
+                        {
+                            return Convert.ToInt32(existingId);
+                        }
+                    }
+                }
+
+                // 2. Insert new customer
+                string sqlInsert = @"
+INSERT INTO Customers (Name, Phone, Address)
+VALUES (@Name, @Phone, @Address);
+SELECT last_insert_rowid();
+";
+
+                using (var cmd = new SQLiteCommand(sqlInsert, conn))
+                {
+                    cmd.Parameters.AddWithValue("@Name", c.Name ?? "");
+                    cmd.Parameters.AddWithValue("@Phone", c.Phone ?? "");
+                    cmd.Parameters.AddWithValue("@Address", c.Address ?? "");
+                    return Convert.ToInt32(cmd.ExecuteScalar());
+                }
+            }
         }
 
     }

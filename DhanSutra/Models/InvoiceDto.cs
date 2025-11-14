@@ -15,6 +15,8 @@ namespace DhanSutra.Models
         public DateTime InvoiceDate { get; set; } = DateTime.Now;
         public int CompanyProfileId { get; set; } = 1;
 
+        // NEW (complete customer)
+        public CustomerDto Customer { get; set; }
         // Customer
         public int? CustomerId { get; set; }                // null for walk-in
         public string CustomerName { get; set; }
