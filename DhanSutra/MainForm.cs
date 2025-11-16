@@ -1,8 +1,11 @@
 ﻿using DhanSutra;
 using DhanSutra.Models;
+using DhanSutra.Pdf;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using PdfSharpCore.Drawing;
+using PdfSharpCore.Pdf;
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -10,8 +13,8 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
-using PdfSharpCore.Pdf;
-using PdfSharpCore.Drawing;
+using QuestPDF.Fluent;
+using QuestPDF.Infrastructure;
 
 namespace DhanSutra
 {
@@ -869,37 +872,80 @@ namespace DhanSutra
                         }
                     case "CreateInvoice":
                         {
-                            var payload = req.Payload as JObject;
-                            var invoiceDto = payload.ToObject<InvoiceDto>();
-
-                            // Extract customer object
-                            var cust = invoiceDto.Customer;
-                            int customerId = cust?.Id ?? 0;
-
-                            // Save customer if new or missing
-                            if (cust != null)
+                            try
                             {
-                                customerId = db.InsertOrUpdateCustomer(cust);
+                                var payload = req.Payload as JObject;
+                                if (payload == null)
+                                {
+                                    var errResp = new
+                                    {
+                                        action = "CreateInvoiceResponse",
+                                        success = false,
+                                        message = "Invalid payload"
+                                    };
+                                    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(errResp));
+                                    break;
+                                }
+
+                                // Convert to CreateInvoiceDto
+                                var dto = payload.ToObject<CreateInvoiceDto>();
+                                if (dto == null)
+                                {
+                                    var errResp = new
+                                    {
+                                        action = "CreateInvoiceResponse",
+                                        success = false,
+                                        message = "Unable to parse invoice payload"
+                                    };
+                                    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(errResp));
+                                    break;
+                                }
+
+                                // Validate company profile ID (optional)
+                                if (dto.CompanyId == 0)
+                                {
+                                    var errResp = new
+                                    {
+                                        action = "CreateInvoiceResponse",
+                                        success = false,
+                                        message = "Missing CompanyProfileId"
+                                    };
+                                    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(errResp));
+                                    break;
+                                }
+
+                                // ⭐ SINGLE CALL — does customer insert/update + invoice + items + next invoice no
+                                // ⭐ Now returns both invoiceId and invoiceNo
+                                var result = db.CreateInvoice(dto);
+                                long invoiceId = result.invoiceId;
+                                string invoiceNo = result.invoiceNo;
+
+                                var resp = new
+                                {
+                                    action = "CreateInvoiceResponse",
+                                    success = invoiceId > 0,
+                                    invoiceId = invoiceId,
+                                    invoiceNo = invoiceNo,
+                                    message = invoiceId > 0 ? "Invoice saved successfully" : "Invoice save failed"
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
+                            }
+                            catch (Exception ex)
+                            {
+                                var resp = new
+                                {
+                                    action = "CreateInvoiceResponse",
+                                    success = false,
+                                    message = "Save failed: " + ex.Message
+                                };
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
                             }
 
-                            // assign resolved ID back
-                            invoiceDto.CustomerId = customerId;
-                            invoiceDto.CustomerName = cust?.Name ?? "";
-                            invoiceDto.CustomerPhone = cust?.Phone ?? "";
-                            invoiceDto.CustomerAddress = cust?.Address ?? "";
-
-                            bool ok = db.SaveInvoice(invoiceDto);
-
-                            var resp = new
-                            {
-                                action = "CreateInvoiceResponse",
-                                success = ok,
-                                message = ok ? "Invoice saved" : "Save failed"
-                            };
-
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
                             break;
                         }
+
+
 
                     case "GetInvoice":
                         {
@@ -924,22 +970,114 @@ namespace DhanSutra
                     case "PrintInvoice":
                         {
                             var payload = req.Payload as JObject;
-                            var id = payload?["Id"]?.ToObject<int>() ?? 0;
-                            var invoice = db.GetInvoice(id);
-                            if (invoice != null)
+                            if (payload == null) break;
+
+                            long invoiceId = payload["InvoiceId"]?.ToObject<long>() ?? 0;
+                            
+
+                            // 1) Load invoice from DB
+                            var invoice = db.GetInvoice(invoiceId);
+
+                            // 2) Load company profile from DB
+                            var company = db.GetCompanyProfile();
+
+                            // 3) Convert Models.InvoiceLoadDto to Pdf.InvoiceLoadDto
+                            var pdfInvoice = new DhanSutra.Pdf.InvoiceLoadDto
                             {
-                                var pdfBytes = GenerateInvoicePdfBytes(invoice); // implement PdfService
-                                                                                            // You can either save to disk and return path or return base64
-                                var base64 = Convert.ToBase64String(pdfBytes);
-                                var resp = new { action = "PrintInvoiceResponse", success = true, pdfBase64 = base64 };
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
-                            }
-                            else
+                                Id = invoice.Id,
+                                InvoiceNo = invoice.InvoiceNo,
+                                InvoiceNum = invoice.InvoiceNum,
+                                InvoiceDate = invoice.InvoiceDate,
+                                CompanyProfileId = invoice.CompanyProfileId,
+                                CustomerId = invoice.CustomerId,
+                                CustomerName = invoice.CustomerName,
+                                CustomerPhone = invoice.CustomerPhone,
+                                CustomerState = invoice.CustomerState,
+                                CustomerAddress = invoice.CustomerAddress,
+                                SubTotal = invoice.SubTotal,
+                                TotalTax = invoice.TotalTax,
+                                TotalAmount = invoice.TotalAmount,
+                                RoundOff = invoice.RoundOff,
+                                Items = invoice.Items?.ConvertAll(x => new DhanSutra.Pdf.InvoiceItemDto
+                                {
+                                    ItemId = x.ItemId,
+                                    BatchNo = x.BatchNo,
+                                    HsnCode = x.HsnCode,
+                                    Qty = x.Qty,
+                                    Rate = x.Rate,
+                                    DiscountPercent = x.DiscountPercent,
+                                    GstPercent = x.GstPercent,
+                                    GstValue = x.GstValue,
+                                    CgstPercent = x.CgstPercent,
+                                    CgstValue = x.CgstValue,
+                                    SgstPercent = x.SgstPercent,
+                                    SgstValue = x.SgstValue,
+                                    IgstPercent = x.IgstPercent,
+                                    IgstValue = x.IgstValue,
+                                    LineSubTotal = x.LineSubTotal,
+                                    LineTotal = x.LineTotal
+                                }), // If item types differ, map accordingly
+                            };
+
+                            // 4) Convert Models.CompanyProfile to Pdf.CompanyProfileDto
+                            var pdfCompany = new DhanSutra.Pdf.CompanyProfileDto
                             {
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(new { action = "PrintInvoiceResponse", success = false }));
-                            }
+                                CompanyName = company.CompanyName,
+                                AddressLine1 = company.AddressLine1,
+                                AddressLine2 = company.AddressLine2,
+                                City = company.City,
+                                State = company.State,
+                                Pincode = company.Pincode,
+                                //Country = company.Country,
+                                GSTIN = company.GSTIN,
+                                PAN = company.PAN,
+                                Email = company.Email,
+                                Phone = company.Phone,
+                                //BankName = company.BankName,
+                                //BankAccount = company.BankAccount,
+                                //IFSC = company.IFSC,
+                                //BranchName = company.BranchName,
+                                //InvoicePrefix = company.InvoicePrefix,
+                                //InvoiceStartNo = company.InvoiceStartNo,
+                                //CurrentInvoiceNo = company.CurrentInvoiceNo,
+                                //Logo = company.Logo,
+                                //CreatedBy = company.CreatedBy,
+                                //CreatedAt = company.CreatedAt
+                            };
+
+                            // 5) Create the PDF
+                            var doc = new InvoiceDocument(pdfInvoice, pdfCompany);
+
+                            // 6) Generate PDF file path
+                            string pdfPath = Path.Combine(
+                                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                                "Invoices",
+                                "invoice-" + invoice.InvoiceNo + ".pdf"
+                            );
+
+                            Directory.CreateDirectory(Path.GetDirectoryName(pdfPath));
+
+                            // 7) Save PDF
+                            //var bytes = doc.GeneratePdfBytes();
+
+                            QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
+                            var bytes = doc.GeneratePdf();
+
+                            File.WriteAllBytes(pdfPath, bytes);
+
+                            // 8) Send back PDF path to frontend
+                            var response = new
+                            {
+                                action = "PrintInvoiceResponse",
+                                success = true,
+                                pdfPath = pdfPath
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
+
                     case "GetCustomers":
                         {
                             var customers = db.GetCustomers();
@@ -1009,10 +1147,10 @@ namespace DhanSutra
                 foreach (var line in invoice.Items)
                 {
                     gfx.DrawString(i.ToString(), font, XBrushes.Black, new XPoint(30, y));
-                    gfx.DrawString(line.ItemName, font, XBrushes.Black, new XPoint(80, y));
+                    gfx.DrawString(line.HsnCode ?? line.ItemId.ToString(), font, XBrushes.Black, new XPoint(80, y));
                     gfx.DrawString(line.Qty.ToString("0.##"), font, XBrushes.Black, new XPoint(320, y));
                     gfx.DrawString(line.Rate.ToString("0.00"), font, XBrushes.Black, new XPoint(360, y));
-                    gfx.DrawString(line.Amount.ToString("0.00"), font, XBrushes.Black, new XPoint(430, y));
+                    gfx.DrawString(line.LineTotal.ToString("0.00"), font, XBrushes.Black, new XPoint(430, y));
                     y += 16;
                     i++;
                     if (y > page.Height - 120) { page = doc.AddPage(); gfx = XGraphics.FromPdfPage(page); y = 40; }

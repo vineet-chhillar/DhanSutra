@@ -1,54 +1,57 @@
 ﻿using Newtonsoft.Json.Linq;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace DhanSutra.Models
 {
     public class InvoiceItemDto
     {
-        public int ItemId { get; set; }                 // 0 if not linked to master
-        public string ItemName { get; set; } = string.Empty;
-        public string HsnCode { get; set; }
+        public int Id { get; set; }
+        public int InvoiceId { get; set; }
+        public int ItemId { get; set; }
         public string BatchNo { get; set; }
+        public string HsnCode { get; set; }
         public decimal Qty { get; set; }
-        public string Unit { get; set; }
         public decimal Rate { get; set; }
-        public decimal Amount { get; set; }             // Qty * Rate (after discount)
+        public decimal DiscountPercent { get; set; }
         public decimal GstPercent { get; set; }
-        public decimal TaxAmount { get; set; }          // Amount * GstPercent / 100
-        public decimal Cgst { get; set; }
-        public decimal Sgst { get; set; }
-        public decimal Igst { get; set; }
-        public decimal Discount { get; set; }           // absolute discount amount (optional)
+        public decimal GstValue { get; set; }
+        public decimal CgstPercent { get; set; }
+        public decimal CgstValue { get; set; }
+        public decimal SgstPercent { get; set; }
+        public decimal SgstValue { get; set; }
+        public decimal IgstPercent { get; set; }
+        public decimal IgstValue { get; set; }
+        public decimal LineSubTotal { get; set; }
+        public decimal LineTotal { get; set; }
 
         /// <summary>
-        /// Safe factory from JObject - tolerates missing fields.
+        /// Safe factory to build InvoiceItemDto from a JObject (payload). Tolerant to missing properties.
         /// </summary>
-        public static InvoiceItemDto FromJObject(JObject j)
+        public static InvoiceItemDto FromJObject(JObject payload)
         {
-            if (j == null) return new InvoiceItemDto();
+            var dto = new InvoiceItemDto();
+            if (payload == null) return dto;
 
-            return new InvoiceItemDto
-            {
-                ItemId = (int?)j["ItemId"] ?? 0,
-                ItemName = (string)j["ItemName"] ?? string.Empty,
-                HsnCode = (string)j["HsnCode"],
-                BatchNo = (string)j["BatchNo"], 
-                Qty = Convert.ToDecimal((double?)j["Qty"] ?? 0d),
-                Unit = (string)j["Unit"],
-                Rate = Convert.ToDecimal((double?)j["Rate"] ?? 0d),
-                Amount = Convert.ToDecimal((double?)j["Amount"] ?? 0d),
-                GstPercent = Convert.ToDecimal((double?)j["GstPercent"] ?? 0d),
-                TaxAmount = Convert.ToDecimal((double?)j["TaxAmount"] ?? 0d),
-                Cgst = Convert.ToDecimal((double?)j["Cgst"] ?? 0d),
-                Sgst = Convert.ToDecimal((double?)j["Sgst"] ?? 0d),
-                Igst = Convert.ToDecimal((double?)j["Igst"] ?? 0d),
-                Discount = Convert.ToDecimal((double?)j["Discount"] ?? 0d)
-            };
+            dto.Id = (int?)payload["Id"] ?? 0;
+            dto.InvoiceId = (int?)payload["InvoiceId"] ?? 0;
+            dto.ItemId = (int?)payload["ItemId"] ?? 0;
+            dto.BatchNo = (string)payload["BatchNo"];
+            dto.HsnCode = (string)payload["HsnCode"];
+            dto.Qty = Convert.ToDecimal((double?)payload["Qty"] ?? 0d);
+            dto.Rate = Convert.ToDecimal((double?)payload["Rate"] ?? 0d);
+            dto.DiscountPercent = Convert.ToDecimal((double?)payload["DiscountPercent"] ?? 0d);
+            dto.GstPercent = Convert.ToDecimal((double?)payload["GstPercent"] ?? 0d);
+            dto.GstValue = Convert.ToDecimal((double?)payload["GstValue"] ?? 0d);
+            dto.CgstPercent = Convert.ToDecimal((double?)payload["CgstPercent"] ?? 0d);
+            dto.CgstValue = Convert.ToDecimal((double?)payload["CgstValue"] ?? 0d);
+            dto.SgstPercent = Convert.ToDecimal((double?)payload["SgstPercent"] ?? 0d);
+            dto.SgstValue = Convert.ToDecimal((double?)payload["SgstValue"] ?? 0d);
+            dto.IgstPercent = Convert.ToDecimal((double?)payload["IgstPercent"] ?? 0d);
+            dto.IgstValue = Convert.ToDecimal((double?)payload["IgstValue"] ?? 0d);
+            dto.LineSubTotal = Convert.ToDecimal((double?)payload["LineSubTotal"] ?? 0d);
+            dto.LineTotal = Convert.ToDecimal((double?)payload["LineTotal"] ?? 0d);
+
+            return dto;
         }
     }
-
 }

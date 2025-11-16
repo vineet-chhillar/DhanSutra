@@ -1527,316 +1527,349 @@ LIMIT 1;", conn))
                 }
             }
         }
-        public bool SaveInvoice(InvoiceDto invoiceDto) // define InvoiceDto class matching payload
+        public (long invoiceId, string invoiceNo) CreateInvoice(CreateInvoiceDto dto)
         {
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
-                using (var txn = conn.BeginTransaction())
+
+                using (var tx = conn.BeginTransaction())
                 {
                     try
                     {
-                        // 1) Insert invoice header
-                        string insertHeader = @"
-INSERT INTO Invoice (InvoiceNo, InvoiceNum, InvoiceDate, CompanyProfileId, CustomerId, CustomerName, CustomerPhone, CustomerAddress, SubTotal, TotalTax, TotalAmount, RoundOff, CreatedBy, CreatedAt)
-VALUES (@InvoiceNo, @InvoiceNum, @InvoiceDate, @CompanyProfileId, @CustomerId, @CustomerName, @CustomerPhone, @CustomerAddress, @SubTotal, @TotalTax, @TotalAmount, @RoundOff, @CreatedBy, datetime('now','localtime'));
-SELECT last_insert_rowid();
-";
-                        using (var cmd = new SQLiteCommand(insertHeader, conn, txn))
+                        //-------------------------------------
+                        // 1️⃣ Insert or Update Customer (Merged)
+                        //-------------------------------------
+
+                        int customerId = 0;
+
+                        if (dto.Customer != null)
                         {
-                            cmd.Parameters.AddWithValue("@InvoiceNo", invoiceDto.InvoiceNo);
-                            cmd.Parameters.AddWithValue("@InvoiceNum", invoiceDto.InvoiceNum);
-                            cmd.Parameters.AddWithValue("@InvoiceDate", invoiceDto.InvoiceDate);
-                            cmd.Parameters.AddWithValue("@CompanyProfileId", invoiceDto.CompanyProfileId);
-                            cmd.Parameters.AddWithValue("@CustomerId", invoiceDto.CustomerId == 0 ? (object)DBNull.Value : invoiceDto.CustomerId);
-                            cmd.Parameters.AddWithValue("@CustomerName", invoiceDto.CustomerName);
-                            cmd.Parameters.AddWithValue("@CustomerPhone", invoiceDto.CustomerPhone);
-                            cmd.Parameters.AddWithValue("@CustomerAddress", invoiceDto.CustomerAddress);
-                            cmd.Parameters.AddWithValue("@SubTotal", invoiceDto.SubTotal);
-                            cmd.Parameters.AddWithValue("@TotalTax", invoiceDto.TotalTax);
-                            cmd.Parameters.AddWithValue("@TotalAmount", invoiceDto.TotalAmount);
-                            cmd.Parameters.AddWithValue("@RoundOff", invoiceDto.RoundOff);
-                            cmd.Parameters.AddWithValue("@CreatedBy", invoiceDto.CreatedBy);
-                            long invoiceId = (long)cmd.ExecuteScalar();
+                            var cust = dto.Customer;
 
-                            // 2) Insert invoice items and update inventory
-                            string insertItem = @"
-INSERT INTO InvoiceItem (InvoiceId, ItemId, ItemName, HsnCode, BatchNo, Qty, Unit, Rate, Amount, GstPercent, TaxAmount, Cgst, Sgst, Igst, Discount)
-VALUES (@InvoiceId,@ItemId,@ItemName,@HsnCode,@BatchNo,@Qty,@Unit,@Rate,@Amount,@GstPercent,@TaxAmount,@Cgst,@Sgst,@Igst,@Discount);
-";
-                            using (var cmdItem = new SQLiteCommand(insertItem, conn, txn))
+                            // 🔍 Check existing by phone
+                            if (!string.IsNullOrWhiteSpace(cust.Phone))
                             {
-                                foreach (var line in invoiceDto.Items)
+                                using (var cmd = conn.CreateCommand())
                                 {
-                                    cmdItem.Parameters.Clear();
-                                    cmdItem.Parameters.AddWithValue("@InvoiceId", invoiceId);
-                                    cmdItem.Parameters.AddWithValue("@ItemId", line.ItemId == 0 ? (object)DBNull.Value : line.ItemId);
-                                    cmdItem.Parameters.AddWithValue("@ItemName", line.ItemName);
-                                    cmdItem.Parameters.AddWithValue("@HsnCode", line.HsnCode ?? "");
-                                    cmdItem.Parameters.AddWithValue("@BatchNo", line.BatchNo ?? "");
-                                    cmdItem.Parameters.AddWithValue("@Qty", line.Qty);
-                                    cmdItem.Parameters.AddWithValue("@Unit", line.Unit ?? "");
-                                    cmdItem.Parameters.AddWithValue("@Rate", line.Rate);
-                                    cmdItem.Parameters.AddWithValue("@Amount", line.Amount);
-                                    cmdItem.Parameters.AddWithValue("@GstPercent", line.GstPercent);
-                                    cmdItem.Parameters.AddWithValue("@TaxAmount", line.TaxAmount);
-                                    cmdItem.Parameters.AddWithValue("@Cgst", line.Cgst);
-                                    cmdItem.Parameters.AddWithValue("@Sgst", line.Sgst);
-                                    cmdItem.Parameters.AddWithValue("@Igst", line.Igst);
-                                    cmdItem.Parameters.AddWithValue("@Discount", line.Discount);
-                                    cmdItem.ExecuteNonQuery();
+                                    cmd.Transaction = tx;
+                                    cmd.CommandText = "SELECT Id FROM Customers WHERE Phone = @phone LIMIT 1;";
+                                    cmd.Parameters.AddWithValue("@phone", cust.Phone);
 
-                                    //3 insert into ItemLedger
-                                    string sql = @"
-            INSERT INTO ItemLedger 
-            (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
-            VALUES 
-            (@ItemId, @BatchNo, @Date, @TxnType, @RefNo, @Qty, @Rate, @DiscountPercent, @NetRate ,@Amount, @Remarks, @CreatedBy);
-        ";
-
-                                    using (var cmditemledger = new SQLiteCommand(sql, conn, txn))
+                                    var existingId = cmd.ExecuteScalar();
+                                    if (existingId != null)
                                     {
-
-                                        cmd.Parameters.AddWithValue("@ItemId", line.ItemId);
-                                        cmd.Parameters.AddWithValue("@BatchNo", line.BatchNo ?? "");
-                                        cmd.Parameters.AddWithValue("@Date", invoiceDto.InvoiceDate);
-                                        cmd.Parameters.AddWithValue("@TxnType", "Sale");
-                                        cmd.Parameters.AddWithValue("@RefNo", invoiceDto.InvoiceNum);
-                                        cmd.Parameters.AddWithValue("@Qty", line.Qty);
-                                        cmd.Parameters.AddWithValue("@Rate", line.Rate);
-                                        cmd.Parameters.AddWithValue("@DiscountPercent", line.Discount);
-                                        cmd.Parameters.AddWithValue("@NetRate", line.Amount);
-                                        cmd.Parameters.AddWithValue("@Amount", line.Amount + line.TaxAmount);
-                                        cmd.Parameters.AddWithValue("@Remarks", "Sale");
-                                        cmd.Parameters.AddWithValue("@CreatedBy", invoiceDto.CreatedBy ?? "System");
-
-                                        cmditemledger.ExecuteNonQuery();
+                                        customerId = Convert.ToInt32(existingId);
                                     }
-                                    // 4) Deduct inventory - implement carefully to match your ItemBalance table
-                                    // Example: subtract from CurrentQtyBatchWise when batch matches, and update total CurrentQty
-                                    string updateBatchQty = @"
-UPDATE ItemBalance 
-SET CurrentQtyBatchWise = CurrentQtyBatchWise - @Qty,
-    LastUpdated = datetime('now','localtime')
-WHERE ItemId = @ItemId AND BatchNo = @BatchNo;
-";
-                                    using (var cmdInv = new SQLiteCommand(updateBatchQty, conn, txn))
-                                    {
-                                        cmdInv.Parameters.AddWithValue("@Qty", line.Qty);
-                                        cmdInv.Parameters.AddWithValue("@ItemId", line.ItemId);
-                                        cmdInv.Parameters.AddWithValue("@BatchNo", line.BatchNo ?? "");
-                                        cmdInv.ExecuteNonQuery();
-                                    }
-
-                                    // Update aggregated CurrentQty
-                                    string updateTotal = @"
-UPDATE ItemBalance
-SET CurrentQty = (
-    SELECT SUM(CurrentQtyBatchWise) FROM ItemBalance sub WHERE sub.ItemId = @ItemId
-),
-LastUpdated = datetime('now','localtime')
-WHERE Id = (SELECT MAX(Id) FROM ItemBalance WHERE ItemId = @ItemId);
-";
-                                    using (var cmdTotal = new SQLiteCommand(updateTotal, conn, txn))
-                                    {
-                                        cmdTotal.Parameters.AddWithValue("@ItemId", line.ItemId);
-                                        cmdTotal.ExecuteNonQuery();
-                                    }
-
-                                    // Optional: insert ledger entry for each line (if you maintain ledger)
-                                    // db.AddLedgerEntry(...) or similar
                                 }
                             }
 
-                            txn.Commit();
-                            return true;
+                            // ➕ If not found → insert new customer
+                            if (customerId == 0)
+                            {
+                                using (var cmd = conn.CreateCommand())
+                                {
+                                    cmd.Transaction = tx;
+                                    cmd.CommandText = @"
+                                INSERT INTO Customers (Name, Phone, State, Address)
+                                VALUES (@Name, @Phone, @State, @Address);
+
+                                SELECT last_insert_rowid();
+                            ";
+
+                                    cmd.Parameters.AddWithValue("@Name", cust.Name ?? "");
+                                    cmd.Parameters.AddWithValue("@Phone", cust.Phone ?? "");
+                                    cmd.Parameters.AddWithValue("@State", cust.State ?? "");
+                                    cmd.Parameters.AddWithValue("@Address", cust.Address ?? "");
+
+                                    customerId = Convert.ToInt32(cmd.ExecuteScalar());
+                                }
+                            }
+
+                            // assign back
+                            dto.Customer.Id = customerId;
                         }
+
+                        //-------------------------------------
+                        // 2️⃣ Generate Invoice Number (Merged)
+                        //-------------------------------------
+
+                        string prefix = "";
+                        long startNo = 1;
+                        long currentNo = 1;
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+                        SELECT InvoicePrefix, InvoiceStartNo, CurrentInvoiceNo 
+                        FROM CompanyProfile ORDER BY Id LIMIT 1";
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                if (!r.Read())
+                                    throw new Exception("Company profile not found");
+
+                                prefix = r.IsDBNull(0) ? "" : r.GetString(0);
+                                startNo = r.IsDBNull(1) ? 1 : r.GetInt64(1);
+                                currentNo = r.IsDBNull(2) ? startNo : r.GetInt64(2);
+                            }
+                        }
+
+                        int nextNo = (int)(currentNo + 1);
+                        string fullInvoiceNo = prefix + nextNo.ToString();
+
+                        //-------------------------------------
+                        // 3️⃣ Insert Invoice Header
+                        //-------------------------------------
+
+                        long invoiceId;
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+
+                            cmd.CommandText = @"
+                        INSERT INTO Invoice (
+                            InvoiceNo, InvoiceNum,
+                            InvoiceDate, CompanyProfileId,
+                            CustomerId, CustomerName, CustomerPhone, CustomerState, CustomerAddress,
+                            SubTotal, TotalTax, TotalAmount, RoundOff,
+                            CreatedBy
+                        )
+                        VALUES (
+                            @InvoiceNo, @InvoiceNum,
+                            @InvoiceDate, @CompanyProfileId,
+                            @CustomerId, @CustomerName, @CustomerPhone, @CustomerState, @CustomerAddress,
+                            @SubTotal, @TotalTax, @TotalAmount, @RoundOff,
+                            @CreatedBy
+                        );
+
+                        SELECT last_insert_rowid();
+                    ";
+
+                            cmd.Parameters.AddWithValue("@InvoiceNo", fullInvoiceNo);
+                            cmd.Parameters.AddWithValue("@InvoiceNum", nextNo);
+
+                            cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate);
+                            cmd.Parameters.AddWithValue("@CompanyProfileId", dto.CompanyId);
+
+                            cmd.Parameters.AddWithValue("@CustomerId", dto.Customer.Id);
+                            cmd.Parameters.AddWithValue("@CustomerName", dto.Customer.Name);
+                            cmd.Parameters.AddWithValue("@CustomerPhone", dto.Customer.Phone);
+                            cmd.Parameters.AddWithValue("@CustomerState", dto.Customer.State);
+                            cmd.Parameters.AddWithValue("@CustomerAddress", dto.Customer.Address);
+
+                            cmd.Parameters.AddWithValue("@SubTotal", dto.SubTotal);
+                            cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
+                            cmd.Parameters.AddWithValue("@TotalAmount", dto.TotalAmount);
+                            cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
+
+                            cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy);
+
+                            invoiceId = (long)cmd.ExecuteScalar();
+                        }
+
+                        //-------------------------------------
+                        // 4️⃣ Insert Invoice Items
+                        //-------------------------------------
+
+                        foreach (var item in dto.Items)
+                        {
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+
+                                cmd.CommandText = @"
+                            INSERT INTO InvoiceItems (
+                                InvoiceId,
+                                ItemId, BatchNo, HsnCode,
+                                Qty, Rate, DiscountPercent,
+                                GstPercent, GstValue,
+                                CgstPercent, CgstValue,
+                                SgstPercent, SgstValue,
+                                IgstPercent, IgstValue,
+                                LineSubTotal, LineTotal
+                            )
+                            VALUES (
+                                @InvoiceId,
+                                @ItemId, @BatchNo, @HsnCode,
+                                @Qty, @Rate, @DiscountPercent,
+                                @GstPercent, @GstValue,
+                                @CgstPercent, @CgstValue,
+                                @SgstPercent, @SgstValue,
+                                @IgstPercent, @IgstValue,
+                                @LineSubTotal, @LineTotal
+                            );
+                        ";
+
+                                cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
+
+                                cmd.Parameters.AddWithValue("@ItemId", item.ItemId);
+                                cmd.Parameters.AddWithValue("@BatchNo", item.BatchNo);
+                                cmd.Parameters.AddWithValue("@HsnCode", item.HsnCode);
+
+                                cmd.Parameters.AddWithValue("@Qty", item.Qty);
+                                cmd.Parameters.AddWithValue("@Rate", item.Rate);
+                                cmd.Parameters.AddWithValue("@DiscountPercent", item.DiscountPercent);
+
+                                cmd.Parameters.AddWithValue("@GstPercent", item.GstPercent);
+                                cmd.Parameters.AddWithValue("@GstValue", item.GstValue);
+
+                                cmd.Parameters.AddWithValue("@CgstPercent", item.CgstPercent);
+                                cmd.Parameters.AddWithValue("@CgstValue", item.CgstValue);
+
+                                cmd.Parameters.AddWithValue("@SgstPercent", item.SgstPercent);
+                                cmd.Parameters.AddWithValue("@SgstValue", item.SgstValue);
+
+                                cmd.Parameters.AddWithValue("@IgstPercent", item.IgstPercent);
+                                cmd.Parameters.AddWithValue("@IgstValue", item.IgstValue);
+
+                                cmd.Parameters.AddWithValue("@LineSubTotal", item.LineSubTotal);
+                                cmd.Parameters.AddWithValue("@LineTotal", item.LineTotal);
+
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+
+                        //-------------------------------------
+                        // 5️⃣ Update CurrentInvoiceNo
+                        //-------------------------------------
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = "UPDATE CompanyProfile SET CurrentInvoiceNo = @n";
+                            cmd.Parameters.AddWithValue("@n", nextNo);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        //-------------------------------------
+                        // 6️⃣ Commit and return both values
+                        //-------------------------------------
+
+                        tx.Commit();
+                        return (invoiceId, fullInvoiceNo);
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        Console.WriteLine("SaveInvoice failed: " + ex.Message);
-                        try { txn.Rollback(); } catch { }
-                        return false;
+                        tx.Rollback();
+                        throw;
                     }
                 }
-       
             }
         }
-        
-        public InvoiceFullDto GetInvoice(int invoiceId)
-        {
-            var invoice = new InvoiceFullDto();
 
+
+        public InvoiceLoadDto GetInvoice(long invoiceId)
+        {
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
 
-                // =============================
-                // 1️⃣ FETCH INVOICE HEADER
-                // =============================
-                string sqlHeader = @"
-            SELECT 
-                Id AS InvoiceNum,
-                InvoiceNo,
-                InvoiceDate,
-                CompanyProfileId,
-                CustomerId,
-                CustomerName,
-                CustomerPhone,
-                CustomerAddress,
-                SubTotal,
-                TotalTax,
-                TotalAmount,
-                RoundOff,
-                CreatedBy,
-                CreatedAt
-            FROM Invoice
-            WHERE Id = @Id;
-        ";
+                var dto = new InvoiceLoadDto();
+                dto.Items = new List<InvoiceItemDto>();
 
-                using (var cmd = new SQLiteCommand(sqlHeader, conn))
+                // 1️⃣ Load invoice header
+                using (var cmd = conn.CreateCommand())
                 {
+                    cmd.CommandText = @"
+                SELECT 
+                    Id,
+                    InvoiceNo, InvoiceNum,
+                    InvoiceDate,
+                    CompanyProfileId,
+
+                    CustomerId, CustomerName, CustomerPhone, CustomerState, CustomerAddress,
+
+                    SubTotal, TotalTax, TotalAmount, RoundOff
+                FROM Invoice
+                WHERE Id = @Id
+            ";
                     cmd.Parameters.AddWithValue("@Id", invoiceId);
-
-                    using (var reader = cmd.ExecuteReader())
-                    {
-                        if (reader.Read())
-                        {
-                            invoice.InvoiceNum = reader.GetInt32(0);
-                            invoice.InvoiceNo = reader["InvoiceNo"]?.ToString();
-                            invoice.InvoiceDate = reader.GetDateTime(reader.GetOrdinal("InvoiceDate"));
-                            invoice.CompanyProfileId = Convert.ToInt32(reader["CompanyProfileId"]);
-
-                            invoice.CustomerId = reader["CustomerId"] as int?;
-                            invoice.CustomerName = reader["CustomerName"]?.ToString();
-                            invoice.CustomerPhone = reader["CustomerPhone"]?.ToString();
-                            invoice.CustomerAddress = reader["CustomerAddress"]?.ToString();
-
-                            invoice.SubTotal = Convert.ToDecimal(reader["SubTotal"]);
-                            invoice.TotalTax = Convert.ToDecimal(reader["TotalTax"]);
-                            invoice.TotalAmount = Convert.ToDecimal(reader["TotalAmount"]);
-                            invoice.RoundOff = Convert.ToDecimal(reader["RoundOff"]);
-
-                            invoice.CreatedBy = reader["CreatedBy"]?.ToString();
-                            invoice.CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt"));
-                        }
-                        else
-                        {
-                            return null;
-                        }
-                    }
-                }
-
-                // =============================
-                // 2️⃣ FETCH INVOICE ITEMS
-                // =============================
-                string sqlItems = @"
-            SELECT 
-                ii.ItemId,
-                i.Name AS ItemName,
-                i.HsnCode,
-                ii.BatchNo,
-                ii.Qty,
-                ii.Unit,
-                ii.Rate,
-                ii.Amount,
-                ii.GstPercent,
-                ii.TaxAmount,
-                ii.Cgst,
-                ii.Sgst,
-                ii.Igst,
-                ii.Discount
-            FROM InvoiceItem ii
-            LEFT JOIN Item i ON i.Id = ii.ItemId
-            WHERE ii.InvoiceId = @Id;
-        ";
-
-                using (var cmd = new SQLiteCommand(sqlItems, conn))
-                {
-                    cmd.Parameters.AddWithValue("@Id", invoiceId);
-
-                    using (var reader = cmd.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            invoice.Items.Add(new InvoiceItemDto
-                            {
-                                ItemId = Convert.ToInt32(reader["ItemId"]),
-                                ItemName = reader["ItemName"]?.ToString(),
-                                HsnCode = reader["HsnCode"]?.ToString(),
-                                BatchNo = reader["BatchNo"]?.ToString(),
-                                Qty = Convert.ToDecimal(reader["Qty"]),
-                                Unit = reader["Unit"]?.ToString(),
-                                Rate = Convert.ToDecimal(reader["Rate"]),
-                                Amount = Convert.ToDecimal(reader["Amount"]),
-                                GstPercent = Convert.ToDecimal(reader["GstPercent"]),
-                                TaxAmount = Convert.ToDecimal(reader["TaxAmount"]),
-                                Cgst = Convert.ToDecimal(reader["Cgst"]),
-                                Sgst = Convert.ToDecimal(reader["Sgst"]),
-                                Igst = Convert.ToDecimal(reader["Igst"]),
-                                Discount = Convert.ToDecimal(reader["Discount"])
-                            });
-                        }
-                    }
-                }
-
-                // =============================
-                // 3️⃣ FETCH COMPANY PROFILE
-                // =============================
-                string sqlCompany = @"
-            SELECT 
-                Logo,
-                CompanyName,
-                AddressLine1,
-                AddressLine2,
-                City,
-                State,
-                Pincode,
-                Country,
-                GSTIN,
-                PAN,
-                Email,
-                Phone,
-                BankName,
-                BankAccount,
-                IFSC,
-                BranchName
-            FROM CompanyProfile
-            WHERE Id = @Id;
-        ";
-
-                using (var cmd = new SQLiteCommand(sqlCompany, conn))
-                {
-                    cmd.Parameters.AddWithValue("@Id", invoice.CompanyProfileId);
 
                     using (var r = cmd.ExecuteReader())
                     {
-                        if (r.Read())
+                        if (!r.Read())
                         {
-                            invoice.CompanyLogo = r["Logo"] != DBNull.Value ? (byte[])r["Logo"] : null;
-                            invoice.CompanyName = r["CompanyName"]?.ToString();
-                            invoice.CompanyAddressLine1 = r["AddressLine1"]?.ToString();
-                            invoice.CompanyAddressLine2 = r["AddressLine2"]?.ToString();
-                            invoice.CompanyCity = r["City"]?.ToString();
-                            invoice.CompanyState = r["State"]?.ToString();
-                            invoice.CompanyPincode = r["Pincode"]?.ToString();
-                            invoice.CompanyCountry = r["Country"]?.ToString();
-                            invoice.CompanyGstin = r["GSTIN"]?.ToString();
-                            invoice.CompanyPan = r["PAN"]?.ToString();
-                            invoice.CompanyEmail = r["Email"]?.ToString();
-                            invoice.CompanyPhone = r["Phone"]?.ToString();
-                            invoice.CompanyBankName = r["BankName"]?.ToString();
-                            invoice.CompanyBankAccount = r["BankAccount"]?.ToString();
-                            invoice.CompanyIfsc = r["IFSC"]?.ToString();
-                            invoice.CompanyBranchName = r["BranchName"]?.ToString();
+                            return null;  // invoice not found
+                        }
+
+                        dto.Id = r.GetInt64(0);
+                        dto.InvoiceNo = r.GetString(1);
+                        dto.InvoiceNum = r.GetInt32(2);
+                        dto.InvoiceDate = r.GetString(3);
+                        dto.CompanyProfileId = r.GetInt32(4);
+
+                        dto.CustomerId = r.IsDBNull(5) ? 0 : r.GetInt32(5);
+                        dto.CustomerName = r.IsDBNull(6) ? "" : r.GetString(6);
+                        dto.CustomerPhone = r.IsDBNull(7) ? "" : r.GetString(7);
+                        dto.CustomerState = r.IsDBNull(8) ? "" : r.GetString(8);
+                        dto.CustomerAddress = r.IsDBNull(9) ? "" : r.GetString(9);
+
+                        dto.SubTotal = r.GetDecimal(10);
+                        dto.TotalTax = r.GetDecimal(11);
+                        dto.TotalAmount = r.GetDecimal(12);
+                        dto.RoundOff = r.GetDecimal(13);
+                    }
+                }
+
+                // 2️⃣ Load invoice items
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+                    ItemId, BatchNo, HsnCode,
+                    Qty, Rate, DiscountPercent,
+                    GstPercent, GstValue,
+                    CgstPercent, CgstValue,
+                    SgstPercent, SgstValue,
+                    IgstPercent, IgstValue,
+                    LineSubTotal, LineTotal
+                FROM InvoiceItems
+                WHERE InvoiceId = @Id
+            ";
+                    cmd.Parameters.AddWithValue("@Id", invoiceId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            var item = new InvoiceItemDto
+                            {
+                                ItemId = r.GetInt32(0),
+                                BatchNo = r.IsDBNull(1) ? "" : r.GetString(1),
+                                HsnCode = r.IsDBNull(2) ? "" : r.GetString(2),
+
+                                Qty = r.GetDecimal(3),
+                                Rate = r.GetDecimal(4),
+                                DiscountPercent = r.GetDecimal(5),
+
+                                GstPercent = r.GetDecimal(6),
+                                GstValue = r.GetDecimal(7),
+
+                                CgstPercent = r.GetDecimal(8),
+                                CgstValue = r.GetDecimal(9),
+
+                                SgstPercent = r.GetDecimal(10),
+                                SgstValue = r.GetDecimal(11),
+
+                                IgstPercent = r.GetDecimal(12),
+                                IgstValue = r.GetDecimal(13),
+
+                                LineSubTotal = r.GetDecimal(14),
+                                LineTotal = r.GetDecimal(15)
+                            };
+
+                            dto.Items.Add(item);
                         }
                     }
                 }
-            }
 
-            return invoice;
-            
+                return dto;
+            }
         }
+
         public List<CustomerDto> GetCustomers()
         {
             var list = new List<CustomerDto>();
@@ -1850,6 +1883,7 @@ WHERE Id = (SELECT MAX(Id) FROM ItemBalance WHERE ItemId = @ItemId);
                 Id,
                 Name,
                 Phone,
+State,
                 Address
             FROM Customers
             ORDER BY Name ASC;
@@ -1865,6 +1899,7 @@ WHERE Id = (SELECT MAX(Id) FROM ItemBalance WHERE ItemId = @ItemId);
                             Id = reader.GetInt32(0),
                             Name = reader.GetString(1),
                             Phone = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                            State = reader.IsDBNull(2) ? "" : reader.GetString(2),
                             Address = reader.IsDBNull(3) ? "" : reader.GetString(3)
                         });
                     }
@@ -1898,20 +1933,64 @@ WHERE Id = (SELECT MAX(Id) FROM ItemBalance WHERE ItemId = @ItemId);
 
                 // 2. Insert new customer
                 string sqlInsert = @"
-INSERT INTO Customers (Name, Phone, Address)
-VALUES (@Name, @Phone, @Address);
-SELECT last_insert_rowid();
-";
+INSERT INTO Customers (Name, Phone, State, Address)
+VALUES (@Name, @Phone, @State, @Address);";
 
                 using (var cmd = new SQLiteCommand(sqlInsert, conn))
                 {
                     cmd.Parameters.AddWithValue("@Name", c.Name ?? "");
                     cmd.Parameters.AddWithValue("@Phone", c.Phone ?? "");
+                    cmd.Parameters.AddWithValue("@State", c.State ?? "");
                     cmd.Parameters.AddWithValue("@Address", c.Address ?? "");
                     return Convert.ToInt32(cmd.ExecuteScalar());
                 }
             }
         }
+        public (string fullNo, int nextNo) GenerateNextInvoiceNo()
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+        SELECT InvoicePrefix, InvoiceStartNo, CurrentInvoiceNo
+        FROM CompanyProfile ORDER BY Id LIMIT 1";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read())
+                            throw new Exception("Company profile not found");
+
+                        string prefix = r.IsDBNull(0) ? "" : r.GetString(0);
+                        long startNo = r.IsDBNull(1) ? 1 : r.GetInt64(1);
+                        long currentNo = r.IsDBNull(2) ? startNo : r.GetInt64(2);
+
+                        long next = currentNo + 1;
+
+                        string fullInvoice = $"{prefix}{next}";
+
+                        return (fullInvoice, (int)next);
+                    }
+                }
+            }
+            
+        }
+        public void UpdateCurrentInvoiceNo(int newNo)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "UPDATE CompanyProfile SET CurrentInvoiceNo = @no";
+                    cmd.Parameters.AddWithValue("@no", newNo);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+            }
 
     }
 

@@ -18,6 +18,7 @@ namespace DhanSutra.Models
         public int? CustomerId { get; set; }
         public string CustomerName { get; set; }
         public string CustomerPhone { get; set; }
+        public string CustomerState { get; set; }
         public string CustomerAddress { get; set; }
 
         // Totals

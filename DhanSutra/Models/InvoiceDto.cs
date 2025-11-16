@@ -21,6 +21,7 @@ namespace DhanSutra.Models
         public int? CustomerId { get; set; }                // null for walk-in
         public string CustomerName { get; set; }
         public string CustomerPhone { get; set; }
+        public string CustomerState { get; set; }
         public string CustomerAddress { get; set; }
 
         // Totals
@@ -63,6 +64,7 @@ namespace DhanSutra.Models
             dto.CustomerId = (int?)payload["CustomerId"];
             dto.CustomerName = (string)payload["CustomerName"];
             dto.CustomerPhone = (string)payload["CustomerPhone"];
+            dto.CustomerPhone = (string)payload["CustomerState"];
             dto.CustomerAddress = (string)payload["CustomerAddress"];
 
             dto.SubTotal = Convert.ToDecimal((double?)payload["SubTotal"] ?? 0d);
