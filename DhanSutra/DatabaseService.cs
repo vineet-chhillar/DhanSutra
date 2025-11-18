@@ -1045,7 +1045,65 @@ LIMIT 1;", conn))
                 return false;
             }
         }
+        public bool DecreaseItemBalance(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            try
+            {
+               
+                string sqlTotal = @"
+        update itembalance set currentqty=currentqty-@Qty where itemid=@ItemId and id=(
+            SELECT MAX(Id)
+            FROM ItemBalance
+            WHERE ItemId = @ItemId
+        );
+        ";
 
+                using (var cmd = new SQLiteCommand(sqlTotal, conn, txn))
+                {
+                    cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+                    cmd.Parameters.AddWithValue("@Qty", entry.Qty);
+                    cmd.ExecuteNonQuery();
+                }
+
+                // ✅ If both SQL operations succeed
+                return true;
+            }
+            catch (Exception ex)
+            {
+                txn.Rollback();
+                throw;
+                //Console.WriteLine("❌ Error in UpdateItemBalance: " + ex.Message);
+                //return false;
+            }
+        }
+        public bool DecreaseItemBalanceBatchWise(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            try
+            {
+
+                string sqlTotal = @"
+         update itembalance set currentqtybatchwise=currentqtybatchwise-@Qty where itemid=@ItemId and batchno=@BatchNo;
+        ";
+
+                using (var cmd = new SQLiteCommand(sqlTotal, conn, txn))
+                {
+                    cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+                    cmd.Parameters.AddWithValue("@BatchNo", entry.BatchNo);
+                    cmd.Parameters.AddWithValue("@Qty", entry.Qty);
+                    cmd.ExecuteNonQuery();
+                }
+
+                // ✅ If both SQL operations succeed
+                return true;
+            }
+            catch (Exception ex)
+            {
+                txn.Rollback();
+                throw;
+                //Console.WriteLine("❌ Error in UpdateItemBalance: " + ex.Message);
+                //return false;
+            }
+        }
         //public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno,string quantity)
         //{
         //    try
@@ -1623,8 +1681,8 @@ LIMIT 1;", conn))
                         // 3️⃣ Insert Invoice Header
                         //-------------------------------------
 
-                        long invoiceId;
 
+                        long invoiceId;
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = tx;
@@ -1666,6 +1724,7 @@ LIMIT 1;", conn))
                             cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
 
                             cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy);
+                            //cmd.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
 
                             invoiceId = (long)cmd.ExecuteScalar();
                         }
@@ -1730,6 +1789,31 @@ LIMIT 1;", conn))
 
                                 cmd.ExecuteNonQuery();
                             }
+                            decimal discountPercent = item.DiscountPercent;
+                            decimal netRate = item.Rate - (item.Rate * discountPercent / 100);
+                            decimal lineTotal = item.LineTotal;
+
+                            ItemLedger ledgerEntry = new ItemLedger();
+                            ledgerEntry.ItemId = item.ItemId;
+                            ledgerEntry.BatchNo = item.BatchNo;
+                            ledgerEntry.Date = dto.InvoiceDate; 
+                            ledgerEntry.TxnType = "SALE";
+                            ledgerEntry.RefNo = fullInvoiceNo;
+                            ledgerEntry.Qty = item.Qty;
+                            ledgerEntry.Rate = item.Rate;
+                            ledgerEntry.DiscountPercent = discountPercent;
+                            ledgerEntry.NetRate = netRate;  
+                            ledgerEntry.TotalAmount = lineTotal;
+                            ledgerEntry.Remarks = "Invoice Sale";
+                            ledgerEntry.CreatedBy = dto.CreatedBy;
+
+                            AddItemLedger(ledgerEntry, conn, tx);
+
+                            
+                            //UpdateItemBalance(ledgerEntry, conn, tx);
+                            // Update balances
+                            DecreaseItemBalance(ledgerEntry, conn, tx);
+                            DecreaseItemBalanceBatchWise(ledgerEntry, conn, tx);
                         }
 
                         //-------------------------------------
@@ -1991,6 +2075,29 @@ VALUES (@Name, @Phone, @State, @Address);";
                 }
             }
             }
+        public int GetItemBalance(int itemId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                var cmd = new SQLiteCommand("select currentqty from itembalance\r\nwhere itemid=@itemid and id=(select max(id) from itembalance where itemid=@itemid)", conn);
+                cmd.Parameters.AddWithValue("@itemid", itemId);
+                var r = cmd.ExecuteScalar();
+                return r != null ? Convert.ToInt32(r) : 0;
+            }
+        }
+        public int GetItemBalanceBatchWise(int itemId,string batchno)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                var cmd = new SQLiteCommand("select currentqtybatchwise from itembalance\r\nwhere itemid=@itemid and batchno=@batchno", conn);
+                cmd.Parameters.AddWithValue("@itemid", itemId);
+                cmd.Parameters.AddWithValue("@batchno", batchno);
+                var r = cmd.ExecuteScalar();
+                return r != null ? Convert.ToInt32(r) : 0;
+            }
+        }
 
     }
 

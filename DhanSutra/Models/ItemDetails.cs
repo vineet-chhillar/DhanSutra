@@ -13,17 +13,17 @@ namespace DhanSutra.Models
         public string BatchNo { get; set; }
         public string refno { get; set; }
         public DateTime Date { get; set; }
-        public double Quantity { get; set; }
-        public double PurchasePrice { get; set; }
+        public decimal Quantity { get; set; }
+        public decimal PurchasePrice { get; set; }
 
-        public double DiscountPercent { get; set; }
+        public decimal DiscountPercent { get; set; }
 
-        public double NetPurchasePrice { get; set; }
+        public decimal NetPurchasePrice { get; set; }
 
-        public double Amount { get; set; }
+        public decimal Amount { get; set; }
 
-        public double SalesPrice { get; set; }
-        public double Mrp { get; set; }
+        public decimal SalesPrice { get; set; }
+        public decimal Mrp { get; set; }
         public string GoodsOrServices { get; set; }
         public string Description { get; set; }
         public string MfgDate { get; set; }

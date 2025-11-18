@@ -966,7 +966,78 @@ namespace DhanSutra
                             );
                             break;
                         }
+                    case "GetItemBalance":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null) break;
 
+                                int itemid = payload["ItemId"]?.ToObject<int>() ?? 0;
+                                int lineindex = payload["LineIndex"]?.ToObject<int>() ?? 0;
+
+                                int bal = db.GetItemBalance(itemid);
+
+                                var resp = new
+                                {
+                                    action = "GetItemBalanceResponse",
+                                    itemId = itemid,
+                                    balance = bal,
+                                    lineIndex = lineindex
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
+                            }
+                            catch (Exception ex)
+                            {
+                                var resp = new
+                                {
+                                    action = "GetItemBalanceResponse",
+                                    success = false,
+                                    message = "Error Fetching Balance: " + ex.Message
+                                };
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
+                            }
+
+                            break;
+                        }
+                    case "GetItemBalanceBatchWise":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null) break;
+
+                                int itemid = payload["ItemId"]?.ToObject<int>() ?? 0;
+                                string batchno = payload["BatchNo"]?.ToObject<string>();
+                                int lineindex = payload["LineIndex"]?.ToObject<int>() ?? 0;
+
+                                int bal = db.GetItemBalanceBatchWise(itemid,batchno);
+
+                                var resp = new
+                                {
+                                    action = "GetItemBalanceBatchWiseResponse",
+                                    itemId = itemid,
+                                    batchno = batchno,
+                                    balance = bal,
+                                    lineIndex = lineindex
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
+                            }
+                            catch (Exception ex)
+                            {
+                                var resp = new
+                                {
+                                    action = "GetItemBalanceResponse",
+                                    success = false,
+                                    message = "Error Fetching Balance: " + ex.Message
+                                };
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(resp));
+                            }
+
+                            break;
+                        }
                     case "PrintInvoice":
                         {
                             var payload = req.Payload as JObject;

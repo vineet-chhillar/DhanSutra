@@ -14,11 +14,11 @@ namespace DhanSutra.Models
         public string Date { get; set; }
         public string TxnType { get; set; }
         public string RefNo { get; set; }
-        public double Qty { get; set; }
-        public double Rate { get; set; }
-        public double DiscountPercent { get; set; }
-        public double NetRate { get; set; }
-        public double TotalAmount { get; set; }
+        public decimal Qty { get; set; }
+        public decimal Rate { get; set; }
+        public decimal DiscountPercent { get; set; }
+        public decimal NetRate { get; set; }
+        public decimal TotalAmount { get; set; }
         public string Remarks { get; set; }
         public string CreatedBy { get; set; }
         public string CreatedAt { get; set; }
