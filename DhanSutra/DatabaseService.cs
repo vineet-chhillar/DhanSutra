@@ -45,43 +45,7 @@ namespace DhanSutra
             Console.WriteLine("📂 Database path: " + dbFile);
 
 
-            //using (var connection = new SQLiteConnection(_connectionString))
-            //    connection.Execute(@"
-            //CREATE TABLE IF NOT EXISTS Item (
-            //    id INTEGER PRIMARY KEY AUTOINCREMENT,
-            //    name TEXT NOT NULL,
-            //    itemcode TEXT UNIQUE NOT NULL,
-            //    category TEXT,
-            //    [date] datetime NULL,
-            //    description TEXT NULL,
-            //    defaultunit TEXT NULL,
-            //    gst REAL NULL,
-            //    createdby text NULL,
-            //    createdat datetime NULL
-            //);
-
-            //CREATE TABLE IF NOT EXISTS ItemDetails (
-            //    id INTEGER PRIMARY KEY AUTOINCREMENT,
-            //    item_id INTEGER NOT NULL,
-            //    hsnCode TEXT,
-            //    batchNo TEXT,
-            //    quantity INTEGER,
-            //    purchasePrice REAL,
-            //    salesPrice REAL,
-            //    mrp REAL,
-            //    goodsOrServices TEXT,
-            //    description TEXT,
-            //    mfgdate TEXT,
-            //    expdate TEXT,
-            //    modelno TEXT,
-            //    brand TEXT,
-            //    size TEXT,
-            //    color TEXT,
-            //    weight REAL,
-            //    dimension TEXT,
-            //    FOREIGN KEY (item_id) REFERENCES Item(id) ON DELETE CASCADE
-            //);
-            //");
+           
         }
 
         public IEnumerable<Item> GetItems()
@@ -594,84 +558,7 @@ createdat)
             return list;
         }
 
-        // ✅ Update
-        //       public bool UpdateInventoryRecord(string itemId,string batchNo, string refno, string hsnCode, string date, string quantity,string purchasePrice, string discountPercent,
-        //    string netpurchasePrice,string amount,string salesPrice,string mrp,string goodsOrServices,string description,string mfgDate,string expDate,string modelNo,string brand,
-        //    string size,string color,string weight,string dimension,string invbatchno
-        //)        {
-        //           try
-        //           {
-        //               using (var conn = new SQLiteConnection(_connectionString))
-        //               {
-        //                   conn.Open();
-
-        //                   string query = @"
-        //                   UPDATE ItemDetails
-        //                   SET 
-        //                   hsnCode = @HsnCode,
-        //                   batchNo = @BatchNo,
-        //                   refno=@refno,
-        //                   date = @Date,
-        //                   quantity = @Quantity,
-        //                   purchasePrice = @PurchasePrice,
-        //                   discountPercent=@DiscountPercent,
-        //                   netpurchasePrice= @NetPurchasePrice,
-        //                   amount= @Amount,
-        //                   salesPrice = @SalesPrice,
-        //                   mrp = @Mrp,
-        //                   goodsOrServices = @GoodsOrServices,
-        //                   description = @Description,
-        //                   mfgdate = @MfgDate,
-        //                   expdate = @ExpDate,
-        //                   modelno = @ModelNo,
-        //                   brand = @Brand,
-        //                   size = @Size,
-        //                   color = @Color,
-        //                   weight = @Weight,
-        //                   dimension = @Dimension
-        //               WHERE item_Id = @ItemId AND batchNo = @invbatchno;
-        //           ";
-
-        //                   using (var cmd = new SQLiteCommand(query, conn))
-        //                   {
-        //                       cmd.Parameters.AddWithValue("@HsnCode", hsnCode);
-        //                       cmd.Parameters.AddWithValue("@Date", date);
-        //                       cmd.Parameters.AddWithValue("@Quantity", quantity);
-        //                       cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
-
-        //                       cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
-        //                       cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
-        //                       cmd.Parameters.AddWithValue("@Amount", amount);
-
-
-        //                       cmd.Parameters.AddWithValue("@SalesPrice", salesPrice);
-        //                       cmd.Parameters.AddWithValue("@Mrp", mrp);
-        //                       cmd.Parameters.AddWithValue("@GoodsOrServices", goodsOrServices);
-        //                       cmd.Parameters.AddWithValue("@Description", description);
-        //                       cmd.Parameters.AddWithValue("@MfgDate", mfgDate);
-        //                       cmd.Parameters.AddWithValue("@ExpDate", expDate);
-        //                       cmd.Parameters.AddWithValue("@ModelNo", modelNo);
-        //                       cmd.Parameters.AddWithValue("@Brand", brand);
-        //                       cmd.Parameters.AddWithValue("@Size", size);
-        //                       cmd.Parameters.AddWithValue("@Color", color);
-        //                       cmd.Parameters.AddWithValue("@Weight", weight);
-        //                       cmd.Parameters.AddWithValue("@Dimension", dimension);
-        //                       cmd.Parameters.AddWithValue("@ItemId", itemId);
-        //                       cmd.Parameters.AddWithValue("@BatchNo", batchNo);
-        //                       cmd.Parameters.AddWithValue("@refno", refno);
-        //                       cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
-
-        //                       int rows = cmd.ExecuteNonQuery();
-        //                       return rows > 0;
-        //                   }
-        //               }
-        //           }
-        //           catch (Exception ex)
-        //           {
-        //               Console.WriteLine("Error updating inventory: " + ex.Message);
-        //               return false;
-        //           }
-        //       }
+        
         public bool UpdateInventoryRecord(
            SQLiteConnection conn,
            SQLiteTransaction tran,
