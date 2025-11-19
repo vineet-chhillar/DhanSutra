@@ -65,6 +65,11 @@ namespace DhanSutra
 
             // Load your React app (or test HTML)
             webView.Source = new Uri("http://localhost:3000");
+            webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+     "invoices.local",
+     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Invoices"),
+     Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow
+ );
         }
 
         private void WebView2_WebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -505,109 +510,7 @@ namespace DhanSutra
                             break;
                         }
 
-                    //case "updateInventory":
-                    //    {
-                    //        var payload = JObject.Parse(req.Payload.ToString());
-
-                    //        var id = payload["id"]?.ToString();
-                    //        var itemId = payload["item_id"]?.ToString();
-                    //        var stritemId = payload["item_id"]?.ToString();
-                    //        var batchNo = payload["batchNo"]?.ToString();
-                    //        var refno = payload["refno"]?.ToString();
-                    //        var hsnCode = payload["hsnCode"]?.ToString();
-
-                    //        string NormalizeDate(string input)
-                    //        {
-                    //            if (string.IsNullOrWhiteSpace(input)) return null;
-                    //            if (DateTime.TryParse(input, out DateTime dt))
-                    //                return dt.ToString("yyyy-MM-dd HH:mm:ss");
-                    //            return null;
-                    //        }
-
-                    //        var date = NormalizeDate(payload["date"]?.ToString());
-
-
-                    //        var quantity = payload["quantity"]?.ToString();
-                    //        var purchasePrice = payload["purchasePrice"]?.ToString();
-
-                    //        var discountPercent = payload["discountPercent"]?.ToString();
-                    //        var netPurchasePrice = payload["netpurchasePrice"]?.ToString();
-                    //        var amount = payload["amount"]?.ToString();
-
-
-                    //        var salesPrice = payload["salesPrice"]?.ToString();
-                    //        var mrp = payload["mrp"]?.ToString();
-                    //        var goodsOrServices = payload["goodsOrServices"]?.ToString();
-                    //        var description = payload["description"]?.ToString();
-                    //        var mfgDate = NormalizeDate(payload["mfgdate"]?.ToString());
-                    //        var expDate = NormalizeDate(payload["expdate"]?.ToString());
-                    //        var modelno = payload["modelno"]?.ToString();
-                    //        var brand = payload["brand"]?.ToString();
-                    //        var size = payload["size"]?.ToString();
-                    //        var color = payload["color"]?.ToString();
-                    //        var weight = payload["weight"]?.ToString();
-                    //        var dimension = payload["dimension"]?.ToString();
-                    //        var invbatchno = payload["invbatchno"]?.ToString();
-
-                    //        bool success = false;
-
-                    //        using (var conn = new SQLiteConnection(_connectionString1))
-                    //        {
-                    //            conn.Open();
-
-                    //            using (var transaction = conn.BeginTransaction())
-                    //            {
-                    //                try
-                    //                {
-                    //                    success = db.UpdateInventoryRecord(itemId, batchNo, refno, hsnCode, date, quantity, purchasePrice, discountPercent, netPurchasePrice, amount,
-                    //            salesPrice, mrp, goodsOrServices, description, mfgDate, expDate, modelno, brand, size, color, weight, dimension, invbatchno);
-
-                    //                    bool success_ledger = db.UpdateItemLedger(itemId, batchNo, refno, date, quantity, purchasePrice, discountPercent, netPurchasePrice, amount,
-                    //                        description, invbatchno);
-
-                    //                    bool success_itembalance_batchno = db.UpdateItemBalanceForBatchNo(itemId, batchNo, invbatchno);
-
-                    //                    //there should be change in itembalance also if quantity changes
-                    //                    bool success_itembalance_forquantity = db.UpdateItemBalance_ForChangeInQuantity(stritemId, batchNo, invbatchno, quantity);
-
-
-
-                    //                    // ✅ If both succeeded, commit
-                    //                    if (success && success_ledger && success_itembalance_batchno && success_itembalance_forquantity)
-                    //                    {
-                    //                        transaction.Commit();
-                    //                        success = true;
-                    //                    }
-                    //                    else
-                    //                    {
-                    //                        transaction.Rollback();
-                    //                        success = false;
-                    //                    }
-                    //                }
-                    //                catch (Exception ex)
-                    //                {
-                    //                    // ❌ Rollback on any error
-                    //                    transaction.Rollback();
-                    //                    Console.WriteLine("Error updating inventory & ledger: " + ex.Message);
-                    //                    success = false;
-                    //                }
-                    //            }
-
-                    //            conn.Close();
-                    //        }
-                    //            var result = new
-                    //        {
-                    //            action = "updateInventoryResponse",
-                    //            success = success,
-                    //            message = success ? "Inventory updated successfully." : "Update failed."
-                    //        };
-
-                    //        webView.CoreWebView2.PostWebMessageAsJson(
-                    //            Newtonsoft.Json.JsonConvert.SerializeObject(result)
-                    //        );
-
-                    //        break;
-                    //    }
+                    
                     case "updateInventory":
                         {
                             var payload = JObject.Parse(req.Payload.ToString());
@@ -886,9 +789,23 @@ namespace DhanSutra
                                     webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(errResp));
                                     break;
                                 }
-
+                                
                                 // Convert to CreateInvoiceDto
                                 var dto = payload.ToObject<CreateInvoiceDto>();
+                                var Invoicedto = payload.ToObject<InvoiceDto>();
+
+                                var validationErrors = db.ValidateInvoice(Invoicedto);
+                                //if (validationErrors.Count > 0)
+                                //{
+                                //    SendMessage(new
+                                //    {
+                                //        action = "SaveInvoiceResponse",
+                                //        success = false,
+                                //        errors = validationErrors
+                                //    });
+                                //    break;
+                                //}
+
                                 if (dto == null)
                                 {
                                     var errResp = new
@@ -916,7 +833,22 @@ namespace DhanSutra
 
                                 // ⭐ SINGLE CALL — does customer insert/update + invoice + items + next invoice no
                                 // ⭐ Now returns both invoiceId and invoiceNo
-                                var result = db.CreateInvoice(dto);
+
+                                if (validationErrors.Count > 0)
+                                {
+
+                                    var errResp = new
+                                    {
+                                        action = "CreateInvoiceResponse",
+                                        success = false,
+                                        message = "Validation errors",
+                                        errors = validationErrors
+                                    };
+                                    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(errResp));
+                                    break;
+                                }
+
+                                    var result = db.CreateInvoice(dto);
                                 long invoiceId = result.invoiceId;
                                 string invoiceNo = result.invoiceNo;
 
@@ -1104,16 +1036,16 @@ namespace DhanSutra
                                 PAN = company.PAN,
                                 Email = company.Email,
                                 Phone = company.Phone,
-                                //BankName = company.BankName,
-                                //BankAccount = company.BankAccount,
-                                //IFSC = company.IFSC,
-                                //BranchName = company.BranchName,
-                                //InvoicePrefix = company.InvoicePrefix,
-                                //InvoiceStartNo = company.InvoiceStartNo,
-                                //CurrentInvoiceNo = company.CurrentInvoiceNo,
-                                //Logo = company.Logo,
-                                //CreatedBy = company.CreatedBy,
-                                //CreatedAt = company.CreatedAt
+                                BankName = company.BankName,
+                                BankAccount = company.BankAccount,
+                                IFSC = company.IFSC,
+                                BranchName = company.BranchName,
+                                InvoicePrefix = company.InvoicePrefix,
+                                InvoiceStartNo = company.InvoiceStartNo,
+                                CurrentInvoiceNo = company.CurrentInvoiceNo,
+                                Logo = company.Logo,
+                                CreatedBy = company.CreatedBy,
+                                CreatedAt = company.CreatedAt
                             };
 
                             // 5) Create the PDF
@@ -1160,6 +1092,28 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
+                    case "getInvoiceNumbersByDate":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+                            string date = payload["date"]?.ToObject<string>() ;
+
+                            
+                            var result = db.GetInvoiceNumbersByDate(date);
+
+                            var response = new
+                            {
+                                action = "invoiceNumbersByDateResult",
+                                data = result
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+
+                            
+                        }
+
+                    
+
 
 
                 }

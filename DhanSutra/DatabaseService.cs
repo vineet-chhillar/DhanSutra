@@ -750,56 +750,7 @@ createdat)
             }
         }
 
-        //   public bool UpdateItemLedger(string itemId, string batchNo, string refno, string date, string quantity, string purchasePrice, string discountPercent,
-        //string netpurchasePrice, string amount, string description, string invbatchno)
-        //   {
-        //       try
-        //       {
-        //           using (var conn = new SQLiteConnection(_connectionString))
-        //           {
-        //               conn.Open();
-
-        //               string query = @"
-        //               UPDATE ItemLedger
-        //               SET 
-        //               BatchNo = @BatchNo,
-        //               refno=@refno,
-        //               date = @Date,
-        //               Qty = @Quantity,
-        //               Rate = @PurchasePrice,
-        //               DiscountPercent=@DiscountPercent,
-        //               NetRate= @NetPurchasePrice,
-        //               TotalAmount= @Amount,
-        //               Remarks = @Description
-        //               WHERE ItemId = @ItemId AND BatchNo = @invbatchno;
-        //       ";
-
-        //               using (var cmd = new SQLiteCommand(query, conn))
-        //               {
-
-        //                   cmd.Parameters.AddWithValue("@Date", date);
-        //                   cmd.Parameters.AddWithValue("@Quantity", quantity);
-        //                   cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
-        //                   cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
-        //                   cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
-        //                   cmd.Parameters.AddWithValue("@Amount", amount);                                          
-        //                   cmd.Parameters.AddWithValue("@Description", description);
-        //                   cmd.Parameters.AddWithValue("@ItemId", itemId);
-        //                   cmd.Parameters.AddWithValue("@BatchNo", batchNo);
-        //                   cmd.Parameters.AddWithValue("@refno", refno);
-        //                   cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
-
-        //                   int rows = cmd.ExecuteNonQuery();
-        //                   return rows > 0;
-        //               }
-        //           }
-        //       }
-        //       catch (Exception ex)
-        //       {
-        //           Console.WriteLine("Error updating item ledger: " + ex.Message);
-        //           return false;
-        //       }
-        //   }
+        
         public bool UpdateItemLedger(
        SQLiteConnection conn,
        SQLiteTransaction tran,
@@ -859,39 +810,7 @@ createdat)
             }
         }
 
-        //public bool UpdateItemBalanceForBatchNo(string itemId, string batchNo,string invbatchno)
-        //{
-        //    try
-        //    {
-        //        using (var conn = new SQLiteConnection(_connectionString))
-        //        {
-        //            conn.Open();
-
-        //            string query = @"
-        //            UPDATE ItemBalance
-        //            SET 
-        //            BatchNo = @BatchNo
-        //            WHERE ItemId = @ItemId AND BatchNo = @invbatchno;
-        //    ";
-
-        //            using (var cmd = new SQLiteCommand(query, conn))
-        //            {
-
-        //                cmd.Parameters.AddWithValue("@ItemId", itemId);
-        //                cmd.Parameters.AddWithValue("@BatchNo", batchNo);
-        //                cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
-
-        //                int rows = cmd.ExecuteNonQuery();
-        //                return rows > 0;
-        //            }
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine("Error updating item balance: " + ex.Message);
-        //        return false;
-        //    }
-        //}
+        
         public bool UpdateItemBalanceForBatchNo(
     SQLiteConnection conn,
     SQLiteTransaction tran,
@@ -926,44 +845,7 @@ createdat)
             }
         }
 
-        //// ✅ Delete
-        //public DbResult DeleteInventory(JObject payload)
-        //{
-        //    try
-        //    {
-        //        int id = payload["id"]?.Value<int>() ?? 0;
-        //        if (id == 0)
-        //            return new DbResult { Success = false, Message = "Invalid ID." };
-
-        //        using var conn = new SQLiteConnection(_connectionString);
-        //        conn.Open();
-        //        using var tx = conn.BeginTransaction();
-
-        //        string sql = "DELETE FROM Inventory WHERE Id = @Id;";
-        //        using var cmd = new SQLiteCommand(sql, conn);
-        //        cmd.Parameters.AddWithValue("@Id", id);
-
-        //        int rows = cmd.ExecuteNonQuery();
-        //        tx.Commit();
-
-        //        return new DbResult
-        //        {
-        //            Success = rows > 0,
-        //            Message = rows > 0
-        //                ? "🗑️ Record deleted successfully."
-        //                : "⚠️ Record not found."
-        //        };
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine($"❌ Delete error: {ex.Message}");
-        //        return new DbResult
-        //        {
-        //            Success = false,
-        //            Message = $"Delete failed: {ex.Message}"
-        //        };
-        //    }
-        //}
+       
         public JObject GetLastItemWithInventory()
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -1104,75 +986,7 @@ LIMIT 1;", conn))
                 //return false;
             }
         }
-        //public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno,string quantity)
-        //{
-        //    try
-        //    {
-        //        using (var conn = new SQLiteConnection(_connectionString))
-        //        {
-        //            conn.Open();
-        //            using (var txn = conn.BeginTransaction())
-        //            {
-        //                try
-        //                {
-        //                    // 1️⃣ First SQL update
-        //                    string query = @"
-        //                UPDATE ItemBalance
-        //                SET CurrentQtyBatchWise = @Qty,
-        //                    LastUpdated = datetime('now','localtime')
-        //                WHERE ItemId = @ItemId AND BatchNo = @BatchNo;
-        //            ";
-
-        //                    using (var cmd1 = new SQLiteCommand(query, conn, txn))
-        //                    {
-        //                        cmd1.Parameters.AddWithValue("@Qty", quantity); // using invbatchno as Qty placeholder?
-        //                        cmd1.Parameters.AddWithValue("@ItemId", itemId);
-        //                        cmd1.Parameters.AddWithValue("@BatchNo", batchNo);
-        //                        cmd1.ExecuteNonQuery();
-        //                    }
-
-        //                    // 2️⃣ Second SQL update (can target another batch or same)
-        //                    string sqlTotal = @"
-        //                    UPDATE ItemBalance
-        //                    SET 
-        //                        CurrentQty = (
-        //                            SELECT SUM(CurrentQtyBatchWise)
-        //                            FROM ItemBalance AS sub
-        //                            WHERE sub.ItemId = @ItemId
-        //                        ),
-        //                        LastUpdated = datetime('now','localtime')
-        //                    WHERE Id = (
-        //                        SELECT MAX(Id)
-        //                        FROM ItemBalance
-        //                        WHERE ItemId = @ItemId
-        //                    );
-        //                    ";
-
-        //                    using (var cmd2 = new SQLiteCommand(sqlTotal, conn, txn))
-        //                    {
-        //                        cmd2.Parameters.AddWithValue("@BatchNo", batchNo);
-        //                        cmd2.ExecuteNonQuery();
-        //                    }
-
-        //                    // ✅ If both succeed, commit
-        //                    txn.Commit();
-        //                    return true;
-        //                }
-        //                catch (Exception innerEx)
-        //                {
-        //                    Console.WriteLine("❌ Error in transaction: " + innerEx.Message);
-        //                    txn.Rollback();
-        //                    return false;
-        //                }
-        //            }
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine("❌ Database error: " + ex.Message);
-        //        return false;
-        //    }
-        //}
+        
         public bool UpdateItemBalance_ForChangeInQuantity(
     SQLiteConnection conn,
     SQLiteTransaction tran,
@@ -1235,89 +1049,7 @@ LIMIT 1;", conn))
         }
 
 
-        //public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno)
-        //{
-        //    try
-        //    {
-        //        using (var conn = new SQLiteConnection(_connectionString))
-        //        {
-        //            conn.Open();
-
-        //            string query = @"
-        //UPDATE ItemBalance
-        //SET CurrentQtyBatchWise = @Qty,
-        //    LastUpdated = datetime('now','localtime')    
-        //        WHERE ItemId = @ItemId and BatchNo=@BatchNo";
-
-        //            using (var cmd = new SQLiteCommand(query, conn))
-        //            {
-
-        //                cmd.Parameters.AddWithValue("@ItemId", itemId);
-        //                cmd.Parameters.AddWithValue("@BatchNo", batchNo);
-        //                cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
-
-        //                int rows = cmd.ExecuteNonQuery();
-        //                return rows > 0;
-        //            }                    
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine("Error updating item balance: " + ex.Message);
-        //        return false;
-        //    }
-        //}
-        //public bool UpdateItemBalance_ForChangeInQuantity(string itemId, string batchNo, string invbatchno)
-        //{
-        //    try
-        //    {
-        //        // 1️⃣ Insert or update batch-wise balance
-        //        string sql = @"
-        //UPDATE ItemBalance
-        //SET CurrentQtyBatchWise = @Qty,
-        //    LastUpdated = datetime('now','localtime')    
-        //        WHERE ItemId = @ItemId and BatchNo=@BatchNo";
-
-        //        using (var cmd = new SQLiteCommand(sql, conn, txn))
-        //        {
-        //            cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
-        //            cmd.Parameters.AddWithValue("@BatchNo", entry.BatchNo ?? "");
-        //            cmd.Parameters.AddWithValue("@Qty", entry.Qty);
-        //            cmd.ExecuteNonQuery();
-        //        }
-
-        //        // 2️⃣ Update total (CurrentQty) only for the latest record
-        //        string sqlTotal = @"
-        //UPDATE ItemBalance
-        //SET 
-        //    CurrentQty = (
-        //        SELECT SUM(CurrentQtyBatchWise)
-        //        FROM ItemBalance AS sub
-        //        WHERE sub.ItemId = @ItemId
-        //    ),
-        //    LastUpdated = datetime('now','localtime')
-        //WHERE Id = (
-        //    SELECT MAX(Id)
-        //    FROM ItemBalance
-        //    WHERE ItemId = @ItemId
-        //);
-        //";
-
-        //        using (var cmd = new SQLiteCommand(sqlTotal, conn, txn))
-        //        {
-        //            cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
-        //            cmd.ExecuteNonQuery();
-        //        }
-
-        //        // ✅ If both SQL operations succeed
-        //        return true;
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine("❌ Error in UpdateItemBalance: " + ex.Message);
-        //        return false;
-        //    }
-        //}
+        
 
 
 
@@ -2098,6 +1830,47 @@ VALUES (@Name, @Phone, @State, @Address);";
                 return r != null ? Convert.ToInt32(r) : 0;
             }
         }
+        public IEnumerable<dynamic> GetInvoiceNumbersByDate(string date)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                return conn.Query(
+                    "SELECT Id, InvoiceNo FROM Invoice WHERE DATE(CreatedAt) = DATE(@date) ORDER BY InvoiceNo",
+                    new { date }
+                ).ToList();
+            }
+        }
+        public List<string> ValidateInvoice(InvoiceDto invoice)
+        {
+            var errors = new List<string>();
+
+            if (invoice.InvoiceDate == null)
+                errors.Add("Missing invoice date.");
+
+            if (string.IsNullOrWhiteSpace(invoice.InvoiceNo))
+                errors.Add("Missing invoice number.");
+
+            if (string.IsNullOrWhiteSpace(invoice.CustomerName))
+                errors.Add("Missing customer name.");
+
+            if (invoice.Items == null || invoice.Items.Count == 0)
+                errors.Add("No items found.");
+
+            foreach (var item in invoice.Items)
+            {
+                if (item.Qty <= 0)
+                    errors.Add($"Item {item.ItemId}: Quantity must be > 0.");
+
+                if (item.Rate <= 0)
+                    errors.Add($"Item {item.ItemId}: Rate must be > 0.");
+            }
+
+            return errors;
+        }
+
+        
+
+
 
     }
 

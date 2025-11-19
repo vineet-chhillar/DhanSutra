@@ -326,6 +326,7 @@
     <Error Condition="!Exists('..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets'))" />
     <Error Condition="!Exists('..\packages\SQLite.3.13.0\build\net45\SQLite.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\SQLite.3.13.0\build\net45\SQLite.props'))" />
     <Error Condition="!Exists('..\packages\QuestPDF.2025.7.4\build\net4\QuestPDF.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\QuestPDF.2025.7.4\build\net4\QuestPDF.targets'))" />
+    <Error Condition="!Exists('..\packages\SkiaSharp.NativeAssets.Win32.3.119.1\build\net462\SkiaSharp.NativeAssets.Win32.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\SkiaSharp.NativeAssets.Win32.3.119.1\build\net462\SkiaSharp.NativeAssets.Win32.targets'))" />
   </Target>
   <Import Project="..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets" Condition="Exists('..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets')" />
   <PropertyGroup>
@@ -333,4 +334,5 @@
     </PostBuildEvent>
   </PropertyGroup>
   <Import Project="..\packages\QuestPDF.2025.7.4\build\net4\QuestPDF.targets" Condition="Exists('..\packages\QuestPDF.2025.7.4\build\net4\QuestPDF.targets')" />
+  <Import Project="..\packages\SkiaSharp.NativeAssets.Win32.3.119.1\build\net462\SkiaSharp.NativeAssets.Win32.targets" Condition="Exists('..\packages\SkiaSharp.NativeAssets.Win32.3.119.1\build\net462\SkiaSharp.NativeAssets.Win32.targets')" />
 </Project>
