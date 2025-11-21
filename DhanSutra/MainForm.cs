@@ -6,15 +6,19 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
+using QuestPDF.Fluent;
+using QuestPDF.Infrastructure;
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
-using QuestPDF.Fluent;
-using QuestPDF.Infrastructure;
+using DhanSutra.Validation;
+
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 namespace DhanSutra
 {
@@ -89,18 +93,38 @@ namespace DhanSutra
                         var item = JsonConvert.DeserializeObject<Item>(req.Payload.ToString());
                         try
                         {
-                            db.AddItem(item); // ✅ SQLite insertion via DatabaseService
 
-                            // ✅ Structured success message
-                            var response = new
+                            var errors = db.ValidateItem(item);
+                            if (errors.Count > 0)
                             {
-                                Type = "AddItem",
-                                Status = "Success",
-                                Message = "Item added successfully",
-                                Data = item
-                            };
+                                
+                                var response = new
+                                {
+                                    Type = "AddItem",
+                                    Status = "Validation Failed Error",
+                                    Message = "Validation Failed",
+                                    Data = item
+                                };
+                            }
+                            else
+                            {
+                                db.AddItem(item); // ✅ SQLite insertion via DatabaseService
+                                                  // ✅ Structured success message
+                                var response = new
+                                {
+                                    Type = "AddItem",
+                                    Status = "Success",
+                                    Message = "Item added successfully",
+                                    Data = item
+                                };
 
-                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
+                                webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
+                            }
+
+
+                           
+
+                            
                         }
                         catch (Exception ex)
                         {
@@ -119,9 +143,14 @@ namespace DhanSutra
                     case "AddItemDetails":
                         try
                         {
-                            
+
+                               
                             var details = JsonConvert.DeserializeObject<ItemDetails>(req.Payload.ToString());
+
+                            var errors = db.ValidateInventoryDetails(details);
+
                             
+
                             ItemLedger itemledger=new ItemLedger();
                             itemledger.ItemId = details.Item_Id;
                             itemledger.BatchNo = details.BatchNo;   
@@ -465,16 +494,44 @@ namespace DhanSutra
                             int? unitId = payload["unitid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["unitid"]);
                             int? gstId = payload["gstid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["gstid"]);
 
-                            bool updated = db.UpdateItem(itemId, name, itemCode, categoryId, date, description, unitId, gstId);
-
-                            var result = new
+                            Item itemforvalidation = new Item();
+                            itemforvalidation.Name = name;
+                            itemforvalidation.ItemCode = itemCode;
+                            itemforvalidation.CategoryId = categoryId ?? 0;
+                            if (DateTime.TryParse(date, out DateTime parsedDate))
                             {
-                                action = "updateItem",
-                                success = updated,
-                                message = updated ? "✅ Item updated successfully." : "⚠️ Item update failed."
-                            };
+                                itemforvalidation.Date = parsedDate;
+                            }
+                            itemforvalidation.Description = description;
+                            itemforvalidation.UnitId = unitId ?? 0;
+                            itemforvalidation.GstId = gstId ?? 0;
 
-                            webView.CoreWebView2.PostWebMessageAsJson(Newtonsoft.Json.JsonConvert.SerializeObject(result));
+                            var errors = db.ValidateItem(itemforvalidation);
+                            if (errors.Count > 0)
+                            {
+
+                                var response = new
+                                {
+                                    action = "updateItem",
+                                    success = false,
+                                    message = errors.ToString()
+                                };
+                            }
+                            else
+                            {
+
+                                bool updated = db.UpdateItem(itemId, name, itemCode, categoryId, date, description, unitId, gstId);
+
+                                var result = new
+                                {
+                                    action = "updateItem",
+                                    success = updated,
+                                    message = updated ? "✅ Item updated successfully." : "⚠️ Item update failed."
+                                };
+                                webView.CoreWebView2.PostWebMessageAsJson(Newtonsoft.Json.JsonConvert.SerializeObject(result));
+                            }
+
+                           
                             break;
                         }
                     case "GetItemList":
@@ -789,12 +846,36 @@ namespace DhanSutra
                                     webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(errResp));
                                     break;
                                 }
-                                
+
+
+                                                               
                                 // Convert to CreateInvoiceDto
                                 var dto = payload.ToObject<CreateInvoiceDto>();
+
+
+                                
                                 var Invoicedto = payload.ToObject<InvoiceDto>();
 
-                                var validationErrors = db.ValidateInvoice(Invoicedto);
+
+                                //InvoiceDto invoice = MapFromJson(msg.Payload);
+
+                                var errors = InvoiceValidator.Validate(Invoicedto);
+                                if (errors.Any())
+                                {
+                                    // send failure back to UI - use the same shape as client expects
+                                    var respvalidation = new
+                                    {
+                                        action = "CreateInvoiceResponse",
+                                        success = false,
+                                        errors = errors.Select(err => new { field = err.Field, message = err.Message }).ToList()
+                                    };
+                                    // stringify and post message back to webview
+                                    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(respvalidation));
+                                    return;
+                                }
+
+
+                                //var validationErrors = db.ValidateInvoice(Invoicedto);
                                 //if (validationErrors.Count > 0)
                                 //{
                                 //    SendMessage(new
@@ -834,19 +915,19 @@ namespace DhanSutra
                                 // ⭐ SINGLE CALL — does customer insert/update + invoice + items + next invoice no
                                 // ⭐ Now returns both invoiceId and invoiceNo
 
-                                if (validationErrors.Count > 0)
-                                {
+                                //if (validationErrors.Count > 0)
+                                //{
 
-                                    var errResp = new
-                                    {
-                                        action = "CreateInvoiceResponse",
-                                        success = false,
-                                        message = "Validation errors",
-                                        errors = validationErrors
-                                    };
-                                    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(errResp));
-                                    break;
-                                }
+                                //    var errResp = new
+                                //    {
+                                //        action = "CreateInvoiceResponse",
+                                //        success = false,
+                                //        message = "Validation errors",
+                                //        errors = validationErrors
+                                //    };
+                                //    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(errResp));
+                                //    break;
+                                //}
 
                                     var result = db.CreateInvoice(dto);
                                 long invoiceId = result.invoiceId;

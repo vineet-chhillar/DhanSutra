@@ -1,7 +1,10 @@
 ﻿using Dapper;
 using DhanSutra.Models;
+using DhanSutra.Validation;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using PdfSharpCore.Drawing;
+using PdfSharpCore.Pdf;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -13,8 +16,6 @@ using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using PdfSharpCore.Pdf;
-using PdfSharpCore.Drawing;
 
 namespace DhanSutra
 {
@@ -91,87 +92,100 @@ namespace DhanSutra
         {
             try
             {
-                // 🧾 Log what we are actually inserting (for debugging)
-                Console.WriteLine("📥 AddItem() received:");
+                // Debug log
+                Console.WriteLine("📥 AddItemDetails() received:");
                 Console.WriteLine(JsonConvert.SerializeObject(details, Formatting.Indented));
 
-                //using (var connection = new SQLiteConnection(_connectionString))
-                //{
-                    string sql = @"
+                // ---------------------------
+                // 🛑 STEP 1: Validate
+                // ---------------------------
+                var validationErrors = ValidateInventoryDetails(details);
+
+                if (validationErrors.Count > 0)
+                {
+                    // Log validation errors
+                    Console.WriteLine("❌ Validation failed:");
+                    foreach (var err in validationErrors)
+                    {
+                        Console.WriteLine(" - " + err);
+                    }
+
+                    // ❗ Since function must return bool → return false on validation failure
+                    return false;
+                }
+
+                // ---------------------------
+                // 🟢 STEP 2: Insert if valid
+                // ---------------------------
+                string sql = @"
             INSERT INTO ItemDetails 
                 (
-item_id,
-hsnCode, 
-batchNo,
-refno,
-[Date],
-quantity,
-purchasePrice,
-discountPercent,
-netPurchasePrice, 
-amount,
-salesPrice,
-mrp, 
-goodsOrServices,
-description, 
-mfgdate,
-expdate,
-modelno, 
-brand, 
-size,
-color,
-weight,
-dimension,
-createdby,
-createdat)
+                    item_id,
+                    hsnCode, 
+                    batchNo,
+                    refno,
+                    [Date],
+                    quantity,
+                    purchasePrice,
+                    discountPercent,
+                    netPurchasePrice, 
+                    amount,
+                    salesPrice,
+                    mrp, 
+                    goodsOrServices,
+                    description, 
+                    mfgdate,
+                    expdate,
+                    modelno, 
+                    brand, 
+                    size,
+                    color,
+                    weight,
+                    dimension,
+                    createdby,
+                    createdat
+                )
             VALUES 
                 (
-@Item_Id,
-@HsnCode,
-@BatchNo,
-@refno,
-@Date,
-@Quantity,
-@PurchasePrice,
-@DiscountPercent, 
-@NetPurchasePrice,
-@Amount,
-@SalesPrice,
-@Mrp,
-@GoodsOrServices,
-@Description, 
-@MfgDate,
-@ExpDate,
-@ModelNo,
-@Brand,
-@Size,
-@Color,
-@Weight,
-@Dimension,
-@CreatedBy,
-@CreatedAt);
-            ";
-                // ✅ Dapper executes inside the provided transaction
+                    @Item_Id,
+                    @HsnCode,
+                    @BatchNo,
+                    @refno,
+                    @Date,
+                    @Quantity,
+                    @PurchasePrice,
+                    @DiscountPercent, 
+                    @NetPurchasePrice,
+                    @Amount,
+                    @SalesPrice,
+                    @Mrp,
+                    @GoodsOrServices,
+                    @Description, 
+                    @MfgDate,
+                    @ExpDate,
+                    @ModelNo,
+                    @Brand,
+                    @Size,
+                    @Color,
+                    @Weight,
+                    @Dimension,
+                    @CreatedBy,
+                    @CreatedAt
+                );
+        ";
+
                 int rowsAffected = conn.Execute(sql, details, transaction: txn);
 
                 return rowsAffected > 0;
-                //using (var cmd = new SQLiteCommand(sql, conn, txn))
-                //{
-                //    // Dapper returns the number of rows affected
-                //    int rowsAffected = conn.Execute(sql, details);
-
-                //    // ✅ If at least one row was inserted successfully
-                //    return rowsAffected > 0;
-                //}
-                //}
             }
             catch (Exception ex)
             {
-                // ❌ Log the error and return false
                 Console.WriteLine("❌ Error inserting ItemDetails: " + ex.Message);
                 return false;
             }
         }
+
+
 
         public string GetItemNameById(int id)
         {
@@ -1727,35 +1741,271 @@ VALUES (@Name, @Phone, @State, @Address);";
                 ).ToList();
             }
         }
-        public List<string> ValidateInvoice(InvoiceDto invoice)
+        //public List<string> ValidateInvoice(InvoiceDto invoice)
+        //{
+        //    var errors = new List<string>();
+
+        //    // 🔵 1. Invoice Date - Mandatory
+        //    if (invoice.InvoiceDate == null)
+        //    {
+        //        errors.Add("Missing invoice date.");
+        //    }
+        //    else
+        //    {
+        //        // 🔵 Convert to DateOnly / DateTime depending on your type
+        //        DateTime date;
+
+        //        string dateText = invoice.InvoiceDate?.Trim();
+
+        //        if (string.IsNullOrWhiteSpace(dateText))
+        //        {
+        //            errors.Add("Invoice date is required.");
+        //            return errors;
+        //        }
+
+        //        // Try parsing as yyyy-MM-dd first (best for HTML <input type="date">)
+        //        if (!DateTime.TryParseExact(
+        //                dateText,
+        //                "yyyy-MM-dd",
+        //                System.Globalization.CultureInfo.InvariantCulture,
+        //                System.Globalization.DateTimeStyles.None,
+        //                out date))
+        //        {
+        //            // Fallback to normal parsing (2025-11-21T00:00:00 OR 11/21/2025, etc.)
+        //            if (!DateTime.TryParse(dateText, out date))
+        //            {
+        //                errors.Add("Invalid invoice date format.");
+        //                return errors;
+        //            }
+        //        }
+
+        //        // Now you can safely use `date`
+        //        date = date.Date;
+
+
+        //        // 🔵 2. Invalid Calendar Date
+        //        if (date.Year < 2000 || date.Year > 2100)
+        //            errors.Add("Invoice date year must be between 2000 and 2100.");
+
+        //        // 🔵 3. Future Date Not Allowed
+        //        if (date > DateTime.Today)
+        //            errors.Add("Invoice date cannot be in the future.");
+        //    }
+
+        //    //if (string.IsNullOrWhiteSpace(invoice.InvoiceNo))
+        //    //    errors.Add("Missing invoice number.");
+
+        //    //if (string.IsNullOrWhiteSpace(invoice.CustomerName))
+        //    //    errors.Add("Missing customer name.");
+
+        //    if (invoice.Items == null || invoice.Items.Count == 0)
+        //        errors.Add("No items found.");
+
+        //    foreach (var item in invoice.Items)
+        //    {
+        //        if (item.Qty <= 0)
+        //            errors.Add($"Item {item.ItemId}: Quantity must be > 0.");
+
+        //        if (item.Rate <= 0)
+        //            errors.Add($"Item {item.Rate}: Rate must be > 0.");
+
+        //        if (item.BatchNo=="")
+        //            errors.Add($"Item {item.BatchNo}: Batch can not be blank.");
+
+        //        if (item.HsnCode == "")
+        //            errors.Add($"Item {item.HsnCode}: HsnCode can not be blank.");
+
+        //        if (item.Qty <= 0)
+        //            errors.Add($"Item {item.Qty}: Qty can not be <=0.");
+
+
+        //        if (item.DiscountPercent < 0 || item.DiscountPercent > 100)
+        //        {
+        //            errors.Add($"Item {item.GstPercent}: Discount must be >= 0.");
+        //        }
+
+
+        //        if (item.GstPercent < 0)
+        //            errors.Add($"Item {item.GstPercent}: GstPercent must be >= 0.");
+                
+
+        //    }
+
+        //    return errors;
+        //}
+        public List<string> ValidateItem(Item item)
         {
             var errors = new List<string>();
 
-            if (invoice.InvoiceDate == null)
-                errors.Add("Missing invoice date.");
+            // Item Name
+            if (string.IsNullOrWhiteSpace(item.Name))
+                errors.Add("Item Name cannot be empty.");
 
-            if (string.IsNullOrWhiteSpace(invoice.InvoiceNo))
-                errors.Add("Missing invoice number.");
+            // Item Code
+            if (string.IsNullOrWhiteSpace(item.ItemCode))
+                errors.Add("Item Code cannot be empty.");
 
-            if (string.IsNullOrWhiteSpace(invoice.CustomerName))
-                errors.Add("Missing customer name.");
+            // Category
+            if (item.CategoryId <= 0)
+                errors.Add("Category must be selected.");
 
-            if (invoice.Items == null || invoice.Items.Count == 0)
-                errors.Add("No items found.");
-
-            foreach (var item in invoice.Items)
+            // Date
+            if (item.Date == null)
+                errors.Add("Date is required.");
+            else
             {
-                if (item.Qty <= 0)
-                    errors.Add($"Item {item.ItemId}: Quantity must be > 0.");
+                DateTime dt;
 
-                if (item.Rate <= 0)
-                    errors.Add($"Item {item.ItemId}: Rate must be > 0.");
+                if (item.Date is DateTime d) dt = d;
+                else errors.Add("Invalid date format.");
+
+                if (dt > DateTime.Today)
+                    errors.Add("Date cannot be in the future.");
+
+                if (dt.Year < 2000 || dt.Year > 2100)
+                    errors.Add("Date year must be between 2000 and 2100.");
             }
+
+            // Unit
+            if (item.UnitId <= 0)
+                errors.Add("Unit must be selected.");
+
+            // GST
+            if (item.GstId <= 0)
+                errors.Add("GST must be selected.");
+
+            // Description (optional)
+            if (!string.IsNullOrWhiteSpace(item.Description) &&
+                item.Description.Length > 300)
+                errors.Add("Description cannot exceed 300 characters.");
 
             return errors;
         }
 
-        
+        public List<string> ValidateInventoryDetails(ItemDetails details)
+        {
+            var errors = new List<string>();
+
+            // ---------- REQUIRED FIELDS ----------
+
+            // 1. HSN Code (required)
+            if (string.IsNullOrWhiteSpace(details.HsnCode))
+                errors.Add("HSN/SAC Code cannot be empty.");
+
+            // 2. Batch No (required)
+            if (string.IsNullOrWhiteSpace(details.BatchNo))
+                errors.Add("Batch Number cannot be empty.");
+
+            // 3. Ref/Invoice No (optional)
+            // Add only if you want it required
+            // if (string.IsNullOrWhiteSpace(details.RefNo))
+            //     errors.Add("Reference/Invoice Number cannot be empty.");
+
+            // 4. Date (required)
+            if (details.Date == null)
+                errors.Add("Date cannot be empty.");
+            else if (details.Date > DateTime.Today)
+                errors.Add("Date cannot be in the future.");
+
+            // 5. Quantity (required)
+            if (details.Quantity <= 0)
+                errors.Add("Quantity must be greater than 0.");
+
+            // 6. Purchase Price (required)
+            if (details.PurchasePrice <= 0)
+                errors.Add("Purchase Price must be greater than 0.");
+
+            // 7. Discount Percent (0–100 allowed)
+            if (details.DiscountPercent < 0 || details.DiscountPercent > 100)
+                errors.Add("Discount percent must be between 0 and 100.");
+
+            // 8. Net Purchase Price (computed, but still validate)
+            if (details.NetPurchasePrice < 0)
+                errors.Add("Net Purchase Price is invalid.");
+
+            // 9. Amount (computed)
+            if (details.Amount < 0)
+                errors.Add("Amount is invalid.");
+
+            // 10. Sales Price (optional but if present must be valid)
+            if (details.SalesPrice < 0)
+                errors.Add("Sales Price cannot be negative.");
+
+            // 11. MRP (optional)
+            if (details.Mrp < 0)
+                errors.Add("MRP cannot be negative.");
+
+            // 12. Goods/Services (Required)
+            if (string.IsNullOrWhiteSpace(details.GoodsOrServices))
+                errors.Add("Please select Goods/Services.");
+
+            // 13. Description (optional)
+            if (!string.IsNullOrWhiteSpace(details.Description) && details.Description.Length > 300)
+                errors.Add("Description cannot exceed 300 characters.");
+
+            // ---------- OPTIONAL FIELDS ----------
+
+            // ---------- MfgDate ----------
+            if (!string.IsNullOrWhiteSpace(details.MfgDate))
+            {
+                if (DateTime.TryParse(details.MfgDate, out DateTime mfgDate))
+                {
+                    if (mfgDate > DateTime.Today)
+                        errors.Add("Manufacturing Date cannot be in the future.");
+                }
+                else
+                {
+                    errors.Add("Manufacturing Date is invalid.");
+                }
+            }
+
+
+            // ---------- ExpDate ----------
+            if (!string.IsNullOrWhiteSpace(details.ExpDate))
+            {
+                // Try to parse ExpDate
+                if (DateTime.TryParse(details.ExpDate, out DateTime expDate))
+                {
+                    // 1. Cannot be in the past
+                    if (expDate < DateTime.Today)
+                        errors.Add("Expiry Date cannot be in the past.");
+
+                    // 2. Compare with MfgDate if present
+                    if (!string.IsNullOrWhiteSpace(details.MfgDate) &&
+                        DateTime.TryParse(details.MfgDate, out DateTime mfgDate))
+                    {
+                        if (expDate < mfgDate)
+                            errors.Add("Expiry Date cannot be earlier than Manufacturing Date.");
+                    }
+                }
+                else
+                {
+                    errors.Add("Expiry Date is invalid.");
+                }
+            }
+
+
+            if (!string.IsNullOrWhiteSpace(details.ModelNo) && details.ModelNo.Length > 100)
+                errors.Add("Model No cannot exceed 100 characters.");
+
+            if (!string.IsNullOrWhiteSpace(details.Brand) && details.Brand.Length > 100)
+                errors.Add("Brand cannot exceed 100 characters.");
+
+            if (!string.IsNullOrWhiteSpace(details.Size) && details.Size.Length > 50)
+                errors.Add("Size cannot exceed 50 characters.");
+
+            if (!string.IsNullOrWhiteSpace(details.Color) && details.Color.Length > 50)
+                errors.Add("Color cannot exceed 50 characters.");
+
+            if (!string.IsNullOrWhiteSpace(details.Weight) && details.Weight.Length > 50)
+                errors.Add("Weight cannot exceed 50 characters.");
+
+            if (!string.IsNullOrWhiteSpace(details.Dimension) && details.Dimension.Length > 100)
+                errors.Add("Dimension cannot exceed 100 characters.");
+
+            return errors;
+        }
+
 
 
 

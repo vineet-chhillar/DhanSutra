@@ -20,7 +20,7 @@ namespace DhanSutra.Models
         public int UnitId { get; set; }
         public string UnitName { get; set; }
         public int GstId { get; set; }
-        public decimal GstPercent { get; set; }
+        public string GstPercent { get; set; }
 
         public string CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }

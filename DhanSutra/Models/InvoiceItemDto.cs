@@ -8,6 +8,7 @@ namespace DhanSutra.Models
         public int Id { get; set; }
         public int InvoiceId { get; set; }
         public int ItemId { get; set; }
+        public string ItemName { get; set; }
         public string BatchNo { get; set; }
         public string HsnCode { get; set; }
         public decimal Qty { get; set; }
@@ -24,6 +25,10 @@ namespace DhanSutra.Models
         public decimal LineSubTotal { get; set; }
         public decimal LineTotal { get; set; }
 
+        // optional balances (may be null if backend doesn't supply)
+        public decimal AvailableStock { get; set; }
+        public decimal BalanceBatchWise { get; set; }
+
         /// <summary>
         /// Safe factory to build InvoiceItemDto from a JObject (payload). Tolerant to missing properties.
         /// </summary>
@@ -36,6 +41,7 @@ namespace DhanSutra.Models
             dto.InvoiceId = (int?)payload["InvoiceId"] ?? 0;
             dto.ItemId = (int?)payload["ItemId"] ?? 0;
             dto.BatchNo = (string)payload["BatchNo"];
+            dto.ItemName = (string)payload["ItemName"];
             dto.HsnCode = (string)payload["HsnCode"];
             dto.Qty = Convert.ToDecimal((double?)payload["Qty"] ?? 0d);
             dto.Rate = Convert.ToDecimal((double?)payload["Rate"] ?? 0d);
@@ -50,6 +56,8 @@ namespace DhanSutra.Models
             dto.IgstValue = Convert.ToDecimal((double?)payload["IgstValue"] ?? 0d);
             dto.LineSubTotal = Convert.ToDecimal((double?)payload["LineSubTotal"] ?? 0d);
             dto.LineTotal = Convert.ToDecimal((double?)payload["LineTotal"] ?? 0d);
+            dto.AvailableStock = Convert.ToDecimal((double?)payload["AvailableStock"] ?? 0d);
+            dto.BalanceBatchWise = Convert.ToDecimal((double?)payload["BalanceBatchWise"] ?? 0d);
 
             return dto;
         }
