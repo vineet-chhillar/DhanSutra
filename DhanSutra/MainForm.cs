@@ -1189,19 +1189,321 @@ namespace DhanSutra
                             };
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
-
                             
                         }
 
-                    
+                    case "LoadInvoiceForReturn":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            int invoiceId = payload["InvoiceId"].ToObject<int>();
+                            var inv = db.LoadInvoiceForReturn(invoiceId);
+
+                            var response = new
+                            {
+                                action = "LoadInvoiceForReturnResponse",
+                                type = "LoadInvoiceForReturnResponse",
+                                invoice = new
+                                {
+                                    inv.Id,
+                                    inv.InvoiceNo,
+                                    inv.CustomerId,
+                                    inv.CustomerName,
+                                    Items = inv.ReturnItems  // 🔥 IMPORTANT
+                                }
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+                        }
+
+                    case "SaveSalesReturn":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            var dto = payload.ToObject<SalesReturnDto>();
+
+                            var result = db.SaveSalesReturn(dto);
+
+                            var response = new
+                            {
+                                action = "SaveSalesReturnResponse",
+                                success = result.Success,
+                                returnId = result.ReturnId
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                          
+                        }
+                    case "SearchSalesReturns":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            var date = payload["Date"].ToObject<string>();
+                            var list = db.SearchSalesReturns(date);
+                            var response = new
+                            {
+                                action = "SearchSalesReturnsResponse",
+                                returns = list     // 🔥 must use "returns"
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+
+                           
+                        }
+                    case "LoadSalesReturnDetail":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+                            int id = payload["ReturnId"].ToObject<int>();
+                                                        
+                            var data = db.LoadSalesReturnDetail(id);
+                            var response = new
+                            {
+                                action = "LoadSalesReturnDetailResponse",
+                                returnData = data    // 🔥 must use "returns"
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                           
+                        }
+                    case "PrintSalesReturn":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long returnId = payload["ReturnId"]?.ToObject<long>() ?? 0;
+
+                            // 1) Load sales return from DB
+                            var sr = db.GetSalesReturn(returnId);
+
+                            // 2) Load company profile
+                            var company = db.GetCompanyProfileSR();
+
+                            // 3) Map to Pdf DTO
+                            var pdfSR = new DhanSutra.Pdf.SalesReturnLoadDto
+                            {
+                                Id = sr.Id,
+                                ReturnNo = sr.ReturnNo,
+                                ReturnNum = sr.ReturnNum,
+                                ReturnDate = sr.ReturnDate,
+                                InvoiceNo = sr.InvoiceNo,
+                                CustomerId = sr.CustomerId,
+                                CustomerName = sr.CustomerName,
+                                CustomerPhone = sr.CustomerPhone,
+                                CustomerState = sr.CustomerState,
+                                CustomerAddress = sr.CustomerAddress,
+                                SubTotal = sr.SubTotal,
+                                TotalTax = sr.TotalTax,
+                                TotalAmount = sr.TotalAmount,
+                                RoundOff = sr.RoundOff,
+                                Notes = sr.Notes,
+                                Items = sr.Items?.ConvertAll(x => new DhanSutra.Pdf.SalesReturnItemForPrintDto
+                                {
+                                    ItemId = x.ItemId,
+                                    BatchNo = x.BatchNo,
+                                    Qty = x.Qty,
+                                    Rate = x.Rate,
+                                    DiscountPercent = x.DiscountPercent,
+                                    GstPercent = x.GstPercent,
+                                    GstValue = x.GstValue,
+                                    CgstPercent = x.CgstPercent,
+                                    CgstValue = x.CgstValue,
+                                    SgstPercent = x.SgstPercent,
+                                    SgstValue = x.SgstValue,
+                                    IgstPercent = x.IgstPercent,
+                                    IgstValue = x.IgstValue,
+                                    LineSubTotal = x.LineSubTotal,
+                                    LineTotal = x.LineTotal
+                                })
+                            };
+
+                            // 4) PDF Doc
+                            var doc = new SalesReturnDocument(pdfSR, company);
+
+                            // 5) PDF path
+                            string pdfPath = Path.Combine(
+                                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                                "SalesReturns",
+                                "salesreturn-" + sr.ReturnNo + ".pdf"
+                            );
+
+                            Directory.CreateDirectory(Path.GetDirectoryName(pdfPath));
+
+                            QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+                            var bytes = doc.GeneratePdf();
+                            File.WriteAllBytes(pdfPath, bytes);
+
+                            // 6) Send path to frontend
+                            var response = new
+                            {
+                                action = "PrintSalesReturnResponse",
+                                success = true,
+                                pdfPath = pdfPath
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
 
 
+                    //case "loadInvoiceForReturnResponse":
+                    //    {
+                    //        var payload = req.Payload as JObject;
+                    //        if (payload == null) break;
+                    //        string invoiceNo = payload["invoiceNo"]?.ToObject<string>();
 
+                    //        var inv = db.GetInvoiceForReturn(invoiceNo);
+
+                    //        if (inv == null)
+                    //        {
+
+                    //            var responseError = new
+                    //            {
+                    //                action = "invoiceReturnLoadError",
+                    //                type = "invoiceReturnLoadError",
+                    //                message = "Invoice not found."
+                    //            };
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(responseError));
+                    //            break;
+                    //        }
+                    //        else
+                    //        { 
+
+                    //            var response = new
+                    //            {
+                    //                action = "loadInvoiceForReturnResponse",
+                    //                type = "loadInvoiceForReturnResponse",
+                    //                invoice = inv
+                    //            };
+
+                    //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //            break;
+                    //        }
+
+
+                    //    }
+                    case "SearchInvoicesForReturn":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+                            var date = payload["Date"]?.ToObject<string>();
+
+
+                            var list = db.SearchInvoicesForReturn(date);
+                            var response = new
+                            {
+                                action = "SearchInvoicesForReturnResponse",
+                                type = "SearchInvoicesForReturnResponse",
+                                invoices = list
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+
+                        }
+                        //            case "PrintSalesReturn":
+                        //                {
+                        //                    var payload = req.Payload as JObject;
+                        //                    if (payload == null) break;
+
+                        //                    int returnId = payload["ReturnId"]?.ToObject<int>() ?? 0;
+
+                        //                    // 1) Load Sales Return header + items from DB
+                        //                    var sr = db.GetSalesReturnHeader(returnId);
+                        //                    var items = db.GetSalesReturnItems(returnId);
+
+                        //                    // 2) Load company profile
+                        //                    var company = db.GetCompanyProfile();
+
+                        //                    // 3) Convert to PDF DTO
+                        //                    var pdfSalesReturn = new DhanSutra.Pdf.SalesReturnLoadDto
+                        //                    {
+                        //                        Id = sr.Id,
+                        //                        ReturnNo = sr.ReturnNo,
+                        //                        // FIX: Convert string to DateTime if sr.ReturnDate is string
+                        //                        ReturnDate = DateTime.TryParse(sr.ReturnDate, out var dt) ? dt : default(DateTime),
+                        //                        InvoiceNo = sr.InvoiceNo,
+                        //                        CustomerName = sr.CustomerName,
+                        //                        CustomerAddress = sr.CustomerAddress,
+                        //                        CustomerGstNo = sr.CustomerGstNo,
+                        //                        SubTotal = sr.SubTotal,
+                        //                        TotalTax = sr.TotalTax,
+                        //                        TotalAmount = sr.TotalAmount,
+                        //                        RoundOff = sr.RoundOff,
+                        //                        Notes = sr.Notes,
+                        //                        Items = items?.ConvertAll(x => new DhanSutra.Pdf.SalesReturnItemDto
+                        //                        {
+                        //                            ItemName = x.ItemName,
+                        //                            BatchNo = x.BatchNo,
+                        //                            Qty = x.Qty,
+                        //                            Rate = x.Rate,
+                        //                            DiscountPercent = x.DiscountPercent,
+                        //                            GstPercent = x.GstPercent,
+                        //                            GstValue = x.GstValue,
+                        //                            LineSubTotal = x.LineSubTotal,
+                        //                            LineTotal = x.LineTotal
+                        //                        })
+                        //                    };
+
+                        //                    // 4) Convert company
+                        //                    var pdfCompany = new DhanSutra.Pdf.CompanyProfileDto
+                        //                    {
+                        //                        CompanyName = company.CompanyName,
+                        //                        AddressLine1 = company.AddressLine1,
+                        //                        AddressLine2 = company.AddressLine2,
+                        //                        City = company.City,
+                        //                        State = company.State,
+                        //                        Pincode = company.Pincode,
+                        //                        GSTIN = company.GSTIN,
+                        //                        PAN = company.PAN,
+                        //                        Email = company.Email,
+                        //                        Phone = company.Phone,
+                        //                        BankName = company.BankName,
+                        //                        BankAccount = company.BankAccount,
+                        //                        IFSC = company.IFSC,
+                        //                        BranchName = company.BranchName,
+                        //                        Logo = company.Logo
+                        //                    };
+
+                        //                    // 5) Create PDF
+                        //                    QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+                        //                    var doc = new SalesReturnDocument(pdfSalesReturn, pdfCompany);
+                        //                    var bytes = doc.GeneratePdf();
+
+                        //                    // 6) File path
+                        //                    string pdfPath = Path.Combine(
+                        //                        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                        //                        "Invoices",
+                        //                        "sales-return-" + sr.ReturnNo + ".pdf"
+                        //                    );
+                        //                    Directory.CreateDirectory(Path.GetDirectoryName(pdfPath));
+                        //                    File.WriteAllBytes(pdfPath, bytes);
+
+                        //                    // 7) Send back path
+                        //                    var response = new
+                        //                    {
+                        //                        action = "PrintSalesReturnResponse",
+                        //                        success = true,
+                        //                        pdfPath = pdfPath
+                        //                    };
+
+                        //                    webView.CoreWebView2.PostWebMessageAsJson(
+                        //                        JsonConvert.SerializeObject(response)
+                        //                    );
+                        //                    break;
+                        //                }
+
+                                }
                 }
-            }
             catch (Exception ex)
             {
-                 webView.CoreWebView2.PostWebMessageAsString("Error: " + ex.Message);
+                webView.CoreWebView2.PostWebMessageAsString("Error: " + ex.Message);
             }
         }
         private void webView_Click(object sender, EventArgs e)

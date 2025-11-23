@@ -1,5 +1,6 @@
 ﻿using Dapper;
 using DhanSutra.Models;
+using DhanSutra.Pdf;
 using DhanSutra.Validation;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -1082,6 +1083,57 @@ LIMIT 1;", conn))
 
             return profile;
         }
+        public CompanyProfileSRDto GetCompanyProfileSR()
+        {
+            CompanyProfileSRDto profile = null;
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                string query = "SELECT * FROM CompanyProfile LIMIT 1";
+
+                using (var cmd = new SQLiteCommand(query, conn))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        profile = new CompanyProfileSRDto
+                        {
+                            Id = Convert.ToInt32(reader["Id"]),
+                            CompanyName = reader["CompanyName"]?.ToString(),
+                            AddressLine1 = reader["AddressLine1"]?.ToString(),
+                            AddressLine2 = reader["AddressLine2"]?.ToString(),
+                            City = reader["City"]?.ToString(),
+                            State = reader["State"]?.ToString(),
+                            Pincode = reader["Pincode"]?.ToString(),
+                            Country = reader["Country"]?.ToString(),
+
+                            GSTIN = reader["GSTIN"]?.ToString(),
+                            PAN = reader["PAN"]?.ToString(),
+
+                            Email = reader["Email"]?.ToString(),
+                            Phone = reader["Phone"]?.ToString(),
+
+                            BankName = reader["BankName"]?.ToString(),
+                            BankAccount = reader["BankAccount"]?.ToString(),
+                            IFSC = reader["IFSC"]?.ToString(),
+                            BranchName = reader["BranchName"]?.ToString(),
+
+                            InvoicePrefix = reader["InvoicePrefix"]?.ToString(),
+                            InvoiceStartNo = Convert.ToInt32(reader["InvoiceStartNo"]),
+                            CurrentInvoiceNo = Convert.ToInt32(reader["CurrentInvoiceNo"]),
+
+                            Logo = reader["Logo"] as byte[],
+
+                            CreatedBy = reader["CreatedBy"]?.ToString(),
+                            CreatedAt = reader["CreatedAt"]?.ToString()
+                        };
+                    }
+                }
+            }
+
+            return profile;
+        }
         public bool SaveCompanyProfile(CompanyProfile data)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -1478,14 +1530,14 @@ LIMIT 1;", conn))
         }
 
 
-        public InvoiceLoadDto GetInvoice(long invoiceId)
+        public Models.InvoiceLoadDto GetInvoice(long invoiceId)
         {
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
 
-                var dto = new InvoiceLoadDto();
-                dto.Items = new List<InvoiceItemDto>();
+                var dto = new Models.InvoiceLoadDto();
+                dto.Items = new List<Models.InvoiceItemDto>();
 
                 // 1️⃣ Load invoice header
                 using (var cmd = conn.CreateCommand())
@@ -1552,7 +1604,7 @@ LIMIT 1;", conn))
                     {
                         while (r.Read())
                         {
-                            var item = new InvoiceItemDto
+                            var item = new Models.InvoiceItemDto
                             {
                                 ItemId = r.GetInt32(0),
                                 BatchNo = r.IsDBNull(1) ? "" : r.GetString(1),
@@ -1586,6 +1638,276 @@ LIMIT 1;", conn))
                 return dto;
             }
         }
+
+        public Models.InvoiceLoadDto GetInvoiceForReturn(long invoiceId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                var dto = new Models.InvoiceLoadDto();
+                dto.Items = new List<Models.InvoiceItemDto>();
+
+                // 1️⃣ Load invoice header
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    Id,
+                    InvoiceNo, InvoiceNum,
+                    InvoiceDate,
+                    CompanyProfileId,
+
+                    CustomerId, CustomerName, CustomerPhone, CustomerState, CustomerAddress,
+
+                    SubTotal, TotalTax, TotalAmount, RoundOff
+                FROM Invoice
+                WHERE Id = @Id
+            ";
+                    cmd.Parameters.AddWithValue("@Id", invoiceId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read())
+                        {
+                            return null;  // invoice not found
+                        }
+
+                        dto.Id = r.GetInt64(0);
+                        dto.InvoiceNo = r.GetString(1);
+                        dto.InvoiceNum = r.GetInt32(2);
+                        dto.InvoiceDate = r.GetString(3);
+                        dto.CompanyProfileId = r.GetInt32(4);
+
+                        dto.CustomerId = r.IsDBNull(5) ? 0 : r.GetInt32(5);
+                        dto.CustomerName = r.IsDBNull(6) ? "" : r.GetString(6);
+                        dto.CustomerPhone = r.IsDBNull(7) ? "" : r.GetString(7);
+                        dto.CustomerState = r.IsDBNull(8) ? "" : r.GetString(8);
+                        dto.CustomerAddress = r.IsDBNull(9) ? "" : r.GetString(9);
+
+                        dto.SubTotal = r.GetDecimal(10);
+                        dto.TotalTax = r.GetDecimal(11);
+                        dto.TotalAmount = r.GetDecimal(12);
+                        dto.RoundOff = r.GetDecimal(13);
+                    }
+                }
+
+                // 2️⃣ Load invoice items
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+    ItemId,item.name BatchNo, HsnCode,
+    Qty, Rate, DiscountPercent,
+    GstPercent, GstValue,
+    CgstPercent, CgstValue,
+    SgstPercent, SgstValue,
+    IgstPercent, IgstValue,
+    LineSubTotal, LineTotal
+FROM InvoiceItems
+inner join item on item.id=invoiceitems.itemid
+WHERE InvoiceId =@Id
+            ";
+                    cmd.Parameters.AddWithValue("@Id", invoiceId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            var item = new Models.InvoiceItemDto
+                            {
+                                ItemId = r.GetInt32(0),
+                                BatchNo = r.IsDBNull(1) ? "" : r.GetString(1),
+                                ItemName = r.IsDBNull(2) ? "" : r.GetString(2),
+                                HsnCode = r.IsDBNull(3) ? "" : r.GetString(3),
+
+                                Qty = r.GetDecimal(4),
+                                Rate = r.GetDecimal(5),
+                                DiscountPercent = r.GetDecimal(6),
+
+                                GstPercent = r.GetDecimal(7),
+                                GstValue = r.GetDecimal(8),
+
+                                CgstPercent = r.GetDecimal(9),
+                                CgstValue = r.GetDecimal(10),
+
+                                SgstPercent = r.GetDecimal(11),
+                                SgstValue = r.GetDecimal(12),
+
+                                IgstPercent = r.GetDecimal(13),
+                                IgstValue = r.GetDecimal(14),
+
+                                LineSubTotal = r.GetDecimal(15),
+                                LineTotal = r.GetDecimal(16)
+                            };
+
+                            dto.Items.Add(item);
+                        }
+                    }
+                }
+
+                return dto;
+            }
+        }
+        public int GetNextSalesReturnNumber(SQLiteConnection conn, IDbTransaction tran)
+        {
+            // Fetch greatest number; if table is empty return 1
+            const string sql = @"SELECT IFNULL(MAX(ReturnNum), 0) FROM SalesReturn;";
+
+            int lastNum = conn.ExecuteScalar<int>(sql, transaction: tran);
+            return lastNum + 1;
+        }
+
+        public (bool Success, int ReturnId) SaveSalesReturn(SalesReturnDto dto)
+        {
+            var conn = new SQLiteConnection(_connectionString);
+            conn.Open();
+            using (var tran = conn.BeginTransaction())
+            {
+                try
+                {
+                    // Generate running number
+                    int nextNum = GetNextSalesReturnNumber(conn,tran);
+                    dto.ReturnNum = nextNum;
+                    dto.ReturnNo = $"SR-{nextNum:D4}";
+
+                    // Insert header
+                    string insertHeader = @"
+            INSERT INTO SalesReturn
+            (ReturnNo, ReturnNum, ReturnDate, InvoiceId, InvoiceNo, CustomerId,
+             SubTotal, TotalTax, TotalAmount, RoundOff, Notes, CreatedBy, CreatedAt)
+            VALUES
+            (@ReturnNo, @ReturnNum, @ReturnDate, @InvoiceId, @InvoiceNo, @CustomerId,
+             @SubTotal, @TotalTax, @TotalAmount, @RoundOff, @Notes, @CreatedBy, @CreatedAt);
+            SELECT last_insert_rowid();
+        ";
+
+                    int salesReturnId = conn.ExecuteScalar<int>(
+                        insertHeader,
+                        new
+                        {
+                            dto.ReturnNo,
+                            dto.ReturnNum,
+                            ReturnDate = dto.ReturnDate.ToString("yyyy-MM-dd"),
+                            dto.InvoiceId,
+                            dto.InvoiceNo,
+                            dto.CustomerId,
+                            dto.SubTotal,
+                            dto.TotalTax,
+                            dto.TotalAmount,
+                            dto.RoundOff,
+                            dto.Notes,
+                            dto.CreatedBy,
+                            CreatedAt = dto.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                        },
+                        transaction: tran
+                    );
+
+                    // Insert items
+                    string insertLine = @"
+            INSERT INTO SalesReturnItem
+            (SalesReturnId, InvoiceItemId, ItemId, BatchNo, Qty, Rate,
+             DiscountPercent,
+             GstPercent, GstValue, CgstPercent, CgstValue,
+             SgstPercent, SgstValue, IgstPercent, IgstValue,
+             LineSubTotal, LineTotal)
+            VALUES
+            (@SalesReturnId, @InvoiceItemId, @ItemId, @BatchNo, @Qty, @Rate,
+             @DiscountPercent,
+             @GstPercent, @GstValue, @CgstPercent, @CgstValue,
+             @SgstPercent, @SgstValue, @IgstPercent, @IgstValue,
+             @LineSubTotal, @LineTotal);
+        ";
+
+                    foreach (var item in dto.Items)
+                    {
+                        if (item.Qty <= 0) continue;
+
+                        conn.Execute(
+                            insertLine,
+                            new
+                            {
+                                SalesReturnId = salesReturnId,
+                                item.InvoiceItemId,
+                                item.ItemId,
+                                item.BatchNo,
+                                item.Qty,
+                                item.Rate,
+                                item.DiscountPercent,
+                                item.GstPercent,
+                                item.GstValue,
+                                item.CgstPercent,
+                                item.CgstValue,
+                                item.SgstPercent,
+                                item.SgstValue,
+                                item.IgstPercent,
+                                item.IgstValue,
+                                item.LineSubTotal,
+                                item.LineTotal
+                            },
+                            transaction: tran
+                        );
+
+                        // Increase ReturnedQty in InvoiceItems
+                        string updateReturned = @"
+                UPDATE InvoiceItems
+                SET ReturnedQty = ReturnedQty + @Qty
+                WHERE Id = @InvoiceItemId;
+            ";
+                        conn.Execute(updateReturned, new { item.Qty, item.InvoiceItemId }, transaction: tran);
+
+                        // Increment batch stock
+                        //UpdateBatchStock(item.ItemId, item.BatchNo, +item.Qty, tran);
+
+                        ItemLedger ledgerEntry = new ItemLedger();
+                        ledgerEntry.ItemId = item.ItemId;
+                        ledgerEntry.BatchNo = item.BatchNo; 
+                        ledgerEntry.Date = dto.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
+                        ledgerEntry.TxnType = "SALES RETURN";
+                        ledgerEntry.RefNo = dto.ReturnNo;
+                        ledgerEntry.Qty = item.Qty;
+                        ledgerEntry.Rate = item.Rate;
+                        ledgerEntry.DiscountPercent = item.DiscountPercent;
+                        decimal netRate = item.Rate - (item.Rate * item.DiscountPercent / 100);
+                        ledgerEntry.NetRate = netRate;
+                        ledgerEntry.TotalAmount = item.LineTotal;
+                        ledgerEntry.Remarks = "Sales Return";
+                        ledgerEntry.CreatedBy = dto.CreatedBy;
+                        AddItemLedger(ledgerEntry, conn, tran);
+                        UpdateItemBalance(ledgerEntry, conn, tran);
+
+                    }
+
+                    tran.Commit();
+                    return (true,salesReturnId);
+                }
+                catch
+                {
+                    tran.Rollback();
+                    return (false, 0);
+                    //throw;
+                }
+            }
+        }
+
+        public SalesReturnDto LoadSalesReturnDetail(int id)
+        {
+            var conn = new SQLiteConnection(_connectionString);
+            conn.Open();
+            var header = conn.QuerySingle<SalesReturnDto>(
+                "SELECT * FROM SalesReturn WHERE Id=@id", new { id });
+
+            var items = conn.Query<SalesReturnItemDto>(@"
+            SELECT SalesReturnItem.*,item.name as ItemName 
+FROM SalesReturnItem
+inner join item on item.id=SalesReturnItem.itemid
+WHERE SalesReturnId=@id",
+                new { id }).ToList();
+
+            header.Items = items;
+            return header;
+        }
+
 
         public List<CustomerDto> GetCustomers()
         {
@@ -1881,7 +2203,49 @@ VALUES (@Name, @Phone, @State, @Address);";
 
             return errors;
         }
+    //    public List<SalesReturnListItemDto> SearchSalesReturns(
+    //DateTime? fromDate,
+    //DateTime? toDate
+    //)
+    //    {
+    //        var conn = new SQLiteConnection(_connectionString);
+    //        var sql = @"
+    //    SELECT
+    //        sr.Id,
+    //        sr.ReturnNo,
+    //        sr.ReturnDate,
+    //        sr.InvoiceNo,
+    //        c.Name AS CustomerName,
+    //        sr.TotalAmount
+    //    FROM SalesReturn sr
+    //    JOIN Customers c ON c.Id = sr.CustomerId
+    //    WHERE 1 = 1
+    //";
 
+    //        var dyn = new DynamicParameters();
+
+    //        if (fromDate.HasValue)
+    //        {
+    //            sql += " AND date(sr.ReturnDate) >= date(@FromDate)";
+    //            dyn.Add("@FromDate", fromDate.Value.ToString("yyyy-MM-dd"));
+    //        }
+
+    //        if (toDate.HasValue)
+    //        {
+    //            sql += " AND date(sr.ReturnDate) <= date(@ToDate)";
+    //            dyn.Add("@ToDate", toDate.Value.ToString("yyyy-MM-dd"));
+    //        }
+
+    //        if (!string.IsNullOrWhiteSpace(searchText))
+    //        {
+    //            sql += " AND (sr.ReturnNo LIKE @Search OR sr.InvoiceNo LIKE @Search OR c.Name LIKE @Search)";
+    //            dyn.Add("@Search", "%" + searchText + "%");
+    //        }
+
+    //        sql += " ORDER BY date(sr.ReturnDate) DESC, sr.Id DESC";
+
+    //        return conn.Query<SalesReturnListItemDto>(sql, dyn).ToList();
+    //    }
         public List<string> ValidateInventoryDetails(ItemDetails details)
         {
             var errors = new List<string>();
@@ -2007,8 +2371,250 @@ VALUES (@Name, @Phone, @State, @Address);";
         }
 
 
+        public InvoiceForReturnDto LoadInvoiceForReturn(int invoiceId)
+        {
+            var conn = new SQLiteConnection(_connectionString);
+            var invoice = conn.QuerySingleOrDefault<InvoiceForReturnDto>(
+                "SELECT Id, InvoiceNo, CustomerId, CustomerName FROM Invoice WHERE Id=@id",
+                new { id = invoiceId });
+
+            var items = conn.Query<InvoiceReturnItemDto>(@"
+        SELECT 
+            ii.Id AS InvoiceItemId,
+            ii.ItemId,
+            it.name,
+            ii.BatchNo,
+            ii.Qty AS OriginalQty,
+            ii.Rate,
+            ii.DiscountPercent AS DiscountPercent,
+            ii.GstPercent AS GstPercent,
+            ii.CgstPercent AS CgstPercent,
+            ii.SgstPercent AS SgstPercent,
+            ii.IgstPercent AS IgstPercent,
+            ii.GstValue AS GstValue,
+            ii.LineTotal AS LineSubTotal,
+            ii.ReturnedQty,
+            (ii.Qty - ii.ReturnedQty) AS AvailableReturnQty
+        FROM InvoiceItems ii
+        JOIN Item it ON it.Id = ii.ItemId
+        WHERE InvoiceId = @id",
+                new { id = invoiceId }).ToList();
+
+            invoice.ReturnItems = items;
+            return invoice;
+        }
+
+        public List<SalesReturnSearchRowDto> SearchSalesReturns(string date)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                //DateTime d = DateTime.Parse(date);
+                //DateTime next = d.AddDays(1);
+
+                const string sql = @"
+        SELECT 
+            SalesReturn.Id,
+            ReturnNo,
+            ReturnDate,
+            InvoiceNo,
+            Customers.Name AS CustomerName,
+            TotalAmount
+        FROM SalesReturn
+        INNER JOIN Customers ON Customers.Id = SalesReturn.CustomerId
+        WHERE substr(ReturnDate, 1, 10) = @date
+        ORDER BY ReturnNo";
+
+                return conn.Query<SalesReturnSearchRowDto>(sql, new { date }).ToList();
+            }
+        }
 
 
+        public InvoiceForReturnDto GetInvoiceForReturn(string invoiceNo)
+        {
+            var conn = new SQLiteConnection(_connectionString);
+            const string invoiceSql = @"
+        SELECT inv.Id,
+               inv.InvoiceNo,
+               inv.CustomerId,
+               c.Name AS CustomerName
+        FROM Invoice inv
+        JOIN Customer c ON c.Id = inv.CustomerId
+        WHERE inv.InvoiceNo = @InvoiceNo;
+    ";
+
+            var invoice = conn.QuerySingleOrDefault<InvoiceForReturnDto>(
+                invoiceSql,
+                new { InvoiceNo = invoiceNo }
+            );
+
+            if (invoice == null)
+                return null;
+
+            const string itemsSql = @"
+        SELECT
+            ii.Id AS InvoiceItemId,
+            ii.ItemId,
+            it.Name AS ItemName,
+            ii.BatchNo,
+            ii.Qty AS OriginalQty,
+            IFNULL(ii.ReturnedQty, 0) AS ReturnedQty,
+            (ii.Qty - IFNULL(ii.ReturnedQty, 0)) AS AvailableReturnQty,
+            ii.Rate,
+            ii.DiscountPercent,
+            ii.GstPercent,
+            ii.CgstPercent,
+            ii.SgstPercent,
+            ii.IgstPercent
+        FROM InvoiceItems ii
+        JOIN Item it ON it.Id = ii.ItemId
+        WHERE ii.InvoiceId = @InvoiceId;
+    ";
+
+            invoice.ReturnItems = conn.Query<InvoiceReturnItemDto>(
+                itemsSql,
+                new { InvoiceId = invoice.Id }
+            ).ToList();
+
+            return invoice;
+        }
+
+
+        //    public SalesReturnPrintHeaderDto GetSalesReturnHeader(int id)
+        //    {
+        //        var conn = new SQLiteConnection(_connectionString);
+        //        const string sql = @"
+        //    SELECT
+        //        sr.Id,
+        //        sr.ReturnNo,
+        //        sr.ReturnNum,
+        //        sr.ReturnDate,
+        //        sr.InvoiceNo,
+        //        c.Name AS CustomerName,
+        //        c.Address AS CustomerAddress,
+        //        c.GstNo AS CustomerGstNo,
+        //        sr.SubTotal,
+        //        sr.TotalTax,
+        //        sr.TotalAmount,
+        //        sr.RoundOff,
+        //        sr.Notes
+        //    FROM SalesReturn sr
+        //    JOIN Customer c ON c.Id = sr.CustomerId
+        //    WHERE sr.Id = @Id;
+        //";
+
+        //        return conn.QuerySingleOrDefault<SalesReturnPrintHeaderDto>(sql, new { Id = id });
+        //    }
+        public SalesReturnLoadDto GetSalesReturn(long salesReturnId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // 1) Header + customer info
+                const string headerSql = @"
+        SELECT 
+            sr.Id,
+            sr.ReturnNo,
+            sr.ReturnNum,
+            sr.ReturnDate,
+            sr.InvoiceId,
+            sr.InvoiceNo,
+            sr.CustomerId,
+            c.Name        AS CustomerName,
+            c.Phone       AS CustomerPhone,
+            c.State       AS CustomerState,
+            c.Address     AS CustomerAddress,
+            sr.SubTotal,
+            sr.TotalTax,
+            sr.TotalAmount,
+            sr.RoundOff,
+            sr.Notes,
+            sr.CreatedBy,
+            sr.CreatedAt
+        FROM SalesReturn sr
+        LEFT JOIN Customers c ON c.Id = sr.CustomerId
+        WHERE sr.Id = @id;
+    ";
+
+                var header = conn.QuerySingleOrDefault<SalesReturnLoadDto>(headerSql, new { id = salesReturnId });
+                if (header == null)
+                    return null;
+
+                // 2) Items
+                const string itemsSql = @"
+        SELECT
+            InvoiceItemId,
+            ItemId,
+            BatchNo,
+            Qty,
+            Rate,
+            DiscountPercent,
+            GstPercent,
+            GstValue,
+            CgstPercent,
+            CgstValue,
+            SgstPercent,
+            SgstValue,
+            IgstPercent,
+            IgstValue,
+            LineSubTotal,
+            LineTotal
+        FROM SalesReturnItem
+        WHERE SalesReturnId = @id;
+    ";
+
+                var items = conn.Query<SalesReturnItemForPrintDto>(itemsSql, new { id = salesReturnId }).ToList();
+                header.Items = items;
+
+                return header;
+            }
+        }
+
+        public List<SalesReturnItemForPrintDto> GetSalesReturnItems(int id)
+        {
+            var conn = new SQLiteConnection(_connectionString);
+            const string sql = @"
+        SELECT
+            it.Name AS ItemName,
+            sri.BatchNo,
+            sri.Qty,
+            sri.Rate,
+            sri.DiscountPercent,
+            sri.LineSubTotal,
+            sri.GstPercent,
+            sri.GstValue,
+            sri.LineTotal
+        FROM SalesReturnItem sri
+        JOIN Item it ON it.Id = sri.ItemId
+        WHERE sri.SalesReturnId = @Id
+        ORDER BY sri.Id;
+    ";
+
+            return conn.Query<SalesReturnItemForPrintDto>(sql, new { Id = id }).ToList();
+        }
+        public List<InvoiceSearchRowDto> SearchInvoicesForReturn(string date)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+            conn.Open();
+
+            DateTime d = DateTime.Parse(date);
+            DateTime next = d.AddDays(1);
+
+            const string sql = @"
+        SELECT Id, InvoiceNo, InvoiceDate, CustomerName, TotalAmount
+        FROM Invoice
+        WHERE InvoiceDate >= @start AND InvoiceDate < @end
+        ORDER BY InvoiceNo";
+
+            return conn.Query<InvoiceSearchRowDto>(
+                sql,
+                new { start = d, end = next }
+            ).ToList();
+        }
+        }
     }
 
 }

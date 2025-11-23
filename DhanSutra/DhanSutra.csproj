@@ -264,14 +264,19 @@
     <Compile Include="Models\CustomerDto.cs" />
     <Compile Include="Models\GstMaster.cs" />
     <Compile Include="Models\InvoiceDto.cs" />
+    <Compile Include="Models\InvoiceForReturnDto.cs" />
     <Compile Include="Models\InvoiceFullDto.cs" />
     <Compile Include="Models\InvoiceItemDto.cs" />
     <Compile Include="Models\InvoiceLoadDto.cs" />
+    <Compile Include="Models\InvoiceSearchRowDto.cs" />
     <Compile Include="Models\Item.cs" />
     <Compile Include="Models\ItemBalance.cs" />
     <Compile Include="Models\ItemDetails.cs" />
     <Compile Include="Models\ItemForInvoice.cs" />
     <Compile Include="Models\ItemLedger.cs" />
+    <Compile Include="Models\SalesReturnDto.cs" />
+    <Compile Include="Pdf\SalesReturnDocument.cs" />
+    <Compile Include="Models\SalesReturnSearchRowDto.cs" />
     <Compile Include="Models\UnitMaster.cs" />
     <Compile Include="obj\Debug\.NETFramework,Version=v4.8.AssemblyAttributes.cs" />
     <Compile Include="Pdf\InvoiceDocument.cs" />
