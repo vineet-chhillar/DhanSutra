@@ -1326,25 +1326,26 @@ namespace DhanSutra
                             // 4) PDF Doc
                             var doc = new SalesReturnDocument(pdfSR, company);
 
-                            // 5) PDF path
-                            string pdfPath = Path.Combine(
-                                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                                "SalesReturns",
-                                "salesreturn-" + sr.ReturnNo + ".pdf"
-                            );
 
-                            Directory.CreateDirectory(Path.GetDirectoryName(pdfPath));
+                            var fileName = $"SalesReturn_{sr.ReturnNo}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+                            var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Invoices", fileName);
+
+                            Directory.CreateDirectory(Path.GetDirectoryName(filePath));
+
+                            
+
+                            
 
                             QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
                             var bytes = doc.GeneratePdf();
-                            File.WriteAllBytes(pdfPath, bytes);
+                            File.WriteAllBytes(filePath, bytes);
 
                             // 6) Send path to frontend
                             var response = new
                             {
                                 action = "PrintSalesReturnResponse",
                                 success = true,
-                                pdfPath = pdfPath
+                                pdfPath = filePath
                             };
 
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));

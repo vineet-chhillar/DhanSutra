@@ -2545,23 +2545,25 @@ VALUES (@Name, @Phone, @State, @Address);";
                 // 2) Items
                 const string itemsSql = @"
         SELECT
-            InvoiceItemId,
-            ItemId,
-            BatchNo,
-            Qty,
-            Rate,
-            DiscountPercent,
-            GstPercent,
-            GstValue,
-            CgstPercent,
-            CgstValue,
-            SgstPercent,
-            SgstValue,
-            IgstPercent,
-            IgstValue,
-            LineSubTotal,
-            LineTotal
-        FROM SalesReturnItem
+            sri.InvoiceItemId,
+            sri.ItemId,
+            it.Name AS ItemName,
+            sri.BatchNo,
+            sri.Qty,
+            sri.Rate,
+            sri.DiscountPercent,
+            sri.GstPercent,
+            sri.GstValue,
+            sri.CgstPercent,
+            sri.CgstValue,
+            sri.SgstPercent,
+            sri.SgstValue,
+            sri.IgstPercent,
+            sri.IgstValue,
+            sri.LineSubTotal,
+            sri.LineTotal
+         FROM SalesReturnItem sri
+        JOIN Item it ON it.Id = sri.ItemId
         WHERE SalesReturnId = @id;
     ";
 

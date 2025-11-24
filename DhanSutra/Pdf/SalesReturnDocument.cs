@@ -128,37 +128,48 @@ namespace DhanSutra.Pdf
                 });
             }
 
-            // ---------------- HEADER ----------------
-            private void ComposeHeader(IContainer container)
+        // ---------------- HEADER ----------------
+        private void ComposeHeader(IContainer container)
+        {
+            container.Column(col =>
             {
-                container.Row(row =>
+                // First Row: Company + Logo
+                col.Item().Row(row =>
                 {
-                    row.RelativeItem().Column(col =>
+                    row.RelativeItem().Column(c =>
                     {
-                        col.Item().Text(_company.CompanyName).SemiBold().FontSize(18);
-                        col.Item().Text(_company.AddressLine1);
+                        c.Item().Text(_company.CompanyName).SemiBold().FontSize(18);
+                        c.Item().Text(_company.AddressLine1);
                         if (!string.IsNullOrWhiteSpace(_company.AddressLine2))
-                            col.Item().Text(_company.AddressLine2);
-                        col.Item().Text($"{_company.City}, {_company.State} - {_company.Pincode}");
-                        col.Item().Text($"GSTIN: {_company.GSTIN}");
+                            c.Item().Text(_company.AddressLine2);
+                        c.Item().Text($"{_company.City}, {_company.State} - {_company.Pincode}");
+                        c.Item().Text($"GSTIN: {_company.GSTIN}");
                         if (!string.IsNullOrWhiteSpace(_company.Phone))
-                            col.Item().Text($"Phone: {_company.Phone}");
+                            c.Item().Text($"Phone: {_company.Phone}");
                     });
 
                     if (_company.Logo != null && _company.Logo.Length > 0)
                     {
                         row.ConstantItem(120)
-                            .Height(60)
-                            .Image(_company.Logo);
+                           .Height(60)
+                           .Image(_company.Logo);
                     }
                 });
 
-                container.PaddingTop(10).BorderBottom(1).PaddingBottom(5)
-                    .Text("SALES RETURN").SemiBold().FontSize(16).AlignCenter();
-            }
+                // Second Item: Title
+                col.Item()
+                    .PaddingTop(10)
+                    .BorderBottom(1)
+                    .PaddingBottom(5)
+                    .Text("SALES RETURN")
+                    .SemiBold().FontSize(16)
+                    .AlignCenter();
+            });
+        }
 
-            // ---------------- CONTENT ----------------
-            private void ComposeContent(IContainer container)
+
+        // ---------------- CONTENT ----------------
+        private void ComposeContent(IContainer container)
             {
                 container.PaddingTop(10).Column(col =>
                 {
@@ -205,45 +216,48 @@ namespace DhanSutra.Pdf
                 });
             }
 
-            // ---------------- ITEM TABLE ----------------
-            private void ComposeItemsTable(IContainer container)
+        // ---------------- ITEM TABLE ----------------
+        private void ComposeItemsTable(IContainer container)
+        {
+            container.Table(table =>
             {
-                container.Table(table =>
+                table.ColumnsDefinition(cols =>
                 {
-                    table.ColumnsDefinition(cols =>
-                    {
-                        cols.RelativeColumn(); // Item
-                        cols.RelativeColumn(0.9f); // Batch
-                        cols.RelativeColumn(0.7f); // Qty
-                        cols.RelativeColumn(0.8f); // Rate
-                        cols.RelativeColumn(0.7f); // GST%
-                        cols.RelativeColumn(0.9f); // Amount
-                    });
-
-                    // Header
-                    table.Header(header =>
-                    {
-                        header.Cell().Text("Item").SemiBold();
-                        header.Cell().Text("Batch").SemiBold();
-                        header.Cell().Text("Qty").SemiBold();
-                        header.Cell().Text("Rate").SemiBold();
-                        header.Cell().Text("GST%").SemiBold();
-                        header.Cell().Text("Amount").SemiBold();
-                    });
-
-                    // Rows
-                    foreach (var x in _sr.Items)
-                    {
-                        table.Cell().Text(x.ItemId.ToString()); // Change to itemName if needed
-                        table.Cell().Text(x.BatchNo);
-                        table.Cell().Text($"{x.Qty:0.##}");
-                        table.Cell().Text($"{x.Rate:0.##}");
-                        table.Cell().Text($"{x.GstPercent:0.##}");
-                        table.Cell().Text($"{x.LineTotal:0.00}");
-                    }
+                    cols.RelativeColumn();      // Item
+                    cols.RelativeColumn(0.9f);  // Batch
+                    cols.RelativeColumn(0.7f);  // Qty
+                    cols.RelativeColumn(0.8f);  // Rate
+                    cols.RelativeColumn(0.7f);  // GST%
+                    cols.RelativeColumn(0.9f);  // Amount
                 });
-            }
+
+                // Header row
+                table.Header(header =>
+                {
+                    header.Cell().Text("Item").SemiBold();
+                    header.Cell().Text("Batch").SemiBold();
+                    header.Cell().Text("Qty").SemiBold();
+                    header.Cell().Text("Rate").SemiBold();
+                    header.Cell().Text("GST%").SemiBold();
+                    header.Cell().Text("Amount").SemiBold();
+                });
+
+                // Data rows (FIXED)
+                foreach (var x in _sr.Items)
+                {
+                    table.Cell().Element(e => e.Text(x.ItemName));
+                    table.Cell().Element(e => e.Text(x.BatchNo));
+                    table.Cell().Element(e => e.Text($"{x.Qty:0.##}"));
+                    table.Cell().Element(e => e.Text($"{x.Rate:0.##}"));
+                    table.Cell().Element(e => e.Text($"{x.GstPercent:0.##}"));
+                    table.Cell().Element(e => e.Text($"{x.LineTotal:0.00}"));
+                }
+
+
+            });
         }
+
     }
+}
 
 
