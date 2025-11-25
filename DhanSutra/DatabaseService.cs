@@ -16,6 +16,7 @@ using System.Linq;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace DhanSutra
@@ -2617,6 +2618,238 @@ VALUES (@Name, @Phone, @State, @Address);";
             ).ToList();
         }
         }
+
+        public List<SupplierDto> SearchSuppliers(string keyword)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                var result = new List<SupplierDto>();
+                keyword = keyword ?? string.Empty;
+                string like = "%" + keyword + "%";
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+            SELECT SupplierId, SupplierName, ContactPerson, Mobile,
+                   Email, GSTIN, Address, City, Pincode,OpeningBalance,Balance,
+                   CreatedBy, CreatedAt
+            FROM Suppliers
+            WHERE (@kw = '' 
+                   OR SupplierName LIKE @like 
+                   OR Mobile LIKE @like 
+                   OR City LIKE @like 
+                   OR GSTIN LIKE @like)
+            ORDER BY SupplierName;
+        ";
+
+                    cmd.Parameters.AddWithValue("@kw", keyword);
+                    cmd.Parameters.AddWithValue("@like", like);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            result.Add(new SupplierDto
+                            {
+                                SupplierId = reader.GetInt64(0),
+                                SupplierName = reader.IsDBNull(1) ? null : reader.GetString(1),
+                                ContactPerson = reader.IsDBNull(2) ? null : reader.GetString(2),
+                                Mobile = reader.IsDBNull(3) ? null : reader.GetString(3),
+                                Email = reader.IsDBNull(4) ? null : reader.GetString(4),
+                                GSTIN = reader.IsDBNull(5) ? null : reader.GetString(5),
+                                Address = reader.IsDBNull(6) ? null : reader.GetString(6),
+                                City = reader.IsDBNull(7) ? null : reader.GetString(7),
+                                Pincode = reader.IsDBNull(8) ? null : reader.GetString(8),
+                                OpeningBalance = reader.IsDBNull(9) ? (double?)null : reader.GetDouble(9),
+                                Balance = reader.IsDBNull(10) ? (double?)null : reader.GetDouble(10),
+                                CreatedBy = reader.IsDBNull(9) ? null : reader.GetString(11),
+                                CreatedAt = reader.IsDBNull(10) ? null : reader.GetString(12)
+                            });
+                        }
+                    }
+                }
+                return result;
+            }
+            
+        }
+
+        public SupplierDto GetSupplier(long supplierId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+            SELECT SupplierId, SupplierName, ContactPerson, Mobile,
+                   Email, GSTIN, Address, City, Pincode,openingBalance,Balance,
+                   CreatedBy, CreatedAt
+            FROM Suppliers
+            WHERE SupplierId = @id;
+        ";
+
+                    cmd.Parameters.AddWithValue("@id", supplierId);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            return new SupplierDto
+                            {
+                                SupplierId = reader.GetInt64(0),
+                                SupplierName = reader.IsDBNull(1) ? null : reader.GetString(1),
+                                ContactPerson = reader.IsDBNull(2) ? null : reader.GetString(2),
+                                Mobile = reader.IsDBNull(3) ? null : reader.GetString(3),
+                                Email = reader.IsDBNull(4) ? null : reader.GetString(4),
+                                GSTIN = reader.IsDBNull(5) ? null : reader.GetString(5),
+                                Address = reader.IsDBNull(6) ? null : reader.GetString(6),
+                                City = reader.IsDBNull(7) ? null : reader.GetString(7),
+                                Pincode = reader.IsDBNull(8) ? null : reader.GetString(8),
+                                OpeningBalance = reader.IsDBNull(9) ? (double?)null : reader.GetDouble(9),
+                                Balance = reader.IsDBNull(10) ? (double?)null : reader.GetDouble(10),
+                                CreatedBy = reader.IsDBNull(11) ? null : reader.GetString(11),
+                                CreatedAt = reader.IsDBNull(12) ? null : reader.GetString(12)
+                            };
+                        }
+                    }
+                }
+
+                return null;
+            }
+        }
+        public long SaveSupplier(SupplierDto supplier)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                if (supplier == null) throw new ArgumentNullException(nameof(supplier));
+                //validation block starts
+                
+
+                // 👉 Mandatory validation
+                if (string.IsNullOrWhiteSpace(supplier.SupplierName))
+                    throw new Exception("Supplier Name is required.");
+
+                // 👉 Optional but safe validation checks
+                if (!string.IsNullOrWhiteSpace(supplier.Email))
+                {
+                    var emailPattern = @"^[^@\s]+@[^@\s]+\.[^@\s]+$";
+                    if (!Regex.IsMatch(supplier.Email, emailPattern))
+                        throw new Exception("Invalid Email format.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(supplier.Mobile))
+                {
+                    if (supplier.Mobile.Length != 10 || !supplier.Mobile.All(char.IsDigit))
+                        throw new Exception("Mobile number must be 10 digits.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(supplier.GSTIN))
+                {
+                    if (supplier.GSTIN.Length != 15)
+                        throw new Exception("GSTIN must be 15 characters.");
+                }
+
+                // 🛑 DO NOT trust Balance from UI — protect from tampering
+                if (supplier.SupplierId > 0)
+                {
+                    var dbSup = GetSupplier(supplier.SupplierId);
+                    if (dbSup != null)
+                        supplier.Balance = dbSup.Balance; // preserve original
+                }
+
+
+                //validation block ends
+
+
+
+                if (supplier.SupplierId == 0)
+                {
+                    // INSERT
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+    INSERT INTO Suppliers
+    (SupplierName, ContactPerson, Mobile, Email,
+     GSTIN, Address, City, Pincode,
+     OpeningBalance, Balance,
+     CreatedBy, CreatedAt)
+    VALUES
+    (@name, @cp, @mobile, @email,
+     @gstin, @addr, @city, @pincode,
+     @ob, @ob,
+     @cby, @cat);
+    SELECT last_insert_rowid();
+";
+                        cmd.Parameters.AddWithValue("@ob", supplier.OpeningBalance ?? 0);
+                        cmd.Parameters.AddWithValue("@name", supplier.SupplierName ?? "");
+                        cmd.Parameters.AddWithValue("@cp", supplier.ContactPerson ?? "");
+                        cmd.Parameters.AddWithValue("@mobile", supplier.Mobile ?? "");
+                        cmd.Parameters.AddWithValue("@email", supplier.Email ?? "");
+                        cmd.Parameters.AddWithValue("@gstin", supplier.GSTIN ?? "");
+                        cmd.Parameters.AddWithValue("@addr", supplier.Address ?? "");
+                        cmd.Parameters.AddWithValue("@city", supplier.City ?? "");
+                        cmd.Parameters.AddWithValue("@pincode", supplier.Pincode ?? "");
+                        cmd.Parameters.AddWithValue("@cby", supplier.CreatedBy ?? "");
+                        cmd.Parameters.AddWithValue("@cat", supplier.CreatedAt.ToString());
+
+                        var id = (long)(long)cmd.ExecuteScalar();
+                        supplier.SupplierId = id;
+                        return id;
+                    }
+                }
+                else
+                {
+                    // UPDATE (CreatedBy/CreatedAt unchanged)
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+    UPDATE Suppliers SET
+        SupplierName = @name,
+        ContactPerson = @cp,
+        Mobile = @mobile,
+        Email = @email,
+        GSTIN = @gstin,
+        Address = @addr,
+        City = @city,
+        Pincode = @pincode
+    WHERE SupplierId = @id;
+";
+
+                        cmd.Parameters.AddWithValue("@name", supplier.SupplierName ?? "");
+                        cmd.Parameters.AddWithValue("@cp", supplier.ContactPerson ?? "");
+                        cmd.Parameters.AddWithValue("@mobile", supplier.Mobile ?? "");
+                        cmd.Parameters.AddWithValue("@email", supplier.Email ?? "");
+                        cmd.Parameters.AddWithValue("@gstin", supplier.GSTIN ?? "");
+                        cmd.Parameters.AddWithValue("@addr", supplier.Address ?? "");
+                        cmd.Parameters.AddWithValue("@city", supplier.City ?? "");
+                        cmd.Parameters.AddWithValue("@pincode", supplier.Pincode ?? "");
+                        cmd.Parameters.AddWithValue("@id", supplier.SupplierId);
+
+                        cmd.ExecuteNonQuery();
+                        return supplier.SupplierId;
+                    }
+                }
+            }
+        }
+
+        public bool DeleteSupplier(long supplierId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"DELETE FROM Suppliers WHERE SupplierId = @id;";
+                    cmd.Parameters.AddWithValue("@id", supplierId);
+                    int rows = cmd.ExecuteNonQuery();
+                    return rows > 0;
+                }
+            }
+        }
+
+
     }
 
 }

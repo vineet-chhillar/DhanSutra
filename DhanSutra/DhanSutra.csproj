@@ -275,6 +275,7 @@
     <Compile Include="Models\ItemForInvoice.cs" />
     <Compile Include="Models\ItemLedger.cs" />
     <Compile Include="Models\SalesReturnDto.cs" />
+    <Compile Include="Models\SupplierDto.cs" />
     <Compile Include="Pdf\SalesReturnDocument.cs" />
     <Compile Include="Models\SalesReturnSearchRowDto.cs" />
     <Compile Include="Models\UnitMaster.cs" />
