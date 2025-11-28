@@ -11,6 +11,8 @@ namespace DhanSutra.Models
         public int Id { get; set; }
         public string Name { get; set; }
         public string ItemCode { get; set; }
+
+        public string HsnCode { get; set; }
         public int CategoryId { get; set; }
         public String CategoryName { get; set; }
 

@@ -2,6 +2,7 @@
 using DhanSutra.Models;
 using DhanSutra.Pdf;
 using DhanSutra.Validation;
+using Microsoft.Data.Sqlite;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PdfSharpCore.Drawing;
@@ -48,22 +49,28 @@ namespace DhanSutra
             Console.WriteLine("📂 Database path: " + dbFile);
 
 
-           
+
         }
 
         public IEnumerable<Item> GetItems()
         {
             using (var connection = new SQLiteConnection(_connectionString))
-                return connection.Query<Item>("SELECT i.Id, i.Name, i.ItemCode, c.CategoryName, \r\n      " +
+                return connection.Query<Item>("SELECT i.Id, i.Name, i.ItemCode,i.hsnCode, c.CategoryName, \r\n      " +
                     " u.UnitName, g.GstPercent, i.Description, i.[Date]\r\nFROM Item i\r\nLEFT JOIN CategoryMaster c" +
                     " ON i.CategoryId = c.Id\r\nLEFT JOIN UnitMaster u ON i.UnitId = u.Id\r\nLEFT JOIN GstMaster g ON i.GstId = g.Id;");
         }
         public IEnumerable<ItemForInvoice> GetItemsForInvoice()
         {
             using (var connection = new SQLiteConnection(_connectionString))
+                
                 return connection.Query<ItemForInvoice>("select i.Id, i.Name, i.ItemCode, d.batchno, \r\n      " +
-                    " d.hsncode, d.salesprice , u.unitname, g.gstpercent \r\nfrom itemdetails d\r\ninner join item i" +
+                    " i.hsncode, d.salesprice , u.unitname, g.gstpercent \r\nfrom itemdetails d\r\ninner join item i" +
                     " on i.id=d.item_id\r\nLEFT JOIN UnitMaster u ON i.UnitId = u.Id\r\nLEFT JOIN GstMaster g ON i.GstId = g.Id\r\n order by i.id;");
+        }
+        public IEnumerable<ItemForPurchaseInvoice> GetItemsForPurchaseInvoice()
+        {
+            using (var connection = new SQLiteConnection(_connectionString))
+                return connection.Query<ItemForPurchaseInvoice>("select i.id AS Id, i.Name, i.ItemCode, i.hsncode, u.unitname, g.gstpercent\r\nfrom item i LEFT JOIN UnitMaster u ON i.UnitId = u.Id LEFT JOIN GstMaster g ON i.GstId = g.Id order by i.id;");
         }
         public IEnumerable<ItemDetails> GetItemDetails(int itemId)
         {
@@ -71,7 +78,7 @@ namespace DhanSutra
             {
                 Console.Write(itemId.ToString());
                 return connection.Query<ItemDetails>(
-           "SELECT * FROM ItemDetails WHERE item_id = @ItemId",
+           "SELECT itemdetails.*,suppliers.suppliername as SupplierName FROM ItemDetails\r\nleft join suppliers on suppliers.supplierid=itemdetails.supplierid\r\nWHERE item_id = @ItemId\r\n",
            new { ItemId = itemId }
            );
             }
@@ -84,9 +91,9 @@ namespace DhanSutra
                 Console.WriteLine("📥 AddItem() received:");
                 Console.WriteLine(JsonConvert.SerializeObject(item, Formatting.Indented));
                 connection.Execute(
-                "INSERT INTO Item (name, itemcode, categoryid,[date], description, unitid, gstid,createdby,createdat) " +
+                "INSERT INTO Item (name, itemcode, hsnCode,categoryid,[date], description, unitid, gstid,createdby,createdat) " +
                 "VALUES" +
-                " (@Name, @ItemCode, @CategoryId,@Date, @Description, @UnitId, @GstId,@CreatedBy,@CreatedAt)", item);
+                " (@Name, @ItemCode,@HsnCode, @CategoryId,@Date, @Description, @UnitId, @GstId,@CreatedBy,@CreatedAt)", item);
             }
         }
 
@@ -123,7 +130,7 @@ namespace DhanSutra
             INSERT INTO ItemDetails 
                 (
                     item_id,
-                    hsnCode, 
+                     
                     batchNo,
                     refno,
                     [Date],
@@ -145,12 +152,12 @@ namespace DhanSutra
                     weight,
                     dimension,
                     createdby,
-                    createdat
+                    createdat,
+                    SupplierId
                 )
             VALUES 
                 (
                     @Item_Id,
-                    @HsnCode,
                     @BatchNo,
                     @refno,
                     @Date,
@@ -172,7 +179,8 @@ namespace DhanSutra
                     @Weight,
                     @Dimension,
                     @CreatedBy,
-                    @CreatedAt
+                    @CreatedAt,
+                    @SupplierId
                 );
         ";
 
@@ -385,6 +393,7 @@ namespace DhanSutra
                 i.id,
                 i.name,
                 i.itemcode,
+                i.hsnCode,
                 i.date,
                 i.description,
                 c.id as CategoryId,
@@ -424,6 +433,7 @@ namespace DhanSutra
                                 Id = reader["id"],
                                 Name = reader["name"],
                                 ItemCode = reader["itemcode"],
+                                HsnCode = reader["hsnCode"],
                                 Date = reader["date"],
                                 Description = reader["description"],
                                 CategoryId = reader["CategoryId"],
@@ -440,13 +450,14 @@ namespace DhanSutra
 
             return items;
         }
-        public bool UpdateItem(int id, string name, string itemCode, int? categoryId, string date, string description, int? unitId, int? gstId)
+        public bool UpdateItem(int id, string name, string itemCode, string hsncode, int? categoryId, string date, string description, int? unitId, int? gstId)
         {
             string sql = @"
         UPDATE Item
         SET 
             name = @name,
             itemcode = @itemCode,
+            hsnCode=@hsncode,
             categoryId = @categoryId,
             date = @date,
             description = @description,
@@ -464,6 +475,7 @@ namespace DhanSutra
                     cmd.Parameters.AddWithValue("@id", id);
                     cmd.Parameters.AddWithValue("@name", name);
                     cmd.Parameters.AddWithValue("@itemCode", itemCode);
+                    cmd.Parameters.AddWithValue("@hsncode", hsncode);
 
                     cmd.Parameters.Add("@date", System.Data.DbType.DateTime).Value = string.IsNullOrEmpty(date) ? (object)DBNull.Value : DateTime.Parse(date);
                     cmd.Parameters.AddWithValue("@description", description ?? (object)DBNull.Value);
@@ -516,31 +528,25 @@ namespace DhanSutra
 
                     string sql = @"
                 SELECT 
-                    Item_Id,
-                    HsnCode,
-                    BatchNo,
-                    refno,
-                    Date,
-                    Quantity,
-                    PurchasePrice,
-                    discountPercent,
-                    netPurchasePrice,
-                    amount,
-                    SalesPrice,
-                    Mrp,
-                    GoodsOrServices,
-                    Description,
-                    MfgDate,
-                    ExpDate,
-                    ModelNo,
-                    Brand,
-                    Size,
-                    Color,
-                    Weight,
-                    Dimension
-                FROM ItemDetails
-                WHERE 
-                     item_id=@query
+    Item_Id,    BatchNo,    refno,    Date,    Quantity,    PurchasePrice,    discountPercent,    netPurchasePrice,    amount,
+    SalesPrice,
+    Mrp,
+    GoodsOrServices,
+    Description,
+    MfgDate,
+    ExpDate,
+    ModelNo,
+    Brand,
+    Size,
+    Color,
+    Weight,
+    Dimension,
+    suppliers.suppliername,
+suppliers.supplierId
+FROM ItemDetails
+left join suppliers on suppliers.supplierid=itemdetails.supplierid
+WHERE 
+     item_id=@query
                      ORDER BY Date DESC;";
 
                     using (var cmd = new SQLiteCommand(sql, conn))
@@ -574,23 +580,22 @@ namespace DhanSutra
             return list;
         }
 
-        
+
         public bool UpdateInventoryRecord(
            SQLiteConnection conn,
            SQLiteTransaction tran,
-           string itemId, string batchNo, string refno, string hsnCode, string date,
+           string itemId, string batchNo, string refno, string date,
            string quantity, string purchasePrice, string discountPercent,
            string netpurchasePrice, string amount, string salesPrice, string mrp,
            string goodsOrServices, string description, string mfgDate, string expDate,
            string modelNo, string brand, string size, string color, string weight,
-           string dimension, string invbatchno)
+           string dimension, string invbatchno, int supplierid)
         {
             try
             {
                 string query = @"
             UPDATE ItemDetails
             SET 
-                hsnCode = @HsnCode,
                 batchNo = @BatchNo,
                 refno=@refno,
                 date = @Date,
@@ -610,14 +615,15 @@ namespace DhanSutra
                 size = @Size,
                 color = @Color,
                 weight = @Weight,
-                dimension = @Dimension
+                dimension = @Dimension,
+supplierid=@SupplierId
             WHERE item_Id = @ItemId 
               AND batchNo = @invbatchno;
         ";
 
                 using (var cmd = new SQLiteCommand(query, conn, tran))
                 {
-                    cmd.Parameters.AddWithValue("@HsnCode", hsnCode);
+
                     cmd.Parameters.AddWithValue("@Date", date);
                     cmd.Parameters.AddWithValue("@Quantity", quantity);
                     cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
@@ -641,6 +647,7 @@ namespace DhanSutra
                     cmd.Parameters.AddWithValue("@BatchNo", batchNo);
                     cmd.Parameters.AddWithValue("@refno", refno);
                     cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
+                    cmd.Parameters.AddWithValue("@SupplierId", supplierid);
 
                     int rows = cmd.ExecuteNonQuery();
                     return rows > 0;
@@ -653,7 +660,7 @@ namespace DhanSutra
             }
         }
 
-        
+
         public bool UpdateItemLedger(
        SQLiteConnection conn,
        SQLiteTransaction tran,
@@ -713,7 +720,7 @@ namespace DhanSutra
             }
         }
 
-        
+
         public bool UpdateItemBalanceForBatchNo(
     SQLiteConnection conn,
     SQLiteTransaction tran,
@@ -748,7 +755,7 @@ namespace DhanSutra
             }
         }
 
-       
+
         public JObject GetLastItemWithInventory()
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -830,13 +837,39 @@ LIMIT 1;", conn))
                 return false;
             }
         }
-        public bool DecreaseItemBalance(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
+        public bool UpdateItemBalanceSales(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
         {
             try
             {
-               
+                // 1️⃣ Insert or update batch-wise balance
+                string sql = @"
+        INSERT INTO ItemBalance (ItemId, BatchNo, CurrentQtyBatchWise, CurrentQty)
+        VALUES (@ItemId, @BatchNo, @Qty, @Qty)
+        ON CONFLICT(ItemId, BatchNo)
+        DO UPDATE SET 
+            CurrentQtyBatchWise = CurrentQtyBatchWise - excluded.CurrentQtyBatchWise,
+            LastUpdated = datetime('now','localtime');
+        ";
+
+                using (var cmd = new SQLiteCommand(sql, conn, txn))
+                {
+                    cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+                    cmd.Parameters.AddWithValue("@BatchNo", entry.BatchNo ?? "");
+                    cmd.Parameters.AddWithValue("@Qty", entry.Qty);
+                    cmd.ExecuteNonQuery();
+                }
+
+                // 2️⃣ Update total (CurrentQty) only for the latest record
                 string sqlTotal = @"
-        update itembalance set currentqty=currentqty-@Qty where itemid=@ItemId and id=(
+        UPDATE ItemBalance
+        SET 
+            CurrentQty = (
+                SELECT SUM(CurrentQtyBatchWise)
+                FROM ItemBalance AS sub
+                WHERE sub.ItemId = @ItemId
+            ),
+            LastUpdated = datetime('now','localtime')
+        WHERE Id = (
             SELECT MAX(Id)
             FROM ItemBalance
             WHERE ItemId = @ItemId
@@ -846,7 +879,6 @@ LIMIT 1;", conn))
                 using (var cmd = new SQLiteCommand(sqlTotal, conn, txn))
                 {
                     cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
-                    cmd.Parameters.AddWithValue("@Qty", entry.Qty);
                     cmd.ExecuteNonQuery();
                 }
 
@@ -855,10 +887,8 @@ LIMIT 1;", conn))
             }
             catch (Exception ex)
             {
-                txn.Rollback();
-                throw;
-                //Console.WriteLine("❌ Error in UpdateItemBalance: " + ex.Message);
-                //return false;
+                Console.WriteLine("❌ Error in UpdateItemBalance: " + ex.Message);
+                return false;
             }
         }
         public bool DecreaseItemBalanceBatchWise(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
@@ -889,7 +919,7 @@ LIMIT 1;", conn))
                 //return false;
             }
         }
-        
+
         public bool UpdateItemBalance_ForChangeInQuantity(
     SQLiteConnection conn,
     SQLiteTransaction tran,
@@ -952,7 +982,7 @@ LIMIT 1;", conn))
         }
 
 
-        
+
 
 
 
@@ -994,8 +1024,8 @@ LIMIT 1;", conn))
                 Console.WriteLine("❌ AddItemDetails failed: " + ex.Message);
                 return false;
             }
-           
-           // }
+
+            // }
         }
         public ItemBalance GetItemBalance(int itemId, string batchNo = null)
         {
@@ -1271,6 +1301,37 @@ LIMIT 1;", conn))
                 }
             }
         }
+        public bool DecreaseItemBalance(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            try
+            {
+
+                string sqlTotal = @"
+        update itembalance set currentqty=currentqty-@Qty where itemid=@ItemId and id=(
+            SELECT MAX(Id)
+            FROM ItemBalance
+            WHERE ItemId = @ItemId
+        );
+        ";
+
+                using (var cmd = new SQLiteCommand(sqlTotal, conn, txn))
+                {
+                    cmd.Parameters.AddWithValue("@ItemId", entry.ItemId);
+                    cmd.Parameters.AddWithValue("@Qty", entry.Qty);
+                    cmd.ExecuteNonQuery();
+                }
+
+                // ✅ If both SQL operations succeed
+                return true;
+            }
+            catch (Exception ex)
+            {
+                txn.Rollback();
+                throw;
+                //Console.WriteLine("❌ Error in UpdateItemBalance: " + ex.Message);
+                //return false;
+            }
+        }
         public (long invoiceId, string invoiceNo) CreateInvoice(CreateInvoiceDto dto)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -1482,20 +1543,20 @@ LIMIT 1;", conn))
                             ItemLedger ledgerEntry = new ItemLedger();
                             ledgerEntry.ItemId = item.ItemId;
                             ledgerEntry.BatchNo = item.BatchNo;
-                            ledgerEntry.Date = dto.InvoiceDate; 
+                            ledgerEntry.Date = dto.InvoiceDate;
                             ledgerEntry.TxnType = "SALE";
                             ledgerEntry.RefNo = fullInvoiceNo;
                             ledgerEntry.Qty = item.Qty;
                             ledgerEntry.Rate = item.Rate;
                             ledgerEntry.DiscountPercent = discountPercent;
-                            ledgerEntry.NetRate = netRate;  
+                            ledgerEntry.NetRate = netRate;
                             ledgerEntry.TotalAmount = lineTotal;
                             ledgerEntry.Remarks = "Invoice Sale";
                             ledgerEntry.CreatedBy = dto.CreatedBy;
 
                             AddItemLedger(ledgerEntry, conn, tx);
 
-                            
+
                             //UpdateItemBalance(ledgerEntry, conn, tx);
                             // Update balances
                             DecreaseItemBalance(ledgerEntry, conn, tx);
@@ -1768,7 +1829,7 @@ WHERE InvoiceId =@Id
                 try
                 {
                     // Generate running number
-                    int nextNum = GetNextSalesReturnNumber(conn,tran);
+                    int nextNum = GetNextSalesReturnNumber(conn, tran);
                     dto.ReturnNum = nextNum;
                     dto.ReturnNo = $"SR-{nextNum:D4}";
 
@@ -1862,7 +1923,7 @@ WHERE InvoiceId =@Id
 
                         ItemLedger ledgerEntry = new ItemLedger();
                         ledgerEntry.ItemId = item.ItemId;
-                        ledgerEntry.BatchNo = item.BatchNo; 
+                        ledgerEntry.BatchNo = item.BatchNo;
                         ledgerEntry.Date = dto.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
                         ledgerEntry.TxnType = "SALES RETURN";
                         ledgerEntry.RefNo = dto.ReturnNo;
@@ -1880,7 +1941,7 @@ WHERE InvoiceId =@Id
                     }
 
                     tran.Commit();
-                    return (true,salesReturnId);
+                    return (true, salesReturnId);
                 }
                 catch
                 {
@@ -2015,7 +2076,7 @@ VALUES (@Name, @Phone, @State, @Address);";
                     }
                 }
             }
-            
+
         }
         public void UpdateCurrentInvoiceNo(int newNo)
         {
@@ -2030,7 +2091,7 @@ VALUES (@Name, @Phone, @State, @Address);";
                     cmd.ExecuteNonQuery();
                 }
             }
-            }
+        }
         public int GetItemBalance(int itemId)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -2042,7 +2103,7 @@ VALUES (@Name, @Phone, @State, @Address);";
                 return r != null ? Convert.ToInt32(r) : 0;
             }
         }
-        public int GetItemBalanceBatchWise(int itemId,string batchno)
+        public int GetItemBalanceBatchWise(int itemId, string batchno)
         {
             using (var conn = new SQLiteConnection(_connectionString))
             {
@@ -2150,7 +2211,7 @@ VALUES (@Name, @Phone, @State, @Address);";
 
         //        if (item.GstPercent < 0)
         //            errors.Add($"Item {item.GstPercent}: GstPercent must be >= 0.");
-                
+
 
         //    }
 
@@ -2179,10 +2240,13 @@ VALUES (@Name, @Phone, @State, @Address);";
             {
                 DateTime dt;
 
-                if (item.Date is DateTime d) dt = d;
-                else errors.Add("Invalid date format.");
+                if (!DateTime.TryParse(item.Date.ToString(), out dt))
+                {
+                    errors.Add("Invalid date format.");
+                    return errors;
+                }
 
-                if (dt > DateTime.Today)
+                if (dt.Date > DateTime.Today)
                     errors.Add("Date cannot be in the future.");
 
                 if (dt.Year < 2000 || dt.Year > 2100)
@@ -2204,58 +2268,62 @@ VALUES (@Name, @Phone, @State, @Address);";
 
             return errors;
         }
-    //    public List<SalesReturnListItemDto> SearchSalesReturns(
-    //DateTime? fromDate,
-    //DateTime? toDate
-    //)
-    //    {
-    //        var conn = new SQLiteConnection(_connectionString);
-    //        var sql = @"
-    //    SELECT
-    //        sr.Id,
-    //        sr.ReturnNo,
-    //        sr.ReturnDate,
-    //        sr.InvoiceNo,
-    //        c.Name AS CustomerName,
-    //        sr.TotalAmount
-    //    FROM SalesReturn sr
-    //    JOIN Customers c ON c.Id = sr.CustomerId
-    //    WHERE 1 = 1
-    //";
+        //    public List<SalesReturnListItemDto> SearchSalesReturns(
+        //DateTime? fromDate,
+        //DateTime? toDate
+        //)
+        //    {
+        //        var conn = new SQLiteConnection(_connectionString);
+        //        var sql = @"
+        //    SELECT
+        //        sr.Id,
+        //        sr.ReturnNo,
+        //        sr.ReturnDate,
+        //        sr.InvoiceNo,
+        //        c.Name AS CustomerName,
+        //        sr.TotalAmount
+        //    FROM SalesReturn sr
+        //    JOIN Customers c ON c.Id = sr.CustomerId
+        //    WHERE 1 = 1
+        //";
 
-    //        var dyn = new DynamicParameters();
+        //        var dyn = new DynamicParameters();
 
-    //        if (fromDate.HasValue)
-    //        {
-    //            sql += " AND date(sr.ReturnDate) >= date(@FromDate)";
-    //            dyn.Add("@FromDate", fromDate.Value.ToString("yyyy-MM-dd"));
-    //        }
+        //        if (fromDate.HasValue)
+        //        {
+        //            sql += " AND date(sr.ReturnDate) >= date(@FromDate)";
+        //            dyn.Add("@FromDate", fromDate.Value.ToString("yyyy-MM-dd"));
+        //        }
 
-    //        if (toDate.HasValue)
-    //        {
-    //            sql += " AND date(sr.ReturnDate) <= date(@ToDate)";
-    //            dyn.Add("@ToDate", toDate.Value.ToString("yyyy-MM-dd"));
-    //        }
+        //        if (toDate.HasValue)
+        //        {
+        //            sql += " AND date(sr.ReturnDate) <= date(@ToDate)";
+        //            dyn.Add("@ToDate", toDate.Value.ToString("yyyy-MM-dd"));
+        //        }
 
-    //        if (!string.IsNullOrWhiteSpace(searchText))
-    //        {
-    //            sql += " AND (sr.ReturnNo LIKE @Search OR sr.InvoiceNo LIKE @Search OR c.Name LIKE @Search)";
-    //            dyn.Add("@Search", "%" + searchText + "%");
-    //        }
+        //        if (!string.IsNullOrWhiteSpace(searchText))
+        //        {
+        //            sql += " AND (sr.ReturnNo LIKE @Search OR sr.InvoiceNo LIKE @Search OR c.Name LIKE @Search)";
+        //            dyn.Add("@Search", "%" + searchText + "%");
+        //        }
 
-    //        sql += " ORDER BY date(sr.ReturnDate) DESC, sr.Id DESC";
+        //        sql += " ORDER BY date(sr.ReturnDate) DESC, sr.Id DESC";
 
-    //        return conn.Query<SalesReturnListItemDto>(sql, dyn).ToList();
-    //    }
+        //        return conn.Query<SalesReturnListItemDto>(sql, dyn).ToList();
+        //    }
         public List<string> ValidateInventoryDetails(ItemDetails details)
         {
             var errors = new List<string>();
 
             // ---------- REQUIRED FIELDS ----------
 
+            if (details.SupplierId == 0)
+                errors.Add("Select Supplier");
+
+
             // 1. HSN Code (required)
-            if (string.IsNullOrWhiteSpace(details.HsnCode))
-                errors.Add("HSN/SAC Code cannot be empty.");
+            //if (string.IsNullOrWhiteSpace(details.HsnCode))
+            //errors.Add("HSN/SAC Code cannot be empty.");
 
             // 2. Batch No (required)
             if (string.IsNullOrWhiteSpace(details.BatchNo))
@@ -2268,9 +2336,28 @@ VALUES (@Name, @Phone, @State, @Address);";
 
             // 4. Date (required)
             if (details.Date == null)
-                errors.Add("Date cannot be empty.");
-            else if (details.Date > DateTime.Today)
-                errors.Add("Date cannot be in the future.");
+            {
+                errors.Add("Date is required.");
+            }
+            else
+            {
+                DateTime dt;
+
+                // Convert string → DateTime
+                if (!DateTime.TryParse(details.Date.ToString(), out dt))
+                {
+                    errors.Add("Invalid date format.");
+                    return errors;
+                }
+
+                // NOW dt is a valid DateTime
+                if (dt.Date > DateTime.Today)
+                    errors.Add("Date cannot be in the future.");
+
+                if (dt.Year < 2000 || dt.Year > 2100)
+                    errors.Add("Date year must be between 2000 and 2100.");
+            }
+
 
             // 5. Quantity (required)
             if (details.Quantity <= 0)
@@ -2601,22 +2688,22 @@ VALUES (@Name, @Phone, @State, @Address);";
         {
             using (var conn = new SQLiteConnection(_connectionString))
             {
-            conn.Open();
+                conn.Open();
 
-            DateTime d = DateTime.Parse(date);
-            DateTime next = d.AddDays(1);
+                DateTime d = DateTime.Parse(date);
+                DateTime next = d.AddDays(1);
 
-            const string sql = @"
+                const string sql = @"
         SELECT Id, InvoiceNo, InvoiceDate, CustomerName, TotalAmount
         FROM Invoice
         WHERE InvoiceDate >= @start AND InvoiceDate < @end
         ORDER BY InvoiceNo";
 
-            return conn.Query<InvoiceSearchRowDto>(
-                sql,
-                new { start = d, end = next }
-            ).ToList();
-        }
+                return conn.Query<InvoiceSearchRowDto>(
+                    sql,
+                    new { start = d, end = next }
+                ).ToList();
+            }
         }
 
         public List<SupplierDto> SearchSuppliers(string keyword)
@@ -2633,7 +2720,7 @@ VALUES (@Name, @Phone, @State, @Address);";
                     cmd.CommandText = @"
             SELECT SupplierId, SupplierName, ContactPerson, Mobile,
                    Email, GSTIN, Address, City, Pincode,OpeningBalance,Balance,
-                   CreatedBy, CreatedAt
+                   CreatedBy, CreatedAt,state
             FROM Suppliers
             WHERE (@kw = '' 
                    OR SupplierName LIKE @like 
@@ -2661,17 +2748,18 @@ VALUES (@Name, @Phone, @State, @Address);";
                                 Address = reader.IsDBNull(6) ? null : reader.GetString(6),
                                 City = reader.IsDBNull(7) ? null : reader.GetString(7),
                                 Pincode = reader.IsDBNull(8) ? null : reader.GetString(8),
-                                OpeningBalance = reader.IsDBNull(9) ? (double?)null : reader.GetDouble(9),
-                                Balance = reader.IsDBNull(10) ? (double?)null : reader.GetDouble(10),
-                                CreatedBy = reader.IsDBNull(9) ? null : reader.GetString(11),
-                                CreatedAt = reader.IsDBNull(10) ? null : reader.GetString(12)
+                                OpeningBalance = reader.IsDBNull(9) ? (decimal?)null : reader.GetDecimal(9),
+                                Balance = reader.IsDBNull(10) ? (decimal?)null : reader.GetDecimal(10),
+                                CreatedBy = reader.IsDBNull(11) ? null : reader.GetString(11),
+                                CreatedAt = reader.IsDBNull(12) ? null : reader.GetString(12),
+                                State = reader.IsDBNull(13) ? null : reader.GetString(13)
                             });
                         }
                     }
                 }
                 return result;
             }
-            
+
         }
 
         public SupplierDto GetSupplier(long supplierId)
@@ -2684,7 +2772,7 @@ VALUES (@Name, @Phone, @State, @Address);";
                     cmd.CommandText = @"
             SELECT SupplierId, SupplierName, ContactPerson, Mobile,
                    Email, GSTIN, Address, City, Pincode,openingBalance,Balance,
-                   CreatedBy, CreatedAt
+                   CreatedBy, CreatedAt,state
             FROM Suppliers
             WHERE SupplierId = @id;
         ";
@@ -2706,10 +2794,11 @@ VALUES (@Name, @Phone, @State, @Address);";
                                 Address = reader.IsDBNull(6) ? null : reader.GetString(6),
                                 City = reader.IsDBNull(7) ? null : reader.GetString(7),
                                 Pincode = reader.IsDBNull(8) ? null : reader.GetString(8),
-                                OpeningBalance = reader.IsDBNull(9) ? (double?)null : reader.GetDouble(9),
-                                Balance = reader.IsDBNull(10) ? (double?)null : reader.GetDouble(10),
+                                OpeningBalance = reader.IsDBNull(9) ? (decimal?)null : reader.GetDecimal(9),
+                                Balance = reader.IsDBNull(10) ? (decimal?)null : reader.GetDecimal(10),
                                 CreatedBy = reader.IsDBNull(11) ? null : reader.GetString(11),
-                                CreatedAt = reader.IsDBNull(12) ? null : reader.GetString(12)
+                                CreatedAt = reader.IsDBNull(12) ? null : reader.GetString(12),
+                                State = reader.IsDBNull(13) ? null : reader.GetString(13)
                             };
                         }
                     }
@@ -2725,7 +2814,7 @@ VALUES (@Name, @Phone, @State, @Address);";
                 conn.Open();
                 if (supplier == null) throw new ArgumentNullException(nameof(supplier));
                 //validation block starts
-                
+
 
                 // 👉 Mandatory validation
                 if (string.IsNullOrWhiteSpace(supplier.SupplierName))
@@ -2758,7 +2847,27 @@ VALUES (@Name, @Phone, @State, @Address);";
                     if (dbSup != null)
                         supplier.Balance = dbSup.Balance; // preserve original
                 }
+                if (string.IsNullOrWhiteSpace(supplier.State))
+                {
+                    throw new Exception("State is required.");
+                }
 
+                // must be valid India state
+                string[] VALID_STATES = new[]
+                {
+    "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh",
+    "Goa","Gujarat","Haryana","Himachal Pradesh","Jharkhand","Karnataka",
+    "Kerala","Madhya Pradesh","Maharashtra","Manipur","Meghalaya","Mizoram",
+    "Nagaland","Odisha","Punjab","Rajasthan","Sikkim","Tamil Nadu","Telangana",
+    "Tripura","Uttar Pradesh","Uttarakhand","West Bengal","Delhi",
+    "Jammu & Kashmir","Ladakh","Puducherry","Andaman & Nicobar",
+    "Chandigarh","Dadra & Nagar Haveli","Daman & Diu","Lakshadweep"
+};
+
+                if (!VALID_STATES.Contains(supplier.State))
+                {
+                    throw new Exception("Invalid State selected.");
+                }
 
                 //validation block ends
 
@@ -2774,12 +2883,12 @@ VALUES (@Name, @Phone, @State, @Address);";
     (SupplierName, ContactPerson, Mobile, Email,
      GSTIN, Address, City, Pincode,
      OpeningBalance, Balance,
-     CreatedBy, CreatedAt)
+     CreatedBy, CreatedAt,state)
     VALUES
     (@name, @cp, @mobile, @email,
      @gstin, @addr, @city, @pincode,
      @ob, @ob,
-     @cby, @cat);
+     @cby, @cat,@state);
     SELECT last_insert_rowid();
 ";
                         cmd.Parameters.AddWithValue("@ob", supplier.OpeningBalance ?? 0);
@@ -2793,6 +2902,7 @@ VALUES (@Name, @Phone, @State, @Address);";
                         cmd.Parameters.AddWithValue("@pincode", supplier.Pincode ?? "");
                         cmd.Parameters.AddWithValue("@cby", supplier.CreatedBy ?? "");
                         cmd.Parameters.AddWithValue("@cat", supplier.CreatedAt.ToString());
+                        cmd.Parameters.AddWithValue("@state", supplier.State.ToString());
 
                         var id = (long)(long)cmd.ExecuteScalar();
                         supplier.SupplierId = id;
@@ -2813,7 +2923,8 @@ VALUES (@Name, @Phone, @State, @Address);";
         GSTIN = @gstin,
         Address = @addr,
         City = @city,
-        Pincode = @pincode
+        Pincode = @pincode,
+State=@state
     WHERE SupplierId = @id;
 ";
 
@@ -2825,6 +2936,7 @@ VALUES (@Name, @Phone, @State, @Address);";
                         cmd.Parameters.AddWithValue("@addr", supplier.Address ?? "");
                         cmd.Parameters.AddWithValue("@city", supplier.City ?? "");
                         cmd.Parameters.AddWithValue("@pincode", supplier.Pincode ?? "");
+                        cmd.Parameters.AddWithValue("@state", supplier.State ?? "");
                         cmd.Parameters.AddWithValue("@id", supplier.SupplierId);
 
                         cmd.ExecuteNonQuery();
@@ -2848,8 +2960,621 @@ VALUES (@Name, @Phone, @State, @Address);";
                 }
             }
         }
+        public SupplierDto GetSupplierById(long supplierId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            using (var cmd = conn.CreateCommand())
+            {
+                conn.Open();
+
+                cmd.CommandText = @"
+            SELECT SupplierId, SupplierName, ContactPerson, Mobile, Email,
+                   GSTIN, Address, City, State, Pincode,
+                   OpeningBalance, Balance
+            FROM Suppliers
+            WHERE SupplierId = @id";
+
+                cmd.Parameters.AddWithValue("@id", supplierId);
+
+                using (var r = cmd.ExecuteReader())
+                {
+                    if (r.Read())
+                    {
+                        return new SupplierDto
+                        {
+                            SupplierId = r.GetInt64(0),
+                            SupplierName = r.GetString(1),
+                            ContactPerson = r.IsDBNull(2) ? "" : r.GetString(2),
+                            Mobile = r.IsDBNull(3) ? "" : r.GetString(3),
+                            Email = r.IsDBNull(4) ? "" : r.GetString(4),
+                            GSTIN = r.IsDBNull(5) ? "" : r.GetString(5),
+                            Address = r.IsDBNull(6) ? "" : r.GetString(6),
+                            City = r.IsDBNull(7) ? "" : r.GetString(7),
+                            State = r.IsDBNull(8) ? "" : r.GetString(8),
+                            Pincode = r.IsDBNull(9) ? "" : r.GetString(9),
+                            OpeningBalance = r.IsDBNull(10) ? 0 : r.GetDecimal(10),
+                            Balance = r.IsDBNull(11) ? 0 : r.GetDecimal(11)
+                        };
+                    }
+                }
+
+                return null;
+            }
+        }
+
+        public List<SupplierDto> GetAllSuppliers()
+        {
+            var list = new List<SupplierDto>();
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                string sql = @"SELECT SupplierId, SupplierName FROM Suppliers ORDER BY SupplierName ASC";
+                using (var cmd = new SQLiteCommand(sql, conn))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        list.Add(new SupplierDto
+                        {
+                            SupplierId = reader.GetInt64(0),
+                            SupplierName = reader.GetString(1)
+                        });
+                    }
+                }
+            }
+            return list;
+        }
+        public List<PurchaseItemForDateDto> SearchPurchaseItemsByDate(DateTime date)
+        {
+            var list = new List<PurchaseItemForDateDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText =
+                    @"SELECT 
+            d.id AS ItemDetailsId,
+            d.item_id AS ItemId,
+            i.name AS ItemName,
+            d.refno AS InvoiceNo,
+            d.date AS PurchaseDate,
+            d.SupplierId,
+            s.suppliername AS SupplierName,
+            d.quantity
+          FROM ItemDetails d
+          JOIN Item i ON i.id = d.item_id
+          LEFT JOIN Suppliers s ON s.supplierId = d.SupplierId
+          WHERE DATE(d.date) = DATE(@date)
+          ORDER BY d.date, d.refno;";
+
+                    cmd.Parameters.AddWithValue("@date", date);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            list.Add(new PurchaseItemForDateDto
+                            {
+                                ItemDetailsId = reader.GetInt64(0),
+                                ItemId = reader.GetInt64(1),
+                                ItemName = reader.GetString(2),
+                                InvoiceNo = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                                PurchaseDate = reader.GetDateTime(4),
+                                SupplierId = reader.IsDBNull(5) ? 0 : reader.GetInt64(5),
+                                SupplierName = reader.IsDBNull(6) ? "" : reader.GetString(6),
+                                Quantity = reader.IsDBNull(7) ? 0 : Convert.ToDecimal(reader.GetValue(7))
+                            });
+                        }
+                    }
+                }
+
+                return list;
+            }
+        }
+        public PurchaseItemDetailDto LoadPurchaseForReturn(long itemDetailsId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText =
+                    @"SELECT 
+   d.id AS ItemDetailsId,
+   d.item_id AS ItemId,
+   i.name AS ItemName,
+   i.hsnCode,
+
+   d.batchNo,                  -- NEW
+   d.purchasePrice,
+   d.discountPercent,          -- NEW
+   d.netpurchasePrice,         -- NEW
+   d.quantity,
+
+   (SELECT IFNULL(SUM(r.returnQty),0)
+    FROM PurchaseReturn r
+    WHERE r.itemDetailsId = d.id) AS ReturnedQty,
+
+   d.refno,
+   d.date,
+   d.SupplierId,
+   s.suppliername AS SupplierName,
+   g.GstPercent
+FROM ItemDetails d
+JOIN Item i ON i.id = d.item_id
+LEFT JOIN Suppliers s ON s.supplierId = d.SupplierId
+LEFT JOIN GstMaster g ON g.Id = i.gstid
+WHERE d.id = @id;
+";
+
+                    cmd.Parameters.AddWithValue("@id", itemDetailsId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (r.Read())
+                        {
+                            return new PurchaseItemDetailDto
+                            {
+                                ItemDetailsId = r.GetInt64(0),
+                                ItemId = r.GetInt64(1),
+                                ItemName = r.GetString(2),
+                                HsnCode = r.IsDBNull(3) ? "" : r.GetString(3),
+                                BatchNo = r.IsDBNull(4) ? "" : r.GetString(4),
+                                PurchasePrice = Convert.ToDecimal(r.GetValue(5)),
+                                DiscountPercent = Convert.ToDecimal(r.GetValue(6)),
+                                NetPurchasePrice = Convert.ToDecimal(r.GetValue(7)),
+                                Quantity = Convert.ToDecimal(r.GetValue(8)),
+                                AlreadyReturnedQty = Convert.ToDecimal(r.GetValue(9)),
+                               
+                                InvoiceNo = r.IsDBNull(8) ? "" : r.GetString(10),
+                                PurchaseDate = r.GetDateTime(11),
+                                SupplierId = Convert.ToInt64(r.GetValue(12)),
+                                SupplierName = r.IsDBNull(11) ? "" : r.GetString(13),
+                                GstPercent = r.IsDBNull(12) ? 0 : Convert.ToDecimal(r.GetValue(14)),
+                                
+                            };
+                        }
+                    }
+                }
+
+                return null;
+            }
+        }
+        public PurchaseReturnResult SavePurchaseReturn(PurchaseReturnDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tran = conn.BeginTransaction())
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.Transaction = tran;
+
+                    // 1️⃣ Get next ReturnNum
+                    long nextNum;
+                    using (var cmdNum = conn.CreateCommand())
+                    {
+                        cmdNum.Transaction = tran;
+                        cmdNum.CommandText = "SELECT IFNULL(MAX(ReturnNum), 0) + 1 FROM PurchaseReturn";
+                        nextNum = Convert.ToInt64(cmdNum.ExecuteScalar());
+                    }
+
+                    string nextNo = $"PR/{nextNum}";
+
+                    // 2️⃣ Insert
+                    cmd.CommandText =
+                    @"INSERT INTO PurchaseReturn
+            (ReturnNo, ReturnNum, itemDetailsId, itemId, returnDate, returnQty,
+             rate, discountPercent, netrate, batchno, gstPercent,
+             amount, cgst, sgst, igst, totalAmount,
+             SupplierId, remarks, createdat, createdby)
+          VALUES
+            (@ReturnNo, @ReturnNum, @itemDetailsId, @itemId, @returnDate, @returnQty,
+             @rate, @discountPercent, @netrate, @batchno, @gstPercent,
+             @amount, @cgst, @sgst, @igst, @totalAmount,
+             @SupplierId, @remarks, DATETIME('now'), @createdBy);
+
+          SELECT last_insert_rowid();";
+
+                    cmd.Parameters.AddWithValue("@ReturnNo", nextNo);
+                    cmd.Parameters.AddWithValue("@ReturnNum", nextNum);
+                    cmd.Parameters.AddWithValue("@itemDetailsId", dto.ItemDetailsId);
+                    cmd.Parameters.AddWithValue("@itemId", dto.ItemId);
+                    cmd.Parameters.AddWithValue("@returnDate", dto.ReturnDate);
+                    cmd.Parameters.AddWithValue("@returnQty", dto.Qty);
+
+                    cmd.Parameters.AddWithValue("@rate", dto.Rate);
+                    cmd.Parameters.AddWithValue("@discountPercent", dto.DiscountPercent);
+                    cmd.Parameters.AddWithValue("@netrate", dto.NetRate);
+                    cmd.Parameters.AddWithValue("@batchno", dto.BatchNo ?? "");
+
+                    cmd.Parameters.AddWithValue("@gstPercent", dto.GstPercent);
+                    cmd.Parameters.AddWithValue("@amount", dto.Amount);
+                    cmd.Parameters.AddWithValue("@cgst", dto.Cgst);
+                    cmd.Parameters.AddWithValue("@sgst", dto.Sgst);
+                    cmd.Parameters.AddWithValue("@igst", dto.Igst);
+                    cmd.Parameters.AddWithValue("@totalAmount", dto.TotalAmount);
+
+                    cmd.Parameters.AddWithValue("@SupplierId", dto.SupplierId);
+                    cmd.Parameters.AddWithValue("@remarks", dto.Remarks ?? "");
+                    cmd.Parameters.AddWithValue("@createdBy", dto.CreatedBy ?? "");
+
+                    long newId = Convert.ToInt64(cmd.ExecuteScalar());
+                    ItemLedger ledgerEntry = new ItemLedger();
+                    ledgerEntry.ItemId = dto.ItemId;
+                    ledgerEntry.BatchNo = dto.BatchNo;
+                    ledgerEntry.Date = dto.ReturnDate.ToString("yyyy-MM-dd HH:mm:ss");
+                    ledgerEntry.TxnType = "Purchase Return";
+                    ledgerEntry.RefNo = dto.ReturnNo;
+                    ledgerEntry.Qty = dto.Qty;
+                    ledgerEntry.Rate = dto.Rate;
+                    ledgerEntry.DiscountPercent = dto.DiscountPercent;
+                    decimal netRate = dto.Rate - (dto.Rate * dto.DiscountPercent / 100);
+                    ledgerEntry.NetRate = netRate;
+                    ledgerEntry.TotalAmount = dto.TotalAmount;
+                    ledgerEntry.Remarks = "Purchase Return";
+                    ledgerEntry.CreatedBy = dto.CreatedBy;
+                    AddItemLedger(ledgerEntry, conn, tran);
+                    UpdateItemBalanceSales(ledgerEntry, conn, tran);
+                    tran.Commit();
+
+                    return new PurchaseReturnResult
+                    {
+                        ReturnId = newId,
+                        ReturnNum = nextNum,
+                        ReturnNo = nextNo
+                    };
+                }
+            }
+        }
+        public List<object> SearchPurchaseReturns(DateTime date)
+        {
+            var list = new List<object>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    // Use DATE(...) to compare only the date part
+                    cmd.CommandText = @"
+            SELECT 
+                pr.id AS ReturnId,
+                pr.ReturnNo,
+                pr.returnDate,
+                d.refno AS InvoiceNo,
+                COALESCE(s.supplierName, '') AS SupplierName,
+                pr.totalAmount
+            FROM PurchaseReturn pr
+            LEFT JOIN ItemDetails d ON pr.itemDetailsId = d.id
+            LEFT JOIN Suppliers s ON pr.SupplierId = s.supplierId
+            WHERE DATE(pr.returnDate) = DATE(@date)
+            ORDER BY pr.returnDate DESC, pr.id DESC;
+        ";
+
+                    cmd.Parameters.AddWithValue("@date", date);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            var id = reader.GetInt64(0);
+                            var returnNo = reader.IsDBNull(1) ? "" : reader.GetString(1);
+                            var dt = reader.IsDBNull(2) ? (DateTime?)null : reader.GetDateTime(2);
+                            var invoiceNo = reader.IsDBNull(3) ? "" : reader.GetString(3);
+                            var supplierName = reader.IsDBNull(4) ? "" : reader.GetString(4);
+                            var totalAmount = reader.IsDBNull(5) ? 0m : Convert.ToDecimal(reader.GetValue(5));
+
+                            list.Add(new
+                            {
+                                Id = id,
+                                ReturnNo = returnNo,
+                                ReturnDate = dt?.ToString("yyyy-MM-dd") ?? "",
+                                InvoiceNo = invoiceNo,
+                                SupplierName = supplierName,
+                                TotalAmount = totalAmount
+                            });
+                        }
+                    }
+                }
+
+                return list;
+            }
+        }
+
+        public object GetPurchaseReturnDetail(long returnId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    pr.id,
+                    pr.ReturnNo,
+                    pr.returnDate,
+                    d.refno AS InvoiceNo,
+                    s.supplierName AS SupplierName,
+                    pr.remarks,
+                    i.name AS ItemName,
+                    pr.batchNo,
+                    pr.returnQty,
+                    pr.Rate,
+                    pr.gstPercent,
+                    pr.cgst,
+                    pr.sgst,
+                    pr.amount,
+                    pr.totalAmount
+                FROM PurchaseReturn pr
+                LEFT JOIN ItemDetails d ON pr.itemDetailsId = d.id
+                LEFT JOIN Suppliers s ON pr.SupplierId = s.supplierId
+                LEFT JOIN Item i ON pr.itemId = i.id
+                WHERE pr.id = @id;
+            ";
+
+                    cmd.Parameters.AddWithValue("@id", returnId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read()) return null;
+
+                        decimal cgst = Convert.ToDecimal(r["cgst"]);
+                        decimal sgst = Convert.ToDecimal(r["sgst"]);
+
+                        return new
+                        {
+                            Id = r.GetInt64(0),
+                            ReturnNo = r.IsDBNull(1) ? "" : r.GetString(1),
+                            ReturnDate = r.IsDBNull(2) ? "" : r.GetDateTime(2).ToString("yyyy-MM-dd"),
+                            InvoiceNo = r.IsDBNull(3) ? "" : r.GetString(3),
+                            SupplierName = r.IsDBNull(4) ? "" : r.GetString(4),
+                            Notes = r.IsDBNull(5) ? "" : r.GetString(5),
+
+                            // item fields
+                            ItemName = r.IsDBNull(6) ? "" : r.GetString(6),
+                            BatchNo = r.IsDBNull(7) ? "" : r.GetString(7),
+                            Qty = Convert.ToDecimal(r["returnQty"]),
+                            Rate = Convert.ToDecimal(r["Rate"]),
+                            GstPercent = Convert.ToDecimal(r["gstPercent"]),
+                            GstValue = cgst + sgst,
+                            LineSubTotal = Convert.ToDecimal(r["amount"]),
+                            LineTotal = Convert.ToDecimal(r["totalAmount"])
+                        };
+                    }
+                }
+            }
+        }
+        public int GetNextBatchNumForItem(long itemId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT IFNULL(MAX(batchNum), 0) + 1 FROM PurchaseItem WHERE ItemId = @itemId";
+                    cmd.Parameters.AddWithValue("@itemId", itemId);
+                    var val = cmd.ExecuteScalar();
+                    return Convert.ToInt32(val);
+                }
+            }
+        }
+        public long SavePurchaseInvoice(PurchaseInvoiceDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            using (var tran = conn.BeginTransaction())
+            {
+                try
+                {
+                    // 1) Insert header
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tran;
+                        cmd.CommandText = @"
+INSERT INTO PurchaseHeader (InvoiceNo, InvoiceDate, SupplierId, TotalAmount, TotalTax, RoundOff, Notes, CreatedBy, CreatedAt)
+VALUES (@InvoiceNo, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax, @RoundOff, @Notes, @CreatedBy, DATETIME('now'));
+SELECT last_insert_rowid();
+";
+                        cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo ?? "");
+                        cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd"));
+                        cmd.Parameters.AddWithValue("@SupplierId", dto.SupplierId);
+                        cmd.Parameters.AddWithValue("@TotalAmount", dto.TotalAmount);
+                        cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
+                        cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
+                        cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
+                        cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy ?? "");
+
+                        long purchaseId = Convert.ToInt64(cmd.ExecuteScalar());
+
+                        // 2) For each item, insert PurchaseItem + PurchaseItemDetails
+                        foreach (var it in dto.Items)
+                        {
+                            // get next batchNum
+                            int nextBatchNum;
+                            using (var cmdBatch = conn.CreateCommand())
+                            {
+                                cmdBatch.Transaction = tran;
+                                cmdBatch.CommandText = "SELECT IFNULL(MAX(batchNum), 0) + 1 FROM PurchaseItem WHERE ItemId = @ItemId";
+                                cmdBatch.Parameters.AddWithValue("@ItemId", it.ItemId);
+                                nextBatchNum = Convert.ToInt32(cmdBatch.ExecuteScalar());
+                            }
+
+                            // get itemcode for formatting batchNo (ITEMCODE-B{n})
+                            string itemCode = "";
+                            using (var cmdItem = conn.CreateCommand())
+                            {
+                                cmdItem.Transaction = tran;
+                                cmdItem.CommandText = "SELECT itemcode FROM Item WHERE id = @ItemId LIMIT 1";
+                                cmdItem.Parameters.AddWithValue("@ItemId", it.ItemId);
+                                var o = cmdItem.ExecuteScalar();
+                                itemCode = o == null ? $"I{it.ItemId}" : o.ToString();
+                            }
+
+                            var batchNo = $"{itemCode}-B{nextBatchNum}";
+
+                            // Insert PurchaseItem
+                            using (var cmdIns = conn.CreateCommand())
+                            {
+                                cmdIns.Transaction = tran;
+                                cmdIns.CommandText = @"
+INSERT INTO PurchaseItem
+(PurchaseId, ItemId, batchNum, batchNo, Qty, Rate, DiscountPercent, NetRate, GstPercent, Cgst, Sgst, Igst, Amount, TotalAmount)
+VALUES
+(@PurchaseId, @ItemId, @batchNum, @batchNo, @Qty, @Rate, @DiscountPercent, @NetRate, @GstPercent, @Cgst, @Sgst, @Igst, @Amount, @TotalAmount);
+SELECT last_insert_rowid();
+";
+                                cmdIns.Parameters.AddWithValue("@PurchaseId", purchaseId);
+                                cmdIns.Parameters.AddWithValue("@ItemId", it.ItemId);
+                                cmdIns.Parameters.AddWithValue("@batchNum", nextBatchNum);
+                                cmdIns.Parameters.AddWithValue("@batchNo", batchNo);
+                                cmdIns.Parameters.AddWithValue("@Qty", it.Qty);
+                                cmdIns.Parameters.AddWithValue("@Rate", it.Rate);
+                                cmdIns.Parameters.AddWithValue("@DiscountPercent", it.DiscountPercent);
+                                cmdIns.Parameters.AddWithValue("@NetRate", it.NetRate);
+                                cmdIns.Parameters.AddWithValue("@GstPercent", it.GstPercent);
+                                cmdIns.Parameters.AddWithValue("@Cgst", it.Cgst);
+                                cmdIns.Parameters.AddWithValue("@Sgst", it.Sgst);
+                                cmdIns.Parameters.AddWithValue("@Igst", it.Igst);
+                                cmdIns.Parameters.AddWithValue("@Amount", it.Amount);
+                                cmdIns.Parameters.AddWithValue("@TotalAmount", it.TotalAmount);
+
+                                long purchaseItemId = Convert.ToInt64(cmdIns.ExecuteScalar());
+
+                                // 3) Insert PurchaseItemDetails if optional metadata provided
+                                if (it.SalesPrice.HasValue || it.Mrp.HasValue || !string.IsNullOrEmpty(it.Description))
+                                {
+                                    using (var cmdDet = conn.CreateCommand())
+                                    {
+                                        cmdDet.Transaction = tran;
+                                        cmdDet.CommandText = @"
+INSERT INTO PurchaseItemDetails
+(PurchaseItemId, salesPrice, mrp, description, mfgdate, expdate, modelno, brand, size, color, weight, dimension, createdby, createdat)
+VALUES
+(@PurchaseItemId, @SalesPrice, @Mrp, @Description, @MfgDate, @ExpDate, @ModelNo, @Brand, @Size, @Color, @Weight, @Dimension, @CreatedBy, DATETIME('now'));
+";
+                                        cmdDet.Parameters.AddWithValue("@PurchaseItemId", purchaseItemId);
+                                        cmdDet.Parameters.AddWithValue("@SalesPrice", (object)it.SalesPrice ?? DBNull.Value);
+                                        cmdDet.Parameters.AddWithValue("@Mrp", (object)it.Mrp ?? DBNull.Value);
+                                        cmdDet.Parameters.AddWithValue("@Description", it.Description ?? "");
+                                        cmdDet.Parameters.AddWithValue("@MfgDate", it.MfgDate ?? "");
+                                        cmdDet.Parameters.AddWithValue("@ExpDate", it.ExpDate ?? "");
+                                        cmdDet.Parameters.AddWithValue("@ModelNo", it.ModelNo ?? "");
+                                        cmdDet.Parameters.AddWithValue("@Brand", it.Brand ?? "");
+                                        cmdDet.Parameters.AddWithValue("@Size", it.Size ?? "");
+                                        cmdDet.Parameters.AddWithValue("@Color", it.Color ?? "");
+                                        cmdDet.Parameters.AddWithValue("@Weight", (object)it.Weight ?? DBNull.Value);
+                                        cmdDet.Parameters.AddWithValue("@Dimension", it.Dimension ?? "");
+                                        cmdDet.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy ?? "");
+                                        cmdDet.ExecuteNonQuery();
+                                    }
+                                } // end insert details
+                            } // end insert purchaseitem
+                        } // end foreach item
+
+                        tran.Commit();
+                        return purchaseId;
+                    } // end using cmd header
+                }
+                catch
+                {
+                    tran.Rollback();
+                    throw;
+                }
+            }
+        }
+        public object GetPurchaseInvoice(long purchaseId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                // header
+                object header = null;
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT PurchaseId, InvoiceNo, InvoiceDate, SupplierId, TotalAmount, TotalTax, RoundOff, Notes, CreatedBy, CreatedAt
+FROM PurchaseHeader WHERE PurchaseId = @id
+";
+                    cmd.Parameters.AddWithValue("@id", purchaseId);
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (r.Read())
+                        {
+                            header = new
+                            {
+                                PurchaseId = r.GetInt64(0),
+                                InvoiceNo = r.IsDBNull(1) ? "" : r.GetString(1),
+                                InvoiceDate = r.IsDBNull(2) ? "" : r.GetDateTime(2).ToString("yyyy-MM-dd"),
+                                SupplierId = r.GetInt64(3),
+                                TotalAmount = r.IsDBNull(4) ? 0m : Convert.ToDecimal(r.GetValue(4)),
+                                TotalTax = r.IsDBNull(5) ? 0m : Convert.ToDecimal(r.GetValue(5)),
+                                RoundOff = r.IsDBNull(6) ? 0m : Convert.ToDecimal(r.GetValue(6)),
+                                Notes = r.IsDBNull(7) ? "" : r.GetString(7),
+                                CreatedBy = r.IsDBNull(8) ? "" : r.GetString(8),
+                                CreatedAt = r.IsDBNull(9) ? "" : r.GetDateTime(9).ToString("yyyy-MM-ddTHH:mm:ss")
+                            };
+                        }
+                        else return null;
+                    }
+                }
+
+                // items
+                var items = new List<object>();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT pi.PurchaseItemId, pi.ItemId, it.name AS ItemName, pi.batchNum, pi.batchNo, pi.Qty, pi.Rate, pi.DiscountPercent,
+       pi.NetRate, pi.GstPercent, pi.Cgst, pi.Sgst, pi.Igst, pi.Amount, pi.TotalAmount
+FROM PurchaseItem pi
+LEFT JOIN Item it ON pi.ItemId = it.id
+WHERE pi.PurchaseId = @id
+ORDER BY pi.PurchaseItemId
+";
+                    cmd.Parameters.AddWithValue("@id", purchaseId);
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            items.Add(new
+                            {
+                                PurchaseItemId = r.GetInt64(0),
+                                ItemId = r.GetInt64(1),
+                                ItemName = r.IsDBNull(2) ? "" : r.GetString(2),
+                                BatchNum = r.IsDBNull(3) ? 0 : r.GetInt32(3),
+                                BatchNo = r.IsDBNull(4) ? "" : r.GetString(4),
+                                Qty = Convert.ToDecimal(r["Qty"]),
+                                Rate = Convert.ToDecimal(r["Rate"]),
+                                DiscountPercent = Convert.ToDecimal(r["DiscountPercent"]),
+                                NetRate = Convert.ToDecimal(r["NetRate"]),
+                                GstPercent = Convert.ToDecimal(r["GstPercent"]),
+                                Cgst = Convert.ToDecimal(r["Cgst"]),
+                                Sgst = Convert.ToDecimal(r["Sgst"]),
+                                Igst = Convert.ToDecimal(r["Igst"]),
+                                Amount = Convert.ToDecimal(r["Amount"]),
+                                TotalAmount = Convert.ToDecimal(r["TotalAmount"])
+                            });
+                        }
+                    }
+                }
+
+                return new { Header = header, Items = items };
+            }
+        }
 
 
+
+
+        private long GetNextPurchaseReturnNumber(SqliteConnection conn, SqliteTransaction tran)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tran;
+                cmd.CommandText = "SELECT IFNULL(MAX(ReturnNum), 0) + 1 FROM PurchaseReturn";
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
     }
 
 }

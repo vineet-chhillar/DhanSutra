@@ -273,7 +273,13 @@
     <Compile Include="Models\ItemBalance.cs" />
     <Compile Include="Models\ItemDetails.cs" />
     <Compile Include="Models\ItemForInvoice.cs" />
+    <Compile Include="Models\ItemForPurchaseInvoice.cs" />
     <Compile Include="Models\ItemLedger.cs" />
+    <Compile Include="Models\PurchaseInvoiceDto.cs" />
+    <Compile Include="Models\PurchaseItemDetailDto.cs" />
+    <Compile Include="Models\PurchaseItemForDateDto.cs" />
+    <Compile Include="Models\PurchaseReturnDto.cs" />
+    <Compile Include="Models\PurchaseReturnResult.cs" />
     <Compile Include="Models\SalesReturnDto.cs" />
     <Compile Include="Models\SupplierDto.cs" />
     <Compile Include="Pdf\SalesReturnDocument.cs" />

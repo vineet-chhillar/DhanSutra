@@ -281,6 +281,33 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(error));
                         }
                         break;
+                    case "GetItemsForPurchaseInvoice":
+                        try
+                        {
+                            var items = db.GetItemsForPurchaseInvoice();
+
+                            var response = new
+                            {
+                                Type = "GetItemsForPurchaseInvoice",
+                                Status = "Success",
+                                Message = "Fetched all items successfully",
+                                Data = items
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
+                        }
+                        catch (Exception ex)
+                        {
+                            var error = new
+                            {
+                                Type = "GetItemsForInvoice",
+                                Status = "Error",
+                                Message = ex.Message
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(error));
+                        }
+                        break;
                     case "GetItemNameById":
                         {
                             var payload = (JObject)req.Payload;
@@ -489,6 +516,7 @@ namespace DhanSutra
                             int itemId = Convert.ToInt32(payload["id"]);
                             string name = payload["name"]?.ToString();
                             string itemCode = payload["itemcode"]?.ToString();
+                            string hsnCode = payload["hsncode"]?.ToString();
                             int? categoryId = payload["categoryid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["categoryid"]);
                             string date = payload["date"]?.ToString();
                             string description = payload["description"]?.ToString();
@@ -521,7 +549,7 @@ namespace DhanSutra
                             else
                             {
 
-                                bool updated = db.UpdateItem(itemId, name, itemCode, categoryId, date, description, unitId, gstId);
+                                bool updated = db.UpdateItem(itemId, name, itemCode,hsnCode, categoryId, date, description, unitId, gstId);
 
                                 var result = new
                                 {
@@ -577,7 +605,7 @@ namespace DhanSutra
                             var stritemId = payload["item_id"]?.ToString();
                             var batchNo = payload["batchNo"]?.ToString();
                             var refno = payload["refno"]?.ToString();
-                            var hsnCode = payload["hsnCode"]?.ToString();
+                            //var hsnCode = payload["hsnCode"]?.ToString();
 
                             string NormalizeDate(string input)
                             {
@@ -607,6 +635,7 @@ namespace DhanSutra
                             var weight = payload["weight"]?.ToString();
                             var dimension = payload["dimension"]?.ToString();
                             var invbatchno = payload["invbatchno"]?.ToString();
+                            var supplierid = ((int)payload["supplierId"]);
 
                             bool success = false;
 
@@ -620,10 +649,10 @@ namespace DhanSutra
                                     {
                                         success = db.UpdateInventoryRecord(
                                             conn, transaction,
-                                            itemId, batchNo, refno, hsnCode, date, quantity, purchasePrice,
+                                            itemId, batchNo, refno,  date, quantity, purchasePrice,
                                             discountPercent, netPurchasePrice, amount, salesPrice, mrp,
                                             goodsOrServices, description, mfgDate, expDate, modelno,
-                                            brand, size, color, weight, dimension, invbatchno);
+                                            brand, size, color, weight, dimension, invbatchno,supplierid);
 
                                         bool success_ledger = db.UpdateItemLedger(
                                             conn, transaction,
@@ -1502,9 +1531,397 @@ namespace DhanSutra
                                 //resp.Error = "Delete failed or supplier not found";
                             
                         }
+                    case "GetAllSuppliers":
+                        {
+                            var suppliers = db.GetAllSuppliers();
+                            var response = new
+                            {
+                                action = "GetAllSuppliers",
+                                success = true,
+                                data=suppliers
+
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                            //return JsonConvert.SerializeObject(new { success = true, data = suppliers });
+                        }
+                    case "SearchPurchaseItemsByDate":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null) break;
+                                string dateStr = payload["Date"]?.ToObject<string>();
+
+                                DateTime date = DateTime.Parse(dateStr);
+                                var items = db.SearchPurchaseItemsByDate(date);
+
+                                var response = new
+                                {
+                                    action = "SearchPurchaseItemsByDateResponse",
+                                    success = true,
+                                    items = items
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "SearchPurchaseItemsByDate",
+                                    success = false,
+                                    error = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            }
+
+                            break;
+                        }
+                    case "SearchPurchaseReturns":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null) break;
+
+                                // accept both "Date" and "date" casing just in case
+                                var dateToken = payload["Date"] ?? payload["date"];
+                                if (dateToken == null)
+                                {
+                                    var respErr = new { action = "SearchPurchaseReturnsResponse", success = false, error = "Date not provided" };
+                                    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(respErr));
+                                    break;
+                                }
+
+                                string dateStr = dateToken.ToObject<string>();
+                                DateTime date = DateTime.Parse(dateStr);
+
+                                var returns = db.SearchPurchaseReturns(date);
+
+                                var response = new
+                                {
+                                    action = "SearchPurchaseReturnsResponse",
+                                    success = true,
+                                    returns = returns
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "SearchPurchaseReturnsResponse",
+                                    success = false,
+                                    error = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            }
+
+                            break;
+                        }
+
+
+                    case "LoadPurchaseForReturn":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null) break;
+                                long itemDetailsId = payload["ItemDetailsId"].ToObject<long>();
+
+                                
+
+                                var detail = db.LoadPurchaseForReturn(itemDetailsId);
+
+                                var response = new
+                                {
+                                    action = "LoadPurchaseForReturnResponse",
+                                    success = true,
+                                    data = detail
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "LoadPurchaseForReturn",
+                                    success = false,
+                                    error = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            }
+
+                            break;
+                        }
+                    case "LoadPurchaseReturnDetail":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null) break;
+
+                                long returnId = payload["ReturnId"]?.ToObject<long>() ?? 0;
+
+                                var data = db.GetPurchaseReturnDetail(returnId);
+
+                                var response = new
+                                {
+                                    action = "LoadPurchaseReturnDetailResponse",
+                                    success = true,
+                                    returnData = data
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "LoadPurchaseReturnDetailResponse",
+                                    success = false,
+                                    error = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+
+                            break;
+                        }
+
+
+                    case "SavePurchaseReturn":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null) break;
+
+                                var dto = payload.ToObject<PurchaseReturnDto>();
+                                //var dto = payload.ToObject<PurchaseReturnDto>();
+
+                                var result = db.SavePurchaseReturn(dto);
+
+                                var response = new
+                                {
+                                    action = "SavePurchaseReturnResponse",
+                                    success = true,
+                                    data = new
+                                    {
+                                        returnId = result.ReturnId,
+                                        returnNo = result.ReturnNo,
+                                        returnNum = result.ReturnNum
+                                    }
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "SavePurchaseReturn",
+                                    success = false,
+                                    error = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            }
+
+                            break;
+                        }
+                    case "SavePurchaseInvoice":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null)
+                                    break;
+
+                                // Deserialize into PurchaseInvoiceDto
+                                var dto = payload.ToObject<PurchaseInvoiceDto>();
+
+                                long purchaseId = db.SavePurchaseInvoice(dto);
+
+                                var response = new
+                                {
+                                    action = "SavePurchaseInvoiceResponse",
+                                    success = true,
+                                    purchaseId = purchaseId,
+                                    message = "Purchase invoice saved successfully."
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "SavePurchaseInvoiceResponse",
+                                    success = false,
+                                    message = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+
+                            break;
+                        }
+                    case "GetPurchaseInvoice":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null)
+                                    break;
+
+                                long purchaseId = payload["PurchaseId"]?.ToObject<long>() ?? 0;
+
+                                var invoice = db.GetPurchaseInvoice(purchaseId);
+
+                                var response = new
+                                {
+                                    action = "GetPurchaseInvoiceResponse",
+                                    success = invoice != null,
+                                    data = invoice
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "GetPurchaseInvoiceResponse",
+                                    success = false,
+                                    message = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            break;
+                        }
+                    //case "GetNextBatchNumForItem":
+                    //    {
+                    //        try
+                    //        {
+                    //            var payload = req.Payload as JObject;
+                    //            if (payload == null)
+                    //                break;
+
+                    //            long itemId = payload["ItemId"]?.ToObject<long>() ?? 0;
+
+                    //            int nextBatchNum = db.GetNextBatchNumForItem(itemId);
+
+                    //            var response = new
+                    //            {
+                    //                action = "GetNextBatchNumForItemResponse",
+                    //                success = true,
+                    //                itemId = itemId,
+                    //                nextBatchNum = nextBatchNum
+                    //            };
+
+                    //            webView.CoreWebView2.PostWebMessageAsJson(
+                    //                JsonConvert.SerializeObject(response)
+                    //            );
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            var response = new
+                    //            {
+                    //                action = "GetNextBatchNumForItemResponse",
+                    //                success = false,
+                    //                message = ex.Message
+                    //            };
+
+                    //            webView.CoreWebView2.PostWebMessageAsJson(
+                    //                JsonConvert.SerializeObject(response)
+                    //            );
+                    //        }
+
+                    //        break;
+                    //    }
+                    case "GetNextBatchNum":
+                        {
+                            var payload = req.Payload as JObject;
+
+                            long itemId = payload["ItemId"]?.ToObject<long>() ?? 0;
+                            int lineIndex = payload["LineIndex"]?.ToObject<int>() ?? 0;
+
+                            int nextBatch = db.GetNextBatchNumForItem(itemId);
+
+                            var response = new
+                            {
+                                action = "GetNextBatchNumResponse",
+                                success = true,
+                                itemId = itemId,
+                                lineIndex = lineIndex,
+                                batchNum = nextBatch
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+
+                    case "GetSupplierById":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                long supplierId = payload["SupplierId"]?.ToObject<long>() ?? 0;
+
+                                var supplier = db.GetSupplierById(supplierId);
+
+                                var response = new
+                                {
+                                    action = "GetSupplierByIdResponse",
+                                    success = true,
+                                    data = supplier
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "GetSupplierByIdResponse",
+                                    success = false,
+                                    message = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            break;
+                        }
+
+
 
                 }
-                }
+            }
             catch (Exception ex)
             {
                 webView.CoreWebView2.PostWebMessageAsString("Error: " + ex.Message);

@@ -17,10 +17,11 @@ namespace DhanSutra.Models
         public string Address { get; set; }
         public string City { get; set; }
         public string Pincode { get; set; }
-        public double? OpeningBalance { get; set; }
-        public double? Balance { get; set; }
+        public decimal? OpeningBalance { get; set; }
+        public decimal? Balance { get; set; }
         public string CreatedBy { get; set; }
         public string CreatedAt { get; set; }
+        public string State { get; set; }
     }
 
 }

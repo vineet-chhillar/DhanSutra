@@ -9,7 +9,9 @@ namespace DhanSutra.Models
     public class ItemDetails
     {
         public int Item_Id { get; set; }
-        public string HsnCode { get; set; }
+        public int SupplierId { get; set; }
+
+        public string SupplierName { get; set; }
         public string BatchNo { get; set; }
         public string refno { get; set; }
         public DateTime Date { get; set; }
