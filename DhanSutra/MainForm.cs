@@ -1741,6 +1741,24 @@ namespace DhanSutra
 
                             break;
                         }
+                    case "GetNextPurchaseInvoiceNum":
+                        {
+                            var (num, fy) = db.GetNextPurchaseInvoiceNumFY();
+
+                            var invoiceNo = $"PI/{fy}/{num.ToString().PadLeft(5, '0')}";
+
+                            var res = new
+                            {
+                                action = "GetNextPurchaseInvoiceNumResponse",
+                                nextNum = num,
+                                fy = fy,
+                                invoiceNo = invoiceNo
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(res));
+                            break;
+                        }
+
                     case "SavePurchaseInvoice":
                         {
                             try
@@ -1752,13 +1770,14 @@ namespace DhanSutra
                                 // Deserialize into PurchaseInvoiceDto
                                 var dto = payload.ToObject<PurchaseInvoiceDto>();
 
-                                long purchaseId = db.SavePurchaseInvoice(dto);
+                                string invoiceNo = db.SavePurchaseInvoice(dto);
 
                                 var response = new
                                 {
                                     action = "SavePurchaseInvoiceResponse",
                                     success = true,
-                                    purchaseId = purchaseId,
+                                    //purchaseId = purchaseId,
+                                    invoiceNo = invoiceNo,
                                     message = "Purchase invoice saved successfully."
                                 };
 
@@ -1917,11 +1936,168 @@ namespace DhanSutra
                             }
                             break;
                         }
+                    case "PrintPurchaseInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long purchaseId = payload["PurchaseId"]?.ToObject<long>() ?? 0;
+
+                            // 1. Load invoice from DB → must return PurchaseInvoiceDto
+                            PurchaseInvoiceDto invoice = db.GetPurchaseInvoiceDto(purchaseId);
+                            if (invoice == null)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(new
+                                {
+                                    action = "PrintPurchaseInvoiceResponse",
+                                    success = false,
+                                    message = "Purchase invoice not found."
+                                }));
+                                break;
+                            }
+
+                            // 2. Load company
+                            var company = db.GetCompanyProfile();
+
+                            // 3. Convert to PDF DTO (you can reuse same DTO as sales or create new)
+                            var pdfInvoice = new DhanSutra.Pdf.PurchaseInvoicePdfDto
+                            {
+                                PurchaseId = invoice.PurchaseId,
+                                InvoiceNo = invoice.InvoiceNo,
+                                InvoiceNum = invoice.InvoiceNum,
+                                InvoiceDate = invoice.InvoiceDate,
+                                SupplierId = invoice.SupplierId,
+
+                                TotalAmount = invoice.TotalAmount,
+                                TotalTax = invoice.TotalTax,
+                                RoundOff = invoice.RoundOff,
+                                Notes = invoice.Notes,
+
+                                Items = invoice.Items?.ConvertAll(x => new DhanSutra.Pdf.PurchaseInvoicePdfItemDto
+                                {
+                                    PurchaseItemId = x.PurchaseItemId,
+                                    ItemId = x.ItemId,
+                                    Qty = x.Qty,
+                                    Rate = x.Rate,
+                                    DiscountPercent = x.DiscountPercent,
+                                    NetRate = x.NetRate,
+
+                                    GstPercent = x.GstPercent,
+                                    GstValue = x.GstValue,
+
+                                    CgstPercent = x.CgstPercent,
+                                    CgstValue = x.CgstValue,
+                                    SgstPercent = x.SgstPercent,
+                                    SgstValue = x.SgstValue,
+                                    IgstPercent = x.IgstPercent,
+                                    IgstValue = x.IgstValue,
+
+                                    LineSubTotal = x.LineSubTotal,
+                                    LineTotal = x.LineTotal,
+                                    Notes = x.Notes,
+
+                                    BatchNum = x.BatchNum,
+                                    BatchNo = x.BatchNo,
+
+                                    SalesPrice = x.SalesPrice,
+                                    Mrp = x.Mrp,
+                                    Description = x.Description,
+                                    MfgDate = x.MfgDate,
+                                    ExpDate = x.ExpDate,
+                                    ModelNo = x.ModelNo,
+                                    Brand = x.Brand,
+                                    Size = x.Size,
+                                    Color = x.Color,
+                                    Weight = x.Weight,
+                                    Dimension = x.Dimension
+                                })
+                            };
+
+                            // 4. Company Profile → PDF DTO
+                            var pdfCompany = new DhanSutra.Pdf.CompanyProfileDto
+                            {
+                                CompanyName = company.CompanyName,
+                                AddressLine1 = company.AddressLine1,
+                                AddressLine2 = company.AddressLine2,
+                                City = company.City,
+                                State = company.State,
+                                Pincode = company.Pincode,
+                                GSTIN = company.GSTIN,
+                                Phone = company.Phone,
+                                Email = company.Email,
+                                Logo = company.Logo
+                            };
+
+                            // 5. Build PDF document
+                            var doc = new PurchaseInvoiceDocument(pdfInvoice, pdfCompany);
+
+                            QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+                            byte[] pdfBytes = doc.GeneratePdf();
+
+                            // 6. Save in Downloads folder
+                            string downloads = Path.Combine(
+                                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                                "Downloads"
+                            );
+
+                            Directory.CreateDirectory(downloads);
+
+                            string pdfPath = Path.Combine(downloads,
+                                $"PurchaseInvoice-{invoice.InvoiceNo}.pdf"
+                            );
+
+                            File.WriteAllBytes(pdfPath, pdfBytes);
+
+                            // 7. Return response
+                            var response = new
+                            {
+                                action = "PrintPurchaseInvoiceResponse",
+                                success = true,
+                                pdfPath = pdfPath
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+
+                            break;
+                        }
+
+
+                        //case "GetNextPurchaseInvoiceNum":
+                        //    {
+                        //        try
+                        //        {
+                        //            var next = db.GetNextPurchaseInvoiceNum();
+
+                        //            var res = new
+                        //            {
+                        //                action = "GetNextPurchaseInvoiceNumResponse",
+                        //                next = next
+                        //            };
+
+                        //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(res));
+                        //        }
+                        //        catch (Exception ex)
+                        //        {
+                        //            var res = new
+                        //            {
+                        //                action = "GetNextPurchaseInvoiceNumResponse",
+                        //                next = 0,
+                        //                error = ex.Message
+                        //            };
+
+                        //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(res));
+                        //        }
+
+                        //        break;
+                        //    }
 
 
 
                 }
             }
+
             catch (Exception ex)
             {
                 webView.CoreWebView2.PostWebMessageAsString("Error: " + ex.Message);
