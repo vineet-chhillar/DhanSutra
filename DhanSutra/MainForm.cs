@@ -1163,22 +1163,23 @@ namespace DhanSutra
                             var doc = new InvoiceDocument(pdfInvoice, pdfCompany);
 
                             // 6) Generate PDF file path
+                            // 6) Create unique filename
+                            Directory.CreateDirectory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Invoices"));
+
+                            string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                            string fileName = $"invoice-{invoice.InvoiceNo}-{timestamp}.pdf";
+
                             string pdfPath = Path.Combine(
                                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                                 "Invoices",
-                                "invoice-" + invoice.InvoiceNo + ".pdf"
+                                fileName
                             );
 
-                            Directory.CreateDirectory(Path.GetDirectoryName(pdfPath));
-
                             // 7) Save PDF
-                            //var bytes = doc.GeneratePdfBytes();
-
                             QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
-
                             var bytes = doc.GeneratePdf();
-
                             File.WriteAllBytes(pdfPath, bytes);
+
 
                             // 8) Send back PDF path to frontend
                             var response = new
@@ -1743,21 +1744,25 @@ namespace DhanSutra
                         }
                     case "GetNextPurchaseInvoiceNum":
                         {
-                            var (num, fy) = db.GetNextPurchaseInvoiceNumFY();
+                            long nextNum = db.GetNextPurchaseInvoiceNum();
 
-                            var invoiceNo = $"PI/{fy}/{num.ToString().PadLeft(5, '0')}";
+                            string fy = GetFinancialYear();   // EX: "24-25"
+                            string padded = nextNum.ToString("D5"); // 00001, 00002
 
-                            var res = new
+                            string invoiceNo = $"PINV-{fy}/{padded}";
+
+                            var response = new
                             {
                                 action = "GetNextPurchaseInvoiceNumResponse",
-                                nextNum = num,
+                                nextNum = nextNum,
                                 fy = fy,
                                 invoiceNo = invoiceNo
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(res));
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
+
 
                     case "SavePurchaseInvoice":
                         {
@@ -1770,13 +1775,15 @@ namespace DhanSutra
                                 // Deserialize into PurchaseInvoiceDto
                                 var dto = payload.ToObject<PurchaseInvoiceDto>();
 
-                                string invoiceNo = db.SavePurchaseInvoice(dto);
+                                var result = db.SavePurchaseInvoice(dto);
+                                long purchaseId = result.purchaseId;
+                                string invoiceNo = result.invoiceNo;
 
                                 var response = new
                                 {
                                     action = "SavePurchaseInvoiceResponse",
                                     success = true,
-                                    //purchaseId = purchaseId,
+                                    purchaseId = purchaseId,   // <-- FIXED
                                     invoiceNo = invoiceNo,
                                     message = "Purchase invoice saved successfully."
                                 };
@@ -1936,47 +1943,67 @@ namespace DhanSutra
                             }
                             break;
                         }
+                    case "GetPurchaseInvoiceNumbersByDate":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string date = payload["Date"]?.ToObject<string>();
+
+                            var list = db.GetPurchaseInvoiceNumbersByDate(date);
+
+                            var response = new
+                            {
+                                action = "GetPurchaseInvoiceNumbersByDateResponse",
+                                data = list
+                            };
+
+                            webView.CoreWebView2
+                                .PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+
+                            break;
+                        }
+
                     case "PrintPurchaseInvoice":
                         {
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
-                            long purchaseId = payload["PurchaseId"]?.ToObject<long>() ?? 0;
+                            long PurchaseId = payload["PurchaseId"]?.ToObject<long>() ?? 0;
 
-                            // 1. Load invoice from DB → must return PurchaseInvoiceDto
-                            PurchaseInvoiceDto invoice = db.GetPurchaseInvoiceDto(purchaseId);
-                            if (invoice == null)
-                            {
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(new
-                                {
-                                    action = "PrintPurchaseInvoiceResponse",
-                                    success = false,
-                                    message = "Purchase invoice not found."
-                                }));
-                                break;
-                            }
+                            // 1) Load invoice (contains SupplierId)
+                            var invoice = db.GetPurchaseInvoiceDto(PurchaseId);
 
-                            // 2. Load company
+                            // 2) Load supplier details from DB
+                            var supplier = db.GetSupplierById(invoice.SupplierId);
+
+                            // 3) Load company
                             var company = db.GetCompanyProfile();
 
-                            // 3. Convert to PDF DTO (you can reuse same DTO as sales or create new)
-                            var pdfInvoice = new DhanSutra.Pdf.PurchaseInvoicePdfDto
+                            // 4) Build PDF DTO
+                            var pdfInvoice = new PurchaseInvoicePdfDto
                             {
                                 PurchaseId = invoice.PurchaseId,
                                 InvoiceNo = invoice.InvoiceNo,
                                 InvoiceNum = invoice.InvoiceNum,
                                 InvoiceDate = invoice.InvoiceDate,
+
                                 SupplierId = invoice.SupplierId,
+                                SupplierName = supplier?.SupplierName,
+                                SupplierGSTIN = supplier?.GSTIN,
+                                SupplierAddress = supplier?.Address,
+                                SupplierPhone = supplier?.Mobile,
+                                SupplierState = supplier?.State,
 
                                 TotalAmount = invoice.TotalAmount,
                                 TotalTax = invoice.TotalTax,
                                 RoundOff = invoice.RoundOff,
                                 Notes = invoice.Notes,
 
-                                Items = invoice.Items?.ConvertAll(x => new DhanSutra.Pdf.PurchaseInvoicePdfItemDto
+                                Items = invoice.Items.Select(x => new PurchaseInvoiceItemPdfDto
                                 {
-                                    PurchaseItemId = x.PurchaseItemId,
                                     ItemId = x.ItemId,
+                                    ItemName=x.ItemName,
                                     Qty = x.Qty,
                                     Rate = x.Rate,
                                     DiscountPercent = x.DiscountPercent,
@@ -1994,74 +2021,60 @@ namespace DhanSutra
 
                                     LineSubTotal = x.LineSubTotal,
                                     LineTotal = x.LineTotal,
-                                    Notes = x.Notes,
-
-                                    BatchNum = x.BatchNum,
-                                    BatchNo = x.BatchNo,
-
-                                    SalesPrice = x.SalesPrice,
-                                    Mrp = x.Mrp,
-                                    Description = x.Description,
-                                    MfgDate = x.MfgDate,
-                                    ExpDate = x.ExpDate,
-                                    ModelNo = x.ModelNo,
-                                    Brand = x.Brand,
-                                    Size = x.Size,
-                                    Color = x.Color,
-                                    Weight = x.Weight,
-                                    Dimension = x.Dimension
-                                })
+                                    BatchNo = x.BatchNo
+                                }).ToList()
                             };
 
-                            // 4. Company Profile → PDF DTO
-                            var pdfCompany = new DhanSutra.Pdf.CompanyProfileDto
-                            {
-                                CompanyName = company.CompanyName,
-                                AddressLine1 = company.AddressLine1,
-                                AddressLine2 = company.AddressLine2,
-                                City = company.City,
-                                State = company.State,
-                                Pincode = company.Pincode,
-                                GSTIN = company.GSTIN,
-                                Phone = company.Phone,
-                                Email = company.Email,
-                                Logo = company.Logo
-                            };
+                            var pdfCompany = new CompanyProfilePdfDto(company);
 
-                            // 5. Build PDF document
+                            // 5) Generate PDF document
                             var doc = new PurchaseInvoiceDocument(pdfInvoice, pdfCompany);
 
+                            // 6) Create unique filename
+                            string invoicesDir = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+    "Invoices"
+);
+                            Directory.CreateDirectory(invoicesDir);
+
+                            // sanitize invoice number for filename
+                            string safeInvoiceNo = string.Concat(
+                                invoice.InvoiceNo.Select(ch =>
+                                    Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch
+                                )
+                            );
+
+                            // create base filename
+                            string baseFileName = $"invoice-{safeInvoiceNo}.pdf";
+                            string pdfPath = Path.Combine(invoicesDir, baseFileName);
+
+                            // generate copy filenames
+                            int copyIndex = 1;
+                            while (File.Exists(pdfPath))
+                            {
+                                string copyName = $"invoice-{safeInvoiceNo} (copy {copyIndex}).pdf";
+                                pdfPath = Path.Combine(invoicesDir, copyName);
+                                copyIndex++;
+                            }
+
+                            // generate PDF
                             QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
-                            byte[] pdfBytes = doc.GeneratePdf();
+                            var bytes = doc.GeneratePdf();
+                            File.WriteAllBytes(pdfPath, bytes);
 
-                            // 6. Save in Downloads folder
-                            string downloads = Path.Combine(
-                                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                                "Downloads"
-                            );
 
-                            Directory.CreateDirectory(downloads);
 
-                            string pdfPath = Path.Combine(downloads,
-                                $"PurchaseInvoice-{invoice.InvoiceNo}.pdf"
-                            );
-
-                            File.WriteAllBytes(pdfPath, pdfBytes);
-
-                            // 7. Return response
-                            var response = new
+                            // 6) Return to frontend
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(new
                             {
                                 action = "PrintPurchaseInvoiceResponse",
                                 success = true,
-                                pdfPath = pdfPath
-                            };
-
-                            webView.CoreWebView2.PostWebMessageAsJson(
-                                JsonConvert.SerializeObject(response)
-                            );
+                                pdfPath
+                            }));
 
                             break;
                         }
+
 
 
                         //case "GetNextPurchaseInvoiceNum":
@@ -2103,6 +2116,31 @@ namespace DhanSutra
                 webView.CoreWebView2.PostWebMessageAsString("Error: " + ex.Message);
             }
         }
+        public string GetFinancialYear()
+        {
+            DateTime today = DateTime.Now;
+
+            int year = today.Year;
+            int month = today.Month;
+
+            int startYear;
+            int endYear;
+
+            // Financial Year starts in APRIL
+            if (month >= 4)
+            {
+                startYear = year;
+                endYear = year + 1;
+            }
+            else
+            {
+                startYear = year - 1;
+                endYear = year;
+            }
+
+            return $"{startYear % 100:D2}-{endYear % 100:D2}";
+        }
+
         private void webView_Click(object sender, EventArgs e)
         {
 

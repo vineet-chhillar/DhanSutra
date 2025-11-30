@@ -276,6 +276,9 @@
     <Compile Include="Models\ItemForPurchaseInvoice.cs" />
     <Compile Include="Models\ItemLedger.cs" />
     <Compile Include="Models\PurchaseInvoiceDto.cs" />
+    <Compile Include="Models\PurchaseInvoiceNumberDto.cs" />
+    <Compile Include="Pdf\CompanyProfilePdfDto.cs" />
+    <Compile Include="Pdf\PurchaseInvoiceDocument.cs" />
     <Compile Include="Pdf\PurchaseInvoicePdfDto.cs" />
     <Compile Include="Models\PurchaseItemDetailDto.cs" />
     <Compile Include="Models\PurchaseItemForDateDto.cs" />

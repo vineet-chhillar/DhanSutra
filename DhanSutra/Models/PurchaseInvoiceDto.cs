@@ -28,6 +28,7 @@ namespace DhanSutra.Models
         public long PurchaseItemId { get; set; } = 0; // For loading existing invoices
 
         public long ItemId { get; set; }
+        public string ItemName { get; set; }
         public decimal Qty { get; set; }
         public decimal Rate { get; set; }
         public decimal DiscountPercent { get; set; }

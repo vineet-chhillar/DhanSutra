@@ -3363,7 +3363,7 @@ WHERE d.id = @id;
                 }
             }
         }
-        public string SavePurchaseInvoice(PurchaseInvoiceDto dto)
+        public (long purchaseId, string invoiceNo) SavePurchaseInvoice(PurchaseInvoiceDto dto)
         {
             using (var conn = new SQLiteConnection(_connectionString)) 
             { 
@@ -3510,7 +3510,7 @@ VALUES
                             } // end foreach item
 
                             tran.Commit();
-                            return dto.InvoiceNo;
+                            return (purchaseId, dto.InvoiceNo);
                         } // end using cmd header
                     }
 
@@ -3522,16 +3522,25 @@ VALUES
                 }
             }
         }
-        public int GetNextPurchaseInvoiceNum()
+        public long GetNextPurchaseInvoiceNum()
         {
-            using (var conn = new SQLiteConnection(_connectionString))
+            using (var con = new SQLiteConnection(_connectionString))
             {
-                conn.Open();
-                var cmd = conn.CreateCommand();
-                cmd.CommandText = "SELECT IFNULL(MAX(InvoiceNum), 0) + 1 FROM PurchaseHeader";
-                return Convert.ToInt32(cmd.ExecuteScalar());
+                con.Open();
+
+                string sql = @"
+            SELECT IFNULL(MAX(InvoiceNum), 0)
+            FROM PurchaseHeader;
+        ";
+
+                using (var cmd = new SQLiteCommand(sql, con))
+                {
+                    long last = Convert.ToInt64(cmd.ExecuteScalar());
+                    return last + 1;
+                }
             }
         }
+
         public string GetFinancialYear()
         {
             var today = DateTime.Now;
@@ -3578,6 +3587,42 @@ VALUES
                 return (next, fy);
             }
         }
+        public List<PurchaseInvoiceNumberDto> GetPurchaseInvoiceNumbersByDate(string date)
+        {
+            var list = new List<PurchaseInvoiceNumberDto>();
+
+            using (var con = new SQLiteConnection(_connectionString))
+            {
+                con.Open();
+
+                string sql = @"
+            SELECT PurchaseId, InvoiceNo
+            FROM PurchaseHeader
+            WHERE DATE(InvoiceDate) = DATE(@Date)
+            ORDER BY PurchaseId DESC;
+        ";
+
+                using (var cmd = new SQLiteCommand(sql, con))
+                {
+                    cmd.Parameters.AddWithValue("@Date", date);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            list.Add(new PurchaseInvoiceNumberDto
+                            {
+                                Id = reader.GetInt64(0),
+                                PurchaseNo = reader.IsDBNull(1) ? "" : reader.GetString(1)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
         public PurchaseInvoiceDto GetPurchaseInvoiceDto(long purchaseId)
         {
             var dto = new PurchaseInvoiceDto();
@@ -3635,6 +3680,7 @@ WHERE PurchaseId = @PurchaseId";
 SELECT
     pi.PurchaseItemId,
     pi.ItemId,
+itm.name,
     pi.Qty,
     pi.Rate,
     pi.DiscountPercent,
@@ -3667,6 +3713,7 @@ SELECT
     pid.Dimension
 
 FROM PurchaseItem pi
+left join item itm on itm.id=pi.ItemId
 LEFT JOIN PurchaseItemDetails pid 
        ON pid.PurchaseItemId = pi.PurchaseItemId
 
@@ -3683,6 +3730,7 @@ ORDER BY pi.PurchaseItemId ASC";
                             {
                                 PurchaseItemId = rd.GetInt64(0),
                                 ItemId = rd.GetInt64(1),
+                                ItemName = rd["Qty"].ToString(),
                                 Qty = Convert.ToDecimal(rd["Qty"]),
                                 Rate = Convert.ToDecimal(rd["Rate"]),
                                 DiscountPercent = Convert.ToDecimal(rd["DiscountPercent"]),

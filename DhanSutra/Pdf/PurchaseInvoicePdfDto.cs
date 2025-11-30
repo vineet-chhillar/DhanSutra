@@ -4,31 +4,39 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace DhanSutra.Models
-{
+
     namespace DhanSutra.Pdf
     {
-        public class PurchaseInvoicePdfDto
-        {
-            public long PurchaseId { get; set; }
-            public string InvoiceNo { get; set; }
-            public long InvoiceNum { get; set; }
-            public string InvoiceDate { get; set; }
-            public long SupplierId { get; set; }
+    public class PurchaseInvoicePdfDto
+    {
+        public long PurchaseId { get; set; }
+        public string InvoiceNo { get; set; }
+        public long InvoiceNum { get; set; }
+        public string InvoiceDate { get; set; }
 
-            public decimal TotalAmount { get; set; }
-            public decimal TotalTax { get; set; }
-            public decimal RoundOff { get; set; }
-            public string Notes { get; set; }
+        // Supplier Details
+        public long SupplierId { get; set; }
+        public string SupplierName { get; set; }
+        public string SupplierGSTIN { get; set; }
+        public string SupplierAddress { get; set; }
+        public string SupplierPhone { get; set; }
+        public string SupplierState { get; set; }
 
-            public List<PurchaseInvoicePdfItemDto> Items { get; set; }
-        }
+        // Totals
+        public decimal TotalAmount { get; set; }
+        public decimal TotalTax { get; set; }
+        public decimal RoundOff { get; set; }
+        public string Notes { get; set; }
 
-        public class PurchaseInvoicePdfItemDto
-        {
+        public List<PurchaseInvoiceItemPdfDto> Items { get; set; }
+    }
+
+    public class PurchaseInvoiceItemPdfDto
+    {
             public long PurchaseItemId { get; set; }
             public long ItemId { get; set; }
-            public decimal Qty { get; set; }
+        public string ItemName { get; set; }
+        public decimal Qty { get; set; }
             public decimal Rate { get; set; }
             public decimal DiscountPercent { get; set; }
             public decimal NetRate { get; set; }
@@ -64,4 +72,4 @@ namespace DhanSutra.Models
         }
     }
 
-}
+
