@@ -2059,8 +2059,16 @@ namespace DhanSutra
 
                             // generate PDF
                             QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
-                            var bytes = doc.GeneratePdf();
-                            File.WriteAllBytes(pdfPath, bytes);
+                            try
+                            {
+                                var bytes = doc.GeneratePdf();
+                                File.WriteAllBytes(pdfPath, bytes);
+                            }
+                            catch (Exception ex)
+                            {
+                                File.WriteAllText("C:\\Users\\User\\Documents\\Invoices\\debug-error.txt", ex.ToString());
+                                throw;
+                            }
 
 
 
