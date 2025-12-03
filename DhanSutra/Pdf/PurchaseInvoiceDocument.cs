@@ -1,6 +1,7 @@
 ﻿using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
+using System;
 using System.Linq;
 
 namespace DhanSutra.Pdf
@@ -42,10 +43,9 @@ namespace DhanSutra.Pdf
         {
             container.Column(col =>
             {
-                // header row: company (left) and invoice info (right)
                 col.Item().Row(row =>
                 {
-                    // left block
+                    // LEFT SIDE (company info)
                     row.RelativeItem().Column(left =>
                     {
                         left.Item().Text(Company?.CompanyName ?? "").FontSize(16).Bold();
@@ -55,19 +55,27 @@ namespace DhanSutra.Pdf
                         left.Item().Text($"Phone: {Company?.Phone ?? ""}");
                     });
 
-                    // right block
-                    row.RelativeItem().AlignRight().Column(right =>
+                    // RIGHT SIDE (invoice info) - FIXED WIDTH
+                    row.ConstantItem(220).Column(right =>
                     {
-                        right.Item().Text("Purchase Invoice").FontSize(16).Bold();
-                        right.Item().Text($"Invoice No: {Invoice?.InvoiceNo ?? ""}");
-                        right.Item().Text($"Invoice Date: {Invoice?.InvoiceDate ?? ""}");
+                        right.Item().AlignRight().Text("Purchase Invoice").FontSize(16).Bold();
+                        right.Item().AlignRight().Text($"Invoice No: {Invoice?.InvoiceNo ?? ""}");
+                        string invoiceDateFormatted = "";
+
+                        if (DateTime.TryParse(Invoice?.InvoiceDate?.ToString(), out var dt))
+                        {
+                            invoiceDateFormatted = dt.ToString("dd-MM-yyyy");
+                        }
+
+                        right.Item().AlignRight().Text($"Invoice Date: {invoiceDateFormatted}");
+
                     });
                 });
 
-                // divider — use safe fluent call (no Element(...))
                 col.Item().PaddingVertical(10).LineHorizontal(1);
             });
         }
+
 
         // ---------- Body ----------
         void ComposeBody(IContainer container)
@@ -103,19 +111,19 @@ namespace DhanSutra.Pdf
                 {
                     cols.ConstantColumn(25);     // #
                     cols.RelativeColumn(2);      // item
-                    cols.ConstantColumn(40);     // qty
-                    cols.ConstantColumn(55);     // rate
-                    cols.ConstantColumn(55);     // net rate
-                    cols.ConstantColumn(65);     // net amt
-                    cols.ConstantColumn(40);     // gst%
-                    cols.ConstantColumn(65);     // gst amt
-                    cols.ConstantColumn(40);     // cgst%
-                    cols.ConstantColumn(55);     // cgst amt
-                    cols.ConstantColumn(40);     // sgst%
-                    cols.ConstantColumn(55);     // sgst amt
-                    cols.ConstantColumn(40);     // igst%
-                    cols.ConstantColumn(55);     // igst amt
-                    cols.ConstantColumn(65);     // total
+                    cols.ConstantColumn(25);     // qty
+                    cols.ConstantColumn(25);     // rate
+                    cols.ConstantColumn(25);     // net rate
+                    cols.ConstantColumn(25);     // net amt
+                    cols.ConstantColumn(25);     // gst%
+                    cols.ConstantColumn(25);     // gst amt
+                    cols.ConstantColumn(25);     // cgst%
+                    cols.ConstantColumn(25);     // cgst amt
+                    cols.ConstantColumn(25);     // sgst%
+                    cols.ConstantColumn(25);     // sgst amt
+                    cols.ConstantColumn(25);     // igst%
+                    cols.ConstantColumn(25);     // igst amt
+                    cols.ConstantColumn(25);     // total
                 });
 
                 // header row (each header cell is a single fluent chain)
@@ -144,6 +152,7 @@ namespace DhanSutra.Pdf
                 {
                     table.Cell().Padding(3).BorderBottom(1).Text(idx.ToString());
                     //table.Cell().Padding(3).BorderBottom(1).Text($"{it.ItemName ?? ""}\n{it.HsnCode ?? ""}");
+                    table.Cell().Padding(3).BorderBottom(1).Text(it.ItemName);
                     table.Cell().Padding(3).BorderBottom(1).Text(it.Qty.ToString("0.##"));
                     table.Cell().Padding(3).BorderBottom(1).Text(it.Rate.ToString("0.00"));
                     table.Cell().Padding(3).BorderBottom(1).Text(it.NetRate.ToString("0.00"));
@@ -166,7 +175,7 @@ namespace DhanSutra.Pdf
         // ---------- Totals ----------
         void ComposeTotals(IContainer container)
         {
-            container.AlignRight().Width(300).Column(col =>
+            container.AlignRight().MaxWidth(300).Column(col =>
             {
                 col.Item().Row(r =>
                 {
@@ -193,5 +202,6 @@ namespace DhanSutra.Pdf
                 });
             });
         }
+
     }
 }

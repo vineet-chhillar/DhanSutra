@@ -29,6 +29,7 @@ namespace DhanSutra.Models
 
         public long ItemId { get; set; }
         public string ItemName { get; set; }
+        public string HsnCode { get; set; }
         public decimal Qty { get; set; }
         public decimal Rate { get; set; }
         public decimal DiscountPercent { get; set; }

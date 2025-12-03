@@ -63,10 +63,10 @@ namespace DhanSutra
         public IEnumerable<ItemForInvoice> GetItemsForInvoice()
         {
             using (var connection = new SQLiteConnection(_connectionString))
-                
-                return connection.Query<ItemForInvoice>("select i.Id, i.Name, i.ItemCode, d.batchno, \r\n      " +
-                    " i.hsncode, d.salesprice , u.unitname, g.gstpercent \r\nfrom itemdetails d\r\ninner join item i" +
-                    " on i.id=d.item_id\r\nLEFT JOIN UnitMaster u ON i.UnitId = u.Id\r\nLEFT JOIN GstMaster g ON i.GstId = g.Id\r\n order by i.id;");
+
+                return connection.Query<ItemForInvoice>("select i.Id, i.Name, i.ItemCode, d.batchno, i.hsncode, e.salesprice , u.unitname, g.gstpercent from purchaseitem d" +
+                    " inner join item i on i.id=d.itemid LEFT JOIN UnitMaster u ON i.UnitId = u.Id LEFT JOIN GstMaster g ON i.GstId = g.Id " +
+                    "                   left join purchaseitemdetails e on e.purchaseitemid=d.purchaseid order by i.id;");
         }
         public IEnumerable<ItemForPurchaseInvoice> GetItemsForPurchaseInvoice()
         {
@@ -2568,6 +2568,67 @@ VALUES (@Name, @Phone, @State, @Address);";
 
             return invoice;
         }
+        public List<string> ValidatePurchaseInvoice(PurchaseInvoiceDto inv)
+        {
+            var errors = new List<string>();
+
+            // Supplier required
+            if (inv.SupplierId <= 0)
+                errors.Add("Supplier is required.");
+
+            // Invoice number required
+            if (string.IsNullOrWhiteSpace(inv.InvoiceNo))
+                errors.Add("Invoice number is required.");
+
+            // Date required
+            if (inv.InvoiceDate == null)
+                errors.Add("Invoice date is required.");
+
+            // Items required
+            if (inv.Items == null || inv.Items.Count == 0)
+                errors.Add("At least one item is required.");
+
+            // 🚨 Duplicate check (Item + Batch)
+            var combos = new HashSet<string>();
+            int index = 1;
+
+            foreach (var it in inv.Items)
+            {
+                string key = $"{it.ItemId}__{it.BatchNo ?? ""}";
+
+                if (!combos.Add(key))
+                    errors.Add($"Duplicate Item + Batch found at line {index}");
+
+                index++;
+            }
+
+            // Row-level validations
+            index = 1;
+            foreach (var it in inv.Items)
+            {
+                if (it.ItemId <= 0)
+                    errors.Add($"Line {index}: Item is required.");
+
+                if (it.Qty <= 0)
+                    errors.Add($"Line {index}: Quantity must be greater than zero.");
+
+                if (it.Rate < 0)
+                    errors.Add($"Line {index}: Rate cannot be negative.");
+
+                if (it.NetRate < 0)
+                    errors.Add($"Line {index}: NetRate cannot be negative.");
+
+                if (it.LineTotal < 0)
+                    errors.Add($"Line {index}: NetAmount cannot be negative.");
+
+                if (it.GstPercent < 0)
+                    errors.Add($"Line {index}: GST% cannot be negative.");
+
+                index++;
+            }
+
+            return errors;
+        }
 
 
         //    public SalesReturnPrintHeaderDto GetSalesReturnHeader(int id)
@@ -3128,13 +3189,13 @@ WHERE d.id = @id;
                                 NetPurchasePrice = Convert.ToDecimal(r.GetValue(7)),
                                 Quantity = Convert.ToDecimal(r.GetValue(8)),
                                 AlreadyReturnedQty = Convert.ToDecimal(r.GetValue(9)),
-                               
+
                                 InvoiceNo = r.IsDBNull(8) ? "" : r.GetString(10),
                                 PurchaseDate = r.GetDateTime(11),
                                 SupplierId = Convert.ToInt64(r.GetValue(12)),
                                 SupplierName = r.IsDBNull(11) ? "" : r.GetString(13),
                                 GstPercent = r.IsDBNull(12) ? 0 : Convert.ToDecimal(r.GetValue(14)),
-                                
+
                             };
                         }
                     }
@@ -3365,8 +3426,8 @@ WHERE d.id = @id;
         }
         public (long purchaseId, string invoiceNo) SavePurchaseInvoice(PurchaseInvoiceDto dto)
         {
-            using (var conn = new SQLiteConnection(_connectionString)) 
-            { 
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
                 conn.Open();
                 using (var tran = conn.BeginTransaction())
                 {
@@ -3492,9 +3553,9 @@ VALUES
                                 } // end insert purchaseitem
                                 ItemLedger itemledger = new ItemLedger();
                                 itemledger.ItemId = (int)it.ItemId;
-                                itemledger.BatchNo = it.BatchNo;
+                                itemledger.BatchNo = batchNo;
                                 itemledger.Date = dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
-                                    
+
                                 itemledger.TxnType = "Purchase";
                                 itemledger.RefNo = dto.InvoiceNo ?? "";
                                 itemledger.Qty = it.Qty;
@@ -3864,6 +3925,589 @@ ORDER BY pi.PurchaseItemId
                 return Convert.ToInt64(cmd.ExecuteScalar());
             }
         }
+
+        public bool CanEditPurchaseInvoice(long purchaseId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // 1) Get all Item + Batch combinations from this purchase invoice
+                var items = new List<(long ItemId, string BatchNo)>();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT ItemId, batchNo 
+                FROM PurchaseItem 
+                WHERE PurchaseId = @id";
+                    cmd.Parameters.AddWithValue("@id", purchaseId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            long itemId = r.GetInt64(0);
+                            string batchNo = r.IsDBNull(1) ? null : r.GetString(1);
+                            items.Add((itemId, batchNo));
+                        }
+                    }
+                }
+
+                // 2) If no items found → technically editable
+                if (items.Count == 0)
+                    return true;
+
+                // 3) Check each ItemId + BatchNo pair in InvoiceItems table
+                foreach (var row in items)
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+                    SELECT 1 
+                    FROM InvoiceItems 
+                    WHERE ItemId = @ItemId 
+                      AND BatchNo = @BatchNo
+                    LIMIT 1";
+
+                        cmd.Parameters.AddWithValue("@ItemId", row.ItemId);
+                        cmd.Parameters.AddWithValue("@BatchNo", row.BatchNo ?? (object)DBNull.Value);
+
+                        var result = cmd.ExecuteScalar();
+
+                        // If exists → invoice CANNOT be edited
+                        if (result != null)
+                            return false;
+                    }
+                }
+
+                // 4) If none of the batch lines appear in sales → editable
+                return true;
+            }
+        }
+
+        public PurchaseInvoiceDto LoadPurchaseInvoice(long purchaseId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                var dto = new PurchaseInvoiceDto();
+
+                // Load header
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"SELECT PurchaseId, InvoiceNo, InvoiceDate, SupplierId,
+                                   TotalAmount, TotalTax, RoundOff, Notes
+                            FROM PurchaseHeader WHERE PurchaseId=@id";
+
+                    cmd.Parameters.AddWithValue("@id", purchaseId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read()) return null;
+
+                        dto.PurchaseId = r.GetInt64(0);
+                        dto.InvoiceNo = r.IsDBNull(1) ? "" : r.GetString(1);
+                        dto.InvoiceDate = r.IsDBNull(2) ? "" : r.GetString(2);
+                        dto.SupplierId = r.GetInt64(3);
+                        dto.TotalAmount = r.GetDecimal(4);
+                        dto.TotalTax = r.GetDecimal(5);
+                        dto.RoundOff = r.GetDecimal(6);
+                        dto.Notes = r.IsDBNull(7) ? "" : r.GetString(7);
+                    }
+                }
+                // Load items
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"SELECT PurchaseItemId, ItemId,item.name as itemname, batchNo,item.hsncode as HsnCode, Qty, Rate, DiscountPercent,
+                                   NetRate, GstPercent, GstValue, CgstPercent, CgstValue,
+                                   SgstPercent, SgstValue, IgstPercent, IgstValue,
+                                   LineSubTotal, LineTotal, Notes
+                            FROM PurchaseItem
+                            inner join item on item.id=PurchaseItem.itemid
+                            WHERE PurchaseId=@id";
+
+                    cmd.Parameters.AddWithValue("@id", purchaseId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            var it = new PurchaseInvoiceItemDto
+                            {
+                                ItemId = r.GetInt64(1),
+                                ItemName = r.IsDBNull(2) ? "" : r.GetString(2),
+                                BatchNo = r.IsDBNull(3) ? "" : r.GetString(3),
+                                HsnCode = r.IsDBNull(4) ? "" : r.GetString(4),
+                                Qty = r.GetDecimal(5),
+                                Rate = r.GetDecimal(6),
+                                DiscountPercent = r.GetDecimal(7),
+                                NetRate = r.GetDecimal(8),
+                                GstPercent = r.GetDecimal(9),
+                                GstValue = r.GetDecimal(10),
+                                CgstPercent = r.GetDecimal(11),
+                                CgstValue = r.GetDecimal(12),
+                                SgstPercent = r.GetDecimal(13),
+                                SgstValue = r.GetDecimal(14),
+                                IgstPercent = r.GetDecimal(15),
+                                IgstValue = r.GetDecimal(16),
+                                LineSubTotal = r.GetDecimal(17),
+                                LineTotal = r.GetDecimal(18),
+                                Notes = r.IsDBNull(17) ? "" : r.GetString(19)
+                            };
+
+
+                            // Load extra details
+                            using (var cmdD = conn.CreateCommand())
+                            {
+                                cmdD.CommandText = "SELECT salesPrice, mrp, description, mfgdate, expdate, modelno, brand, size, color, weight, dimension FROM PurchaseItemDetails WHERE PurchaseItemId=@pid";
+                                cmdD.Parameters.AddWithValue("@pid", r.GetInt64(0));
+
+                                using (var rd = cmdD.ExecuteReader())
+                                {
+                                    if (rd.Read())
+                                    {
+                                        it.SalesPrice = rd.IsDBNull(0) ? 0 : rd.GetDecimal(0);
+                                        it.Mrp = rd.IsDBNull(1) ? 0 : rd.GetDecimal(1);
+                                        it.Description = rd.IsDBNull(2) ? "" : rd.GetString(2);
+                                        it.MfgDate = rd.IsDBNull(3) ? "" : rd.GetString(3);
+                                        it.ExpDate = rd.IsDBNull(4) ? "" : rd.GetString(4);
+                                        it.ModelNo = rd.IsDBNull(5) ? "" : rd.GetString(5);
+                                        it.Brand = rd.IsDBNull(6) ? "" : rd.GetString(6);
+                                        it.Size = rd.IsDBNull(7) ? "" : rd.GetString(7);
+                                        it.Color = rd.IsDBNull(8) ? "" : rd.GetString(8);
+                                        it.Weight = rd.IsDBNull(9) ? 0 : rd.GetDecimal(9);
+                                        it.Dimension = rd.IsDBNull(10) ? "" : rd.GetString(10);
+                                    }
+
+                                    dto.Items.Add(it);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return dto;
+            }
+        }
+
+        public (bool Success, string Message, long NewPurchaseId) UpdatePurchaseInvoice(PurchaseInvoiceDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        long oldId = dto.PurchaseId;
+
+                        // STEP 1: Mark old invoice as rejected
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = "UPDATE PurchaseHeader SET Status = 0 WHERE PurchaseId = @id";
+                            cmd.Parameters.AddWithValue("@id", oldId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // STEP 2: Reverse ledger entries for old invoice
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"SELECT ItemId, batchNo, Qty, Rate, DiscountPercent, NetRate, LineSubTotal
+                                FROM PurchaseItem WHERE PurchaseId=@id";
+                            cmd.Parameters.AddWithValue("@id", oldId);
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                while (r.Read())
+                                {
+                                    var ItemId = r.GetInt64(0);
+                                    var BatchNo = r.IsDBNull(1) ? "" : r.GetString(1);
+                                    var Qty = r.GetDouble(2);
+                                    var Rate = r.GetDouble(3);
+                                    var Disc = r.GetDouble(4);
+                                    var NetRate = r.GetDouble(5);
+                                    var SubTotal = r.GetDouble(6);
+
+                                    using (var cmdRev = conn.CreateCommand())
+                                    {
+                                        cmdRev.Transaction = tx;
+
+                                        cmdRev.CommandText =
+                                        @"INSERT INTO ItemLedger (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
+                  VALUES (@ItemId, @BatchNo, @Dt, 'PURCHASE-REVERSAL', @RefNo, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
+
+                                        cmdRev.Parameters.AddWithValue("@ItemId", ItemId);
+                                        cmdRev.Parameters.AddWithValue("@BatchNo", BatchNo);
+                                        cmdRev.Parameters.AddWithValue("@Dt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                        cmdRev.Parameters.AddWithValue("@RefNo", $"PI-{oldId}");
+
+                                        cmdRev.Parameters.AddWithValue("@Qty", -Qty);
+                                        cmdRev.Parameters.AddWithValue("@Rate", Rate);
+                                        cmdRev.Parameters.AddWithValue("@Disc", Disc);
+                                        cmdRev.Parameters.AddWithValue("@NetRate", NetRate);
+                                        cmdRev.Parameters.AddWithValue("@Total", -SubTotal);
+
+                                        cmdRev.Parameters.AddWithValue("@Rem", "Reverse stock due to invoice edit");
+                                        cmdRev.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+                                        cmdRev.ExecuteNonQuery();
+                                    }
+                                }
+                            }
+                        }
+
+                        // STEP 3: Insert NEW PurchaseHeader
+                        long newPurchaseId;
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+
+                            cmd.CommandText = @"
+                INSERT INTO PurchaseHeader
+                (InvoiceNo, InvoiceDate, SupplierId, TotalAmount, TotalTax, RoundOff, Notes, CreatedBy, CreatedAt, Status)
+                VALUES
+                (@InvoiceNo, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax, @RoundOff, @Notes, @User, @Now, 1);
+                SELECT last_insert_rowid();";
+
+                            cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo);
+                            cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate);
+                            cmd.Parameters.AddWithValue("@SupplierId", dto.SupplierId);
+                            cmd.Parameters.AddWithValue("@TotalAmount", dto.TotalAmount);
+                            cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
+                            cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
+                            cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
+                            cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+                            cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+                            newPurchaseId = (long)cmd.ExecuteScalar();
+                        }
+
+                        // STEP 4: Insert PurchaseItems + PurchaseItemDetails + Ledger
+                        foreach (var it in dto.Items)
+                        {
+                            long newItemId;
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+                                cmd.CommandText =
+                                @"INSERT INTO PurchaseItem
+                  (PurchaseId, ItemId, batchNo, Qty, Rate, DiscountPercent, NetRate, 
+                   GstPercent, GstValue, CgstPercent, CgstValue, SgstPercent, SgstValue,
+                   IgstPercent, IgstValue, LineSubTotal, LineTotal, Notes)
+                  VALUES
+                  (@Pid, @ItemId, @Batch, @Qty, @Rate, @Disc, @NetRate,
+                   @GstP, @GstV, @CgstP, @CgstV, @SgstP, @SgstV, @IgstP, @IgstV,
+                   @Sub, @Total, @Notes);
+                  SELECT last_insert_rowid();";
+
+                                cmd.Parameters.AddWithValue("@Pid", newPurchaseId);
+                                cmd.Parameters.AddWithValue("@ItemId", it.ItemId);
+                                cmd.Parameters.AddWithValue("@Batch", it.BatchNo);
+                                cmd.Parameters.AddWithValue("@Qty", it.Qty);
+                                cmd.Parameters.AddWithValue("@Rate", it.Rate);
+                                cmd.Parameters.AddWithValue("@Disc", it.DiscountPercent);
+                                cmd.Parameters.AddWithValue("@NetRate", it.NetRate);
+
+                                cmd.Parameters.AddWithValue("@GstP", it.GstPercent);
+                                cmd.Parameters.AddWithValue("@GstV", it.GstValue);
+                                cmd.Parameters.AddWithValue("@CgstP", it.CgstPercent);
+                                cmd.Parameters.AddWithValue("@CgstV", it.CgstValue);
+                                cmd.Parameters.AddWithValue("@SgstP", it.SgstPercent);
+                                cmd.Parameters.AddWithValue("@SgstV", it.SgstValue);
+                                cmd.Parameters.AddWithValue("@IgstP", it.IgstPercent);
+                                cmd.Parameters.AddWithValue("@IgstV", it.IgstValue);
+
+                                cmd.Parameters.AddWithValue("@Sub", it.LineSubTotal);
+                                cmd.Parameters.AddWithValue("@Total", it.LineTotal);
+                                cmd.Parameters.AddWithValue("@Notes", it.Notes ?? "");
+
+                                newItemId = (long)cmd.ExecuteScalar();
+                            }
+
+                            // Insert details
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+
+                                cmd.CommandText =
+                                @"INSERT INTO PurchaseItemDetails
+                  (PurchaseItemId, salesPrice, mrp, description, mfgdate, expdate,
+                   modelno, brand, size, color, weight, dimension, createdby, createdat)
+                  VALUES
+                  (@Pid, @SP, @MRP, @Desc, @MFG, @EXP, @Model, @Brand, @Size, @Color, @Weight, @Dim, @User, @Now)";
+
+                                cmd.Parameters.AddWithValue("@Pid", newItemId);
+                                cmd.Parameters.AddWithValue("@SP", it.SalesPrice);
+                                cmd.Parameters.AddWithValue("@MRP", it.Mrp);
+                                cmd.Parameters.AddWithValue("@Desc", it.Description ?? "");
+                                cmd.Parameters.AddWithValue("@MFG", it.MfgDate ?? "");
+                                cmd.Parameters.AddWithValue("@EXP", it.ExpDate ?? "");
+                                cmd.Parameters.AddWithValue("@Model", it.ModelNo ?? "");
+                                cmd.Parameters.AddWithValue("@Brand", it.Brand ?? "");
+                                cmd.Parameters.AddWithValue("@Size", it.Size ?? "");
+                                cmd.Parameters.AddWithValue("@Color", it.Color ?? "");
+                                cmd.Parameters.AddWithValue("@Weight", it.Weight);
+                                cmd.Parameters.AddWithValue("@Dim", it.Dimension ?? "");
+
+                                cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+                                cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+                                cmd.ExecuteNonQuery();
+                            }
+
+                            // Insert ledger entry for NEW PURCHASE
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+                                cmd.CommandText =
+                                @"INSERT INTO ItemLedger
+                  (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
+                  VALUES
+                  (@ItemId, @BatchNo, @Dt, 'PURCHASE', @Ref, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
+
+                                cmd.Parameters.AddWithValue("@ItemId", it.ItemId);
+                                cmd.Parameters.AddWithValue("@BatchNo", it.BatchNo);
+                                cmd.Parameters.AddWithValue("@Dt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                cmd.Parameters.AddWithValue("@Ref", $"PI-{newPurchaseId}");
+
+                                cmd.Parameters.AddWithValue("@Qty", it.Qty);
+                                cmd.Parameters.AddWithValue("@Rate", it.Rate);
+                                cmd.Parameters.AddWithValue("@Disc", it.DiscountPercent);
+                                cmd.Parameters.AddWithValue("@NetRate", it.NetRate);
+                                cmd.Parameters.AddWithValue("@Total", it.LineSubTotal);
+
+                                cmd.Parameters.AddWithValue("@Rem", "Purchase created after edit");
+                                cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+
+                        tx.Commit();
+                        return (true, "Updated Successfully", newPurchaseId);
+                    }
+
+                    catch (Exception ex)
+                    {
+                        tx.Rollback();
+                        return (false, ex.Message, 0);
+                    }
+                }
+            }
+        }
+        public (bool Success, string Message, long NewPurchaseId) UpdatePurchaseInvoiceNew(PurchaseInvoiceDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+
+                    try
+                    {
+                        long oldId = dto.PurchaseId;
+
+                        // STEP 1: Mark old invoice as rejected
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = "UPDATE PurchaseHeader SET Status = 0 WHERE PurchaseId = @id";
+                            cmd.Parameters.AddWithValue("@id", oldId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // STEP 2: Reverse ledger entries for old invoice
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"SELECT ItemId, batchNo, Qty, Rate, DiscountPercent, NetRate, LineSubTotal
+                                FROM PurchaseItem WHERE PurchaseId=@id";
+                            cmd.Parameters.AddWithValue("@id", oldId);
+
+                            using (var r = cmd.ExecuteReader())
+                                while (r.Read())
+                                {
+                                    var ItemId = r.GetInt64(0);
+                                    var BatchNo = r.IsDBNull(1) ? "" : r.GetString(1);
+                                    var Qty = r.GetDouble(2);
+                                    var Rate = r.GetDouble(3);
+                                    var Disc = r.GetDouble(4);
+                                    var NetRate = r.GetDouble(5);
+                                    var SubTotal = r.GetDouble(6);
+                                
+
+                            using (var cmdRev = conn.CreateCommand())
+                            {
+                                cmdRev.Transaction = tx;
+
+                                cmdRev.CommandText =
+                                @"INSERT INTO ItemLedger (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
+                  VALUES (@ItemId, @BatchNo, @Dt, 'PURCHASE-REVERSAL', @RefNo, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
+
+                                cmdRev.Parameters.AddWithValue("@ItemId", ItemId);
+                                cmdRev.Parameters.AddWithValue("@BatchNo", BatchNo);
+                                cmdRev.Parameters.AddWithValue("@Dt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                cmdRev.Parameters.AddWithValue("@RefNo", $"PI-{oldId}");
+
+                                cmdRev.Parameters.AddWithValue("@Qty", -Qty);
+                                cmdRev.Parameters.AddWithValue("@Rate", Rate);
+                                cmdRev.Parameters.AddWithValue("@Disc", Disc);
+                                cmdRev.Parameters.AddWithValue("@NetRate", NetRate);
+                                cmdRev.Parameters.AddWithValue("@Total", -SubTotal);
+
+                                cmdRev.Parameters.AddWithValue("@Rem", "Reverse stock due to invoice edit");
+                                cmdRev.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+                                cmdRev.ExecuteNonQuery();
+                            }
+                                }
+                        }
+
+
+                        // STEP 3: Insert NEW PurchaseHeader
+                        long newPurchaseId;
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+
+                            cmd.CommandText = @"
+                INSERT INTO PurchaseHeader
+                (InvoiceNo, InvoiceDate, SupplierId, TotalAmount, TotalTax, RoundOff, Notes, CreatedBy, CreatedAt, Status)
+                VALUES
+                (@InvoiceNo, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax, @RoundOff, @Notes, @User, @Now, 1);
+                SELECT last_insert_rowid();";
+
+                            cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo);
+                            cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate);
+                            cmd.Parameters.AddWithValue("@SupplierId", dto.SupplierId);
+                            cmd.Parameters.AddWithValue("@TotalAmount", dto.TotalAmount);
+                            cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
+                            cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
+                            cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
+                            cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+                            cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+                            newPurchaseId = (long)cmd.ExecuteScalar();
+                        }
+
+                        // STEP 4: Insert PurchaseItems + PurchaseItemDetails + Ledger
+                        foreach (var it in dto.Items)
+                        {
+                            long newItemId;
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+                                cmd.CommandText =
+                                @"INSERT INTO PurchaseItem
+                  (PurchaseId, ItemId, batchNo, Qty, Rate, DiscountPercent, NetRate, 
+                   GstPercent, GstValue, CgstPercent, CgstValue, SgstPercent, SgstValue,
+                   IgstPercent, IgstValue, LineSubTotal, LineTotal, Notes)
+                  VALUES
+                  (@Pid, @ItemId, @Batch, @Qty, @Rate, @Disc, @NetRate,
+                   @GstP, @GstV, @CgstP, @CgstV, @SgstP, @SgstV, @IgstP, @IgstV,
+                   @Sub, @Total, @Notes);
+                  SELECT last_insert_rowid();";
+
+                                cmd.Parameters.AddWithValue("@Pid", newPurchaseId);
+                                cmd.Parameters.AddWithValue("@ItemId", it.ItemId);
+                                cmd.Parameters.AddWithValue("@Batch", it.BatchNo);
+                                cmd.Parameters.AddWithValue("@Qty", it.Qty);
+                                cmd.Parameters.AddWithValue("@Rate", it.Rate);
+                                cmd.Parameters.AddWithValue("@Disc", it.DiscountPercent);
+                                cmd.Parameters.AddWithValue("@NetRate", it.NetRate);
+
+                                cmd.Parameters.AddWithValue("@GstP", it.GstPercent);
+                                cmd.Parameters.AddWithValue("@GstV", it.GstValue);
+                                cmd.Parameters.AddWithValue("@CgstP", it.CgstPercent);
+                                cmd.Parameters.AddWithValue("@CgstV", it.CgstValue);
+                                cmd.Parameters.AddWithValue("@SgstP", it.SgstPercent);
+                                cmd.Parameters.AddWithValue("@SgstV", it.SgstValue);
+                                cmd.Parameters.AddWithValue("@IgstP", it.IgstPercent);
+                                cmd.Parameters.AddWithValue("@IgstV", it.IgstValue);
+
+                                cmd.Parameters.AddWithValue("@Sub", it.LineSubTotal);
+                                cmd.Parameters.AddWithValue("@Total", it.LineTotal);
+                                cmd.Parameters.AddWithValue("@Notes", it.Notes ?? "");
+
+                                newItemId = (long)cmd.ExecuteScalar();
+                            }
+
+                            // Insert details
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+
+                                cmd.CommandText =
+                                @"INSERT INTO PurchaseItemDetails
+                  (PurchaseItemId, salesPrice, mrp, description, mfgdate, expdate,
+                   modelno, brand, size, color, weight, dimension, createdby, createdat)
+                  VALUES
+                  (@Pid, @SP, @MRP, @Desc, @MFG, @EXP, @Model, @Brand, @Size, @Color, @Weight, @Dim, @User, @Now)";
+
+                                cmd.Parameters.AddWithValue("@Pid", newItemId);
+                                cmd.Parameters.AddWithValue("@SP", it.SalesPrice);
+                                cmd.Parameters.AddWithValue("@MRP", it.Mrp);
+                                cmd.Parameters.AddWithValue("@Desc", it.Description ?? "");
+                                cmd.Parameters.AddWithValue("@MFG", it.MfgDate ?? "");
+                                cmd.Parameters.AddWithValue("@EXP", it.ExpDate ?? "");
+                                cmd.Parameters.AddWithValue("@Model", it.ModelNo ?? "");
+                                cmd.Parameters.AddWithValue("@Brand", it.Brand ?? "");
+                                cmd.Parameters.AddWithValue("@Size", it.Size ?? "");
+                                cmd.Parameters.AddWithValue("@Color", it.Color ?? "");
+                                cmd.Parameters.AddWithValue("@Weight", it.Weight);
+                                cmd.Parameters.AddWithValue("@Dim", it.Dimension ?? "");
+
+                                cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+                                cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+                                cmd.ExecuteNonQuery();
+                            }
+
+                            // Insert ledger entry for NEW PURCHASE
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+                                cmd.CommandText =
+                                @"INSERT INTO ItemLedger
+                  (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
+                  VALUES
+                  (@ItemId, @BatchNo, @Dt, 'PURCHASE', @Ref, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
+
+                                cmd.Parameters.AddWithValue("@ItemId", it.ItemId);
+                                cmd.Parameters.AddWithValue("@BatchNo", it.BatchNo);
+                                cmd.Parameters.AddWithValue("@Dt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                cmd.Parameters.AddWithValue("@Ref", $"PI-{newPurchaseId}");
+
+                                cmd.Parameters.AddWithValue("@Qty", it.Qty);
+                                cmd.Parameters.AddWithValue("@Rate", it.Rate);
+                                cmd.Parameters.AddWithValue("@Disc", it.DiscountPercent);
+                                cmd.Parameters.AddWithValue("@NetRate", it.NetRate);
+                                cmd.Parameters.AddWithValue("@Total", it.LineSubTotal);
+
+                                cmd.Parameters.AddWithValue("@Rem", "Purchase created after edit");
+                                cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+
+                        tx.Commit();
+                        return (true, "Updated Successfully", newPurchaseId);
+                    }
+                    catch (Exception ex)
+                    {
+                        tx.Rollback();
+                        return (false, ex.Message, 0);
+                    }
+                }
+            }
+
+        }
+
+
+
     }
 
 }

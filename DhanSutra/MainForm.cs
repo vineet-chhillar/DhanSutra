@@ -1766,6 +1766,8 @@ namespace DhanSutra
 
                     case "SavePurchaseInvoice":
                         {
+                            
+
                             try
                             {
                                 var payload = req.Payload as JObject;
@@ -1775,22 +1777,39 @@ namespace DhanSutra
                                 // Deserialize into PurchaseInvoiceDto
                                 var dto = payload.ToObject<PurchaseInvoiceDto>();
 
-                                var result = db.SavePurchaseInvoice(dto);
-                                long purchaseId = result.purchaseId;
-                                string invoiceNo = result.invoiceNo;
-
-                                var response = new
+                                var errors = db.ValidatePurchaseInvoice(dto);
+                                if (errors.Any())
                                 {
-                                    action = "SavePurchaseInvoiceResponse",
-                                    success = true,
-                                    purchaseId = purchaseId,   // <-- FIXED
-                                    invoiceNo = invoiceNo,
-                                    message = "Purchase invoice saved successfully."
-                                };
+                                    var response = new
+                                    {
+                                        action = "SavePurchaseInvoiceResponse",
+                                        success = false,
+                                       
+                                        message = "validation Error."
+                                    };
+                                }
+                                else
+                                {
+                                    var result = db.SavePurchaseInvoice(dto);
+                                    long purchaseId = result.purchaseId;
+                                    string invoiceNo = result.invoiceNo;
 
-                                webView.CoreWebView2.PostWebMessageAsJson(
-                                    JsonConvert.SerializeObject(response)
-                                );
+                                    var response = new
+                                    {
+                                        action = "SavePurchaseInvoiceResponse",
+                                        success = true,
+                                        purchaseId = purchaseId,   // <-- FIXED
+                                        invoiceNo = invoiceNo,
+                                        message = "Purchase invoice saved successfully."
+                                    };
+
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(response)
+                                    );
+
+                                }
+
+                                   
                             }
                             catch (Exception ex)
                             {
@@ -1963,6 +1982,95 @@ namespace DhanSutra
 
                             break;
                         }
+                    case "CanEditPurchaseInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long purchaseId = payload["PurchaseId"].ToObject<long>();
+
+                            //long purchaseId = msg.Payload?["PurchaseId"]?.ToObject<long>() ?? 0;
+
+                            bool editable = db.CanEditPurchaseInvoice(purchaseId);
+
+                            var response = new
+                            {
+                                action = "CanEditPurchaseInvoiceResponse",
+                                PurchaseId = purchaseId,
+                                Editable = editable
+                            };
+
+                            webView.CoreWebView2
+                               .PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+
+                            break;
+                        }
+
+                    case "LoadPurchaseInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long purchaseId = payload["PurchaseId"].ToObject<long>();
+
+                            var dto = db.LoadPurchaseInvoice(purchaseId);
+
+                            var response = new
+                            {
+                                action = "LoadPurchaseInvoiceResponse",
+                                success = dto != null,
+                                data = dto
+                            };
+
+                            webView.CoreWebView2
+                               .PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+
+                            break;
+
+                           
+                        }
+
+                    case "UpdatePurchaseInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+
+                            if (payload == null)
+                            {
+                                var response = new
+                                {
+                                    action = "UpdatePurchaseInvoiceResponse",
+                                    success = false,
+                                    message = "Invalid update payload"
+                                };
+                                webView.CoreWebView2
+                              .PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+
+                                break;
+                            }
+                            else
+                            {
+
+
+                                // Deserialize into PurchaseInvoiceDto
+                                var dto = payload.ToObject<PurchaseInvoiceDto>();
+                                var result = db.UpdatePurchaseInvoice(dto);
+
+                                var response = new
+                                {
+                                    action = "UpdatePurchaseInvoiceResponse",
+                                    success = result.Success,
+                                    message = result.Message,
+                                    newPurchaseId = result.NewPurchaseId,
+                                    invoiceNo = dto.InvoiceNo
+                                };
+                                webView.CoreWebView2
+                              .PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+
+                                break;
+
+                            }
+                        }
+
 
                     case "PrintPurchaseInvoice":
                         {
