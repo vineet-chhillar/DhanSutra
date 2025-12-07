@@ -1400,30 +1400,30 @@ LIMIT 1;", conn))
                         // 2️⃣ Generate Invoice Number (Merged)
                         //-------------------------------------
 
-                        string prefix = "";
-                        long startNo = 1;
-                        long currentNo = 1;
+                        //string prefix = "";
+                        //long startNo = 1;
+                        //long currentNo = 1;
 
-                        using (var cmd = conn.CreateCommand())
-                        {
-                            cmd.Transaction = tx;
-                            cmd.CommandText = @"
-                        SELECT InvoicePrefix, InvoiceStartNo, CurrentInvoiceNo 
-                        FROM CompanyProfile ORDER BY Id LIMIT 1";
+                        //using (var cmd = conn.CreateCommand())
+                        //{
+                        //    cmd.Transaction = tx;
+                        //    cmd.CommandText = @"
+                        //SELECT InvoicePrefix, InvoiceStartNo, CurrentInvoiceNo 
+                        //FROM CompanyProfile ORDER BY Id LIMIT 1";
 
-                            using (var r = cmd.ExecuteReader())
-                            {
-                                if (!r.Read())
-                                    throw new Exception("Company profile not found");
+                        //    using (var r = cmd.ExecuteReader())
+                        //    {
+                        //        if (!r.Read())
+                        //            throw new Exception("Company profile not found");
 
-                                prefix = r.IsDBNull(0) ? "" : r.GetString(0);
-                                startNo = r.IsDBNull(1) ? 1 : r.GetInt64(1);
-                                currentNo = r.IsDBNull(2) ? startNo : r.GetInt64(2);
-                            }
-                        }
+                        //        prefix = r.IsDBNull(0) ? "" : r.GetString(0);
+                        //        startNo = r.IsDBNull(1) ? 1 : r.GetInt64(1);
+                        //        currentNo = r.IsDBNull(2) ? startNo : r.GetInt64(2);
+                        //    }
+                        //}
 
-                        int nextNo = (int)(currentNo + 1);
-                        string fullInvoiceNo = prefix + nextNo.ToString();
+                        //int nextNo = (int)(currentNo + 1);
+                        //string fullInvoiceNo = prefix + nextNo.ToString();
 
                         //-------------------------------------
                         // 3️⃣ Insert Invoice Header
@@ -1454,8 +1454,8 @@ LIMIT 1;", conn))
                         SELECT last_insert_rowid();
                     ";
 
-                            cmd.Parameters.AddWithValue("@InvoiceNo", fullInvoiceNo);
-                            cmd.Parameters.AddWithValue("@InvoiceNum", nextNo);
+                            cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo);
+                            cmd.Parameters.AddWithValue("@InvoiceNum", dto.InvoiceNum);
 
                             cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate);
                             cmd.Parameters.AddWithValue("@CompanyProfileId", dto.CompanyId);
@@ -1546,7 +1546,7 @@ LIMIT 1;", conn))
                             ledgerEntry.BatchNo = item.BatchNo;
                             ledgerEntry.Date = dto.InvoiceDate;
                             ledgerEntry.TxnType = "SALE";
-                            ledgerEntry.RefNo = fullInvoiceNo;
+                            ledgerEntry.RefNo = dto.InvoiceNo;
                             ledgerEntry.Qty = item.Qty;
                             ledgerEntry.Rate = item.Rate;
                             ledgerEntry.DiscountPercent = discountPercent;
@@ -1568,20 +1568,20 @@ LIMIT 1;", conn))
                         // 5️⃣ Update CurrentInvoiceNo
                         //-------------------------------------
 
-                        using (var cmd = conn.CreateCommand())
-                        {
-                            cmd.Transaction = tx;
-                            cmd.CommandText = "UPDATE CompanyProfile SET CurrentInvoiceNo = @n";
-                            cmd.Parameters.AddWithValue("@n", nextNo);
-                            cmd.ExecuteNonQuery();
-                        }
+                        //using (var cmd = conn.CreateCommand())
+                        //{
+                        //    cmd.Transaction = tx;
+                        //    cmd.CommandText = "UPDATE CompanyProfile SET CurrentInvoiceNo = @n";
+                        //    cmd.Parameters.AddWithValue("@n", nextNo);
+                        //    cmd.ExecuteNonQuery();
+                        //}
 
                         //-------------------------------------
                         // 6️⃣ Commit and return both values
                         //-------------------------------------
 
                         tx.Commit();
-                        return (invoiceId, fullInvoiceNo);
+                        return (invoiceId, dto.InvoiceNo);
                     }
                     catch
                     {
@@ -1702,274 +1702,274 @@ LIMIT 1;", conn))
             }
         }
 
-        public Models.InvoiceLoadDto GetInvoiceForReturn(long invoiceId)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
+//        public Models.InvoiceLoadDto GetInvoiceForReturn(long invoiceId)
+//        {
+//            using (var conn = new SQLiteConnection(_connectionString))
+//            {
+//                conn.Open();
 
-                var dto = new Models.InvoiceLoadDto();
-                dto.Items = new List<Models.InvoiceItemDto>();
+//                var dto = new Models.InvoiceLoadDto();
+//                dto.Items = new List<Models.InvoiceItemDto>();
 
-                // 1️⃣ Load invoice header
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-                SELECT 
-                    Id,
-                    InvoiceNo, InvoiceNum,
-                    InvoiceDate,
-                    CompanyProfileId,
+//                // 1️⃣ Load invoice header
+//                using (var cmd = conn.CreateCommand())
+//                {
+//                    cmd.CommandText = @"
+//                SELECT 
+//                    Id,
+//                    InvoiceNo, InvoiceNum,
+//                    InvoiceDate,
+//                    CompanyProfileId,
 
-                    CustomerId, CustomerName, CustomerPhone, CustomerState, CustomerAddress,
+//                    CustomerId, CustomerName, CustomerPhone, CustomerState, CustomerAddress,
 
-                    SubTotal, TotalTax, TotalAmount, RoundOff
-                FROM Invoice
-                WHERE Id = @Id
-            ";
-                    cmd.Parameters.AddWithValue("@Id", invoiceId);
+//                    SubTotal, TotalTax, TotalAmount, RoundOff
+//                FROM Invoice
+//                WHERE Id = @Id
+//            ";
+//                    cmd.Parameters.AddWithValue("@Id", invoiceId);
 
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        if (!r.Read())
-                        {
-                            return null;  // invoice not found
-                        }
+//                    using (var r = cmd.ExecuteReader())
+//                    {
+//                        if (!r.Read())
+//                        {
+//                            return null;  // invoice not found
+//                        }
 
-                        dto.Id = r.GetInt64(0);
-                        dto.InvoiceNo = r.GetString(1);
-                        dto.InvoiceNum = r.GetInt32(2);
-                        dto.InvoiceDate = r.GetString(3);
-                        dto.CompanyProfileId = r.GetInt32(4);
+//                        dto.Id = r.GetInt64(0);
+//                        dto.InvoiceNo = r.GetString(1);
+//                        dto.InvoiceNum = r.GetInt32(2);
+//                        dto.InvoiceDate = r.GetString(3);
+//                        dto.CompanyProfileId = r.GetInt32(4);
 
-                        dto.CustomerId = r.IsDBNull(5) ? 0 : r.GetInt32(5);
-                        dto.CustomerName = r.IsDBNull(6) ? "" : r.GetString(6);
-                        dto.CustomerPhone = r.IsDBNull(7) ? "" : r.GetString(7);
-                        dto.CustomerState = r.IsDBNull(8) ? "" : r.GetString(8);
-                        dto.CustomerAddress = r.IsDBNull(9) ? "" : r.GetString(9);
+//                        dto.CustomerId = r.IsDBNull(5) ? 0 : r.GetInt32(5);
+//                        dto.CustomerName = r.IsDBNull(6) ? "" : r.GetString(6);
+//                        dto.CustomerPhone = r.IsDBNull(7) ? "" : r.GetString(7);
+//                        dto.CustomerState = r.IsDBNull(8) ? "" : r.GetString(8);
+//                        dto.CustomerAddress = r.IsDBNull(9) ? "" : r.GetString(9);
 
-                        dto.SubTotal = r.GetDecimal(10);
-                        dto.TotalTax = r.GetDecimal(11);
-                        dto.TotalAmount = r.GetDecimal(12);
-                        dto.RoundOff = r.GetDecimal(13);
-                    }
-                }
+//                        dto.SubTotal = r.GetDecimal(10);
+//                        dto.TotalTax = r.GetDecimal(11);
+//                        dto.TotalAmount = r.GetDecimal(12);
+//                        dto.RoundOff = r.GetDecimal(13);
+//                    }
+//                }
 
-                // 2️⃣ Load invoice items
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-                SELECT
-    ItemId,item.name BatchNo, HsnCode,
-    Qty, Rate, DiscountPercent,
-    GstPercent, GstValue,
-    CgstPercent, CgstValue,
-    SgstPercent, SgstValue,
-    IgstPercent, IgstValue,
-    LineSubTotal, LineTotal
-FROM InvoiceItems
-inner join item on item.id=invoiceitems.itemid
-WHERE InvoiceId =@Id
-            ";
-                    cmd.Parameters.AddWithValue("@Id", invoiceId);
+//                // 2️⃣ Load invoice items
+//                using (var cmd = conn.CreateCommand())
+//                {
+//                    cmd.CommandText = @"
+//                SELECT
+//    ItemId,item.name BatchNo, HsnCode,
+//    Qty, Rate, DiscountPercent,
+//    GstPercent, GstValue,
+//    CgstPercent, CgstValue,
+//    SgstPercent, SgstValue,
+//    IgstPercent, IgstValue,
+//    LineSubTotal, LineTotal
+//FROM InvoiceItems
+//inner join item on item.id=invoiceitems.itemid
+//WHERE InvoiceId =@Id
+//            ";
+//                    cmd.Parameters.AddWithValue("@Id", invoiceId);
 
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            var item = new Models.InvoiceItemDto
-                            {
-                                ItemId = r.GetInt32(0),
-                                BatchNo = r.IsDBNull(1) ? "" : r.GetString(1),
-                                ItemName = r.IsDBNull(2) ? "" : r.GetString(2),
-                                HsnCode = r.IsDBNull(3) ? "" : r.GetString(3),
+//                    using (var r = cmd.ExecuteReader())
+//                    {
+//                        while (r.Read())
+//                        {
+//                            var item = new Models.InvoiceItemDto
+//                            {
+//                                ItemId = r.GetInt32(0),
+//                                BatchNo = r.IsDBNull(1) ? "" : r.GetString(1),
+//                                ItemName = r.IsDBNull(2) ? "" : r.GetString(2),
+//                                HsnCode = r.IsDBNull(3) ? "" : r.GetString(3),
 
-                                Qty = r.GetDecimal(4),
-                                Rate = r.GetDecimal(5),
-                                DiscountPercent = r.GetDecimal(6),
+//                                Qty = r.GetDecimal(4),
+//                                Rate = r.GetDecimal(5),
+//                                DiscountPercent = r.GetDecimal(6),
 
-                                GstPercent = r.GetDecimal(7),
-                                GstValue = r.GetDecimal(8),
+//                                GstPercent = r.GetDecimal(7),
+//                                GstValue = r.GetDecimal(8),
 
-                                CgstPercent = r.GetDecimal(9),
-                                CgstValue = r.GetDecimal(10),
+//                                CgstPercent = r.GetDecimal(9),
+//                                CgstValue = r.GetDecimal(10),
 
-                                SgstPercent = r.GetDecimal(11),
-                                SgstValue = r.GetDecimal(12),
+//                                SgstPercent = r.GetDecimal(11),
+//                                SgstValue = r.GetDecimal(12),
 
-                                IgstPercent = r.GetDecimal(13),
-                                IgstValue = r.GetDecimal(14),
+//                                IgstPercent = r.GetDecimal(13),
+//                                IgstValue = r.GetDecimal(14),
 
-                                LineSubTotal = r.GetDecimal(15),
-                                LineTotal = r.GetDecimal(16)
-                            };
+//                                LineSubTotal = r.GetDecimal(15),
+//                                LineTotal = r.GetDecimal(16)
+//                            };
 
-                            dto.Items.Add(item);
-                        }
-                    }
-                }
+//                            dto.Items.Add(item);
+//                        }
+//                    }
+//                }
 
-                return dto;
-            }
-        }
-        public int GetNextSalesReturnNumber(SQLiteConnection conn, IDbTransaction tran)
-        {
-            // Fetch greatest number; if table is empty return 1
-            const string sql = @"SELECT IFNULL(MAX(ReturnNum), 0) FROM SalesReturn;";
+//                return dto;
+//            }
+//        }
+        //public int GetNextSalesReturnNumber(SQLiteConnection conn, IDbTransaction tran)
+        //{
+        //    // Fetch greatest number; if table is empty return 1
+        //    const string sql = @"SELECT IFNULL(MAX(ReturnNum), 0) FROM SalesReturn;";
 
-            int lastNum = conn.ExecuteScalar<int>(sql, transaction: tran);
-            return lastNum + 1;
-        }
+        //    int lastNum = conn.ExecuteScalar<int>(sql, transaction: tran);
+        //    return lastNum + 1;
+        //}
 
-        public (bool Success, int ReturnId) SaveSalesReturn(SalesReturnDto dto)
-        {
-            var conn = new SQLiteConnection(_connectionString);
-            conn.Open();
-            using (var tran = conn.BeginTransaction())
-            {
-                try
-                {
-                    // Generate running number
-                    int nextNum = GetNextSalesReturnNumber(conn, tran);
-                    dto.ReturnNum = nextNum;
-                    dto.ReturnNo = $"SR-{nextNum:D4}";
+        //public (bool Success, int ReturnId) SaveSalesReturn(SalesReturnDto dto)
+        //{
+        //    var conn = new SQLiteConnection(_connectionString);
+        //    conn.Open();
+        //    using (var tran = conn.BeginTransaction())
+        //    {
+        //        try
+        //        {
+        //            // Generate running number
+        //            int nextNum = GetNextSalesReturnNumber(conn, tran);
+        //            dto.ReturnNum = nextNum;
+        //            dto.ReturnNo = $"SR-{nextNum:D4}";
 
-                    // Insert header
-                    string insertHeader = @"
-            INSERT INTO SalesReturn
-            (ReturnNo, ReturnNum, ReturnDate, InvoiceId, InvoiceNo, CustomerId,
-             SubTotal, TotalTax, TotalAmount, RoundOff, Notes, CreatedBy, CreatedAt)
-            VALUES
-            (@ReturnNo, @ReturnNum, @ReturnDate, @InvoiceId, @InvoiceNo, @CustomerId,
-             @SubTotal, @TotalTax, @TotalAmount, @RoundOff, @Notes, @CreatedBy, @CreatedAt);
-            SELECT last_insert_rowid();
-        ";
+        //            // Insert header
+        //            string insertHeader = @"
+        //    INSERT INTO SalesReturn
+        //    (ReturnNo, ReturnNum, ReturnDate, InvoiceId, InvoiceNo, CustomerId,
+        //     SubTotal, TotalTax, TotalAmount, RoundOff, Notes, CreatedBy, CreatedAt)
+        //    VALUES
+        //    (@ReturnNo, @ReturnNum, @ReturnDate, @InvoiceId, @InvoiceNo, @CustomerId,
+        //     @SubTotal, @TotalTax, @TotalAmount, @RoundOff, @Notes, @CreatedBy, @CreatedAt);
+        //    SELECT last_insert_rowid();
+        //";
 
-                    int salesReturnId = conn.ExecuteScalar<int>(
-                        insertHeader,
-                        new
-                        {
-                            dto.ReturnNo,
-                            dto.ReturnNum,
-                            ReturnDate = dto.ReturnDate.ToString("yyyy-MM-dd"),
-                            dto.InvoiceId,
-                            dto.InvoiceNo,
-                            dto.CustomerId,
-                            dto.SubTotal,
-                            dto.TotalTax,
-                            dto.TotalAmount,
-                            dto.RoundOff,
-                            dto.Notes,
-                            dto.CreatedBy,
-                            CreatedAt = dto.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
-                        },
-                        transaction: tran
-                    );
+        //            int salesReturnId = conn.ExecuteScalar<int>(
+        //                insertHeader,
+        //                new
+        //                {
+        //                    dto.ReturnNo,
+        //                    dto.ReturnNum,
+        //                    ReturnDate = dto.ReturnDate.ToString("yyyy-MM-dd"),
+        //                    dto.InvoiceId,
+        //                    dto.InvoiceNo,
+        //                    dto.CustomerId,
+        //                    dto.SubTotal,
+        //                    dto.TotalTax,
+        //                    dto.TotalAmount,
+        //                    dto.RoundOff,
+        //                    dto.Notes,
+        //                    dto.CreatedBy,
+        //                    CreatedAt = dto.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+        //                },
+        //                transaction: tran
+        //            );
 
-                    // Insert items
-                    string insertLine = @"
-            INSERT INTO SalesReturnItem
-            (SalesReturnId, InvoiceItemId, ItemId, BatchNo, Qty, Rate,
-             DiscountPercent,
-             GstPercent, GstValue, CgstPercent, CgstValue,
-             SgstPercent, SgstValue, IgstPercent, IgstValue,
-             LineSubTotal, LineTotal)
-            VALUES
-            (@SalesReturnId, @InvoiceItemId, @ItemId, @BatchNo, @Qty, @Rate,
-             @DiscountPercent,
-             @GstPercent, @GstValue, @CgstPercent, @CgstValue,
-             @SgstPercent, @SgstValue, @IgstPercent, @IgstValue,
-             @LineSubTotal, @LineTotal);
-        ";
+        //            // Insert items
+        //            string insertLine = @"
+        //    INSERT INTO SalesReturnItem
+        //    (SalesReturnId, InvoiceItemId, ItemId, BatchNo, Qty, Rate,
+        //     DiscountPercent,
+        //     GstPercent, GstValue, CgstPercent, CgstValue,
+        //     SgstPercent, SgstValue, IgstPercent, IgstValue,
+        //     LineSubTotal, LineTotal)
+        //    VALUES
+        //    (@SalesReturnId, @InvoiceItemId, @ItemId, @BatchNo, @Qty, @Rate,
+        //     @DiscountPercent,
+        //     @GstPercent, @GstValue, @CgstPercent, @CgstValue,
+        //     @SgstPercent, @SgstValue, @IgstPercent, @IgstValue,
+        //     @LineSubTotal, @LineTotal);
+        //";
 
-                    foreach (var item in dto.Items)
-                    {
-                        if (item.Qty <= 0) continue;
+        //            foreach (var item in dto.Items)
+        //            {
+        //                if (item.Qty <= 0) continue;
 
-                        conn.Execute(
-                            insertLine,
-                            new
-                            {
-                                SalesReturnId = salesReturnId,
-                                item.InvoiceItemId,
-                                item.ItemId,
-                                item.BatchNo,
-                                item.Qty,
-                                item.Rate,
-                                item.DiscountPercent,
-                                item.GstPercent,
-                                item.GstValue,
-                                item.CgstPercent,
-                                item.CgstValue,
-                                item.SgstPercent,
-                                item.SgstValue,
-                                item.IgstPercent,
-                                item.IgstValue,
-                                item.LineSubTotal,
-                                item.LineTotal
-                            },
-                            transaction: tran
-                        );
+        //                conn.Execute(
+        //                    insertLine,
+        //                    new
+        //                    {
+        //                        SalesReturnId = salesReturnId,
+        //                        item.InvoiceItemId,
+        //                        item.ItemId,
+        //                        item.BatchNo,
+        //                        item.Qty,
+        //                        item.Rate,
+        //                        item.DiscountPercent,
+        //                        item.GstPercent,
+        //                        item.GstValue,
+        //                        item.CgstPercent,
+        //                        item.CgstValue,
+        //                        item.SgstPercent,
+        //                        item.SgstValue,
+        //                        item.IgstPercent,
+        //                        item.IgstValue,
+        //                        item.LineSubTotal,
+        //                        item.LineTotal
+        //                    },
+        //                    transaction: tran
+        //                );
 
-                        // Increase ReturnedQty in InvoiceItems
-                        string updateReturned = @"
-                UPDATE InvoiceItems
-                SET ReturnedQty = ReturnedQty + @Qty
-                WHERE Id = @InvoiceItemId;
-            ";
-                        conn.Execute(updateReturned, new { item.Qty, item.InvoiceItemId }, transaction: tran);
+        //                // Increase ReturnedQty in InvoiceItems
+        //                string updateReturned = @"
+        //        UPDATE InvoiceItems
+        //        SET ReturnedQty = ReturnedQty + @Qty
+        //        WHERE Id = @InvoiceItemId;
+        //    ";
+        //                conn.Execute(updateReturned, new { item.Qty, item.InvoiceItemId }, transaction: tran);
 
-                        // Increment batch stock
-                        //UpdateBatchStock(item.ItemId, item.BatchNo, +item.Qty, tran);
+        //                // Increment batch stock
+        //                //UpdateBatchStock(item.ItemId, item.BatchNo, +item.Qty, tran);
 
-                        ItemLedger ledgerEntry = new ItemLedger();
-                        ledgerEntry.ItemId = item.ItemId;
-                        ledgerEntry.BatchNo = item.BatchNo;
-                        ledgerEntry.Date = dto.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
-                        ledgerEntry.TxnType = "SALES RETURN";
-                        ledgerEntry.RefNo = dto.ReturnNo;
-                        ledgerEntry.Qty = item.Qty;
-                        ledgerEntry.Rate = item.Rate;
-                        ledgerEntry.DiscountPercent = item.DiscountPercent;
-                        decimal netRate = item.Rate - (item.Rate * item.DiscountPercent / 100);
-                        ledgerEntry.NetRate = netRate;
-                        ledgerEntry.TotalAmount = item.LineTotal;
-                        ledgerEntry.Remarks = "Sales Return";
-                        ledgerEntry.CreatedBy = dto.CreatedBy;
-                        AddItemLedger(ledgerEntry, conn, tran);
-                        UpdateItemBalance(ledgerEntry, conn, tran);
+        //                ItemLedger ledgerEntry = new ItemLedger();
+        //                ledgerEntry.ItemId = item.ItemId;
+        //                ledgerEntry.BatchNo = item.BatchNo;
+        //                ledgerEntry.Date = dto.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
+        //                ledgerEntry.TxnType = "SALES RETURN";
+        //                ledgerEntry.RefNo = dto.ReturnNo;
+        //                ledgerEntry.Qty = item.Qty;
+        //                ledgerEntry.Rate = item.Rate;
+        //                ledgerEntry.DiscountPercent = item.DiscountPercent;
+        //                decimal netRate = item.Rate - (item.Rate * item.DiscountPercent / 100);
+        //                ledgerEntry.NetRate = netRate;
+        //                ledgerEntry.TotalAmount = item.LineTotal;
+        //                ledgerEntry.Remarks = "Sales Return";
+        //                ledgerEntry.CreatedBy = dto.CreatedBy;
+        //                AddItemLedger(ledgerEntry, conn, tran);
+        //                UpdateItemBalance(ledgerEntry, conn, tran);
 
-                    }
+        //            }
 
-                    tran.Commit();
-                    return (true, salesReturnId);
-                }
-                catch
-                {
-                    tran.Rollback();
-                    return (false, 0);
-                    //throw;
-                }
-            }
-        }
+        //            tran.Commit();
+        //            return (true, salesReturnId);
+        //        }
+        //        catch
+        //        {
+        //            tran.Rollback();
+        //            return (false, 0);
+        //            //throw;
+        //        }
+        //    }
+        //}
 
-        public SalesReturnDto LoadSalesReturnDetail(int id)
-        {
-            var conn = new SQLiteConnection(_connectionString);
-            conn.Open();
-            var header = conn.QuerySingle<SalesReturnDto>(
-                "SELECT * FROM SalesReturn WHERE Id=@id", new { id });
+//        public SalesReturnDto LoadSalesReturnDetail(int id)
+//        {
+//            var conn = new SQLiteConnection(_connectionString);
+//            conn.Open();
+//            var header = conn.QuerySingle<SalesReturnDto>(
+//                "SELECT * FROM SalesReturn WHERE Id=@id", new { id });
 
-            var items = conn.Query<SalesReturnItemDto>(@"
-            SELECT SalesReturnItem.*,item.name as ItemName 
-FROM SalesReturnItem
-inner join item on item.id=SalesReturnItem.itemid
-WHERE SalesReturnId=@id",
-                new { id }).ToList();
+//            var items = conn.Query<SalesReturnItemDto>(@"
+//            SELECT SalesReturnItem.*,item.name as ItemName 
+//FROM SalesReturnItem
+//inner join item on item.id=SalesReturnItem.itemid
+//WHERE SalesReturnId=@id",
+//                new { id }).ToList();
 
-            header.Items = items;
-            return header;
-        }
+//            header.Items = items;
+//            return header;
+//        }
 
 
         public List<CustomerDto> GetCustomers()
@@ -3086,330 +3086,330 @@ State=@state
             }
             return list;
         }
-        public List<PurchaseItemForDateDto> SearchPurchaseItemsByDate(DateTime date)
-        {
-            var list = new List<PurchaseItemForDateDto>();
+        //public List<PurchaseItemForDateDto> SearchPurchaseItemsByDate(DateTime date)
+        //{
+        //    var list = new List<PurchaseItemForDateDto>();
 
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText =
-                    @"SELECT 
-            d.id AS ItemDetailsId,
-            d.item_id AS ItemId,
-            i.name AS ItemName,
-            d.refno AS InvoiceNo,
-            d.date AS PurchaseDate,
-            d.SupplierId,
-            s.suppliername AS SupplierName,
-            d.quantity
-          FROM ItemDetails d
-          JOIN Item i ON i.id = d.item_id
-          LEFT JOIN Suppliers s ON s.supplierId = d.SupplierId
-          WHERE DATE(d.date) = DATE(@date)
-          ORDER BY d.date, d.refno;";
+        //    using (var conn = new SQLiteConnection(_connectionString))
+        //    {
+        //        conn.Open();
+        //        using (var cmd = conn.CreateCommand())
+        //        {
+        //            cmd.CommandText =
+        //            @"SELECT 
+        //    d.id AS ItemDetailsId,
+        //    d.item_id AS ItemId,
+        //    i.name AS ItemName,
+        //    d.refno AS InvoiceNo,
+        //    d.date AS PurchaseDate,
+        //    d.SupplierId,
+        //    s.suppliername AS SupplierName,
+        //    d.quantity
+        //  FROM ItemDetails d
+        //  JOIN Item i ON i.id = d.item_id
+        //  LEFT JOIN Suppliers s ON s.supplierId = d.SupplierId
+        //  WHERE DATE(d.date) = DATE(@date)
+        //  ORDER BY d.date, d.refno;";
 
-                    cmd.Parameters.AddWithValue("@date", date);
+        //            cmd.Parameters.AddWithValue("@date", date);
 
-                    using (var reader = cmd.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            list.Add(new PurchaseItemForDateDto
-                            {
-                                ItemDetailsId = reader.GetInt64(0),
-                                ItemId = reader.GetInt64(1),
-                                ItemName = reader.GetString(2),
-                                InvoiceNo = reader.IsDBNull(3) ? "" : reader.GetString(3),
-                                PurchaseDate = reader.GetDateTime(4),
-                                SupplierId = reader.IsDBNull(5) ? 0 : reader.GetInt64(5),
-                                SupplierName = reader.IsDBNull(6) ? "" : reader.GetString(6),
-                                Quantity = reader.IsDBNull(7) ? 0 : Convert.ToDecimal(reader.GetValue(7))
-                            });
-                        }
-                    }
-                }
+        //            using (var reader = cmd.ExecuteReader())
+        //            {
+        //                while (reader.Read())
+        //                {
+        //                    list.Add(new PurchaseItemForDateDto
+        //                    {
+        //                        ItemDetailsId = reader.GetInt64(0),
+        //                        ItemId = reader.GetInt64(1),
+        //                        ItemName = reader.GetString(2),
+        //                        InvoiceNo = reader.IsDBNull(3) ? "" : reader.GetString(3),
+        //                        PurchaseDate = reader.GetDateTime(4),
+        //                        SupplierId = reader.IsDBNull(5) ? 0 : reader.GetInt64(5),
+        //                        SupplierName = reader.IsDBNull(6) ? "" : reader.GetString(6),
+        //                        Quantity = reader.IsDBNull(7) ? 0 : Convert.ToDecimal(reader.GetValue(7))
+        //                    });
+        //                }
+        //            }
+        //        }
 
-                return list;
-            }
-        }
-        public PurchaseItemDetailDto LoadPurchaseForReturn(long itemDetailsId)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText =
-                    @"SELECT 
-   d.id AS ItemDetailsId,
-   d.item_id AS ItemId,
-   i.name AS ItemName,
-   i.hsnCode,
+        //        return list;
+        //    }
+        //}
+//        public PurchaseItemDetailDto LoadPurchaseForReturn(long itemDetailsId)
+//        {
+//            using (var conn = new SQLiteConnection(_connectionString))
+//            {
+//                conn.Open();
+//                using (var cmd = conn.CreateCommand())
+//                {
+//                    cmd.CommandText =
+//                    @"SELECT 
+//   d.id AS ItemDetailsId,
+//   d.item_id AS ItemId,
+//   i.name AS ItemName,
+//   i.hsnCode,
 
-   d.batchNo,                  -- NEW
-   d.purchasePrice,
-   d.discountPercent,          -- NEW
-   d.netpurchasePrice,         -- NEW
-   d.quantity,
+//   d.batchNo,                  -- NEW
+//   d.purchasePrice,
+//   d.discountPercent,          -- NEW
+//   d.netpurchasePrice,         -- NEW
+//   d.quantity,
 
-   (SELECT IFNULL(SUM(r.returnQty),0)
-    FROM PurchaseReturn r
-    WHERE r.itemDetailsId = d.id) AS ReturnedQty,
+//   (SELECT IFNULL(SUM(r.returnQty),0)
+//    FROM PurchaseReturn r
+//    WHERE r.itemDetailsId = d.id) AS ReturnedQty,
 
-   d.refno,
-   d.date,
-   d.SupplierId,
-   s.suppliername AS SupplierName,
-   g.GstPercent
-FROM ItemDetails d
-JOIN Item i ON i.id = d.item_id
-LEFT JOIN Suppliers s ON s.supplierId = d.SupplierId
-LEFT JOIN GstMaster g ON g.Id = i.gstid
-WHERE d.id = @id;
-";
+//   d.refno,
+//   d.date,
+//   d.SupplierId,
+//   s.suppliername AS SupplierName,
+//   g.GstPercent
+//FROM ItemDetails d
+//JOIN Item i ON i.id = d.item_id
+//LEFT JOIN Suppliers s ON s.supplierId = d.SupplierId
+//LEFT JOIN GstMaster g ON g.Id = i.gstid
+//WHERE d.id = @id;
+//";
 
-                    cmd.Parameters.AddWithValue("@id", itemDetailsId);
+//                    cmd.Parameters.AddWithValue("@id", itemDetailsId);
 
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        if (r.Read())
-                        {
-                            return new PurchaseItemDetailDto
-                            {
-                                ItemDetailsId = r.GetInt64(0),
-                                ItemId = r.GetInt64(1),
-                                ItemName = r.GetString(2),
-                                HsnCode = r.IsDBNull(3) ? "" : r.GetString(3),
-                                BatchNo = r.IsDBNull(4) ? "" : r.GetString(4),
-                                PurchasePrice = Convert.ToDecimal(r.GetValue(5)),
-                                DiscountPercent = Convert.ToDecimal(r.GetValue(6)),
-                                NetPurchasePrice = Convert.ToDecimal(r.GetValue(7)),
-                                Quantity = Convert.ToDecimal(r.GetValue(8)),
-                                AlreadyReturnedQty = Convert.ToDecimal(r.GetValue(9)),
+//                    using (var r = cmd.ExecuteReader())
+//                    {
+//                        if (r.Read())
+//                        {
+//                            return new PurchaseItemDetailDto
+//                            {
+//                                ItemDetailsId = r.GetInt64(0),
+//                                ItemId = r.GetInt64(1),
+//                                ItemName = r.GetString(2),
+//                                HsnCode = r.IsDBNull(3) ? "" : r.GetString(3),
+//                                BatchNo = r.IsDBNull(4) ? "" : r.GetString(4),
+//                                PurchasePrice = Convert.ToDecimal(r.GetValue(5)),
+//                                DiscountPercent = Convert.ToDecimal(r.GetValue(6)),
+//                                NetPurchasePrice = Convert.ToDecimal(r.GetValue(7)),
+//                                Quantity = Convert.ToDecimal(r.GetValue(8)),
+//                                AlreadyReturnedQty = Convert.ToDecimal(r.GetValue(9)),
 
-                                InvoiceNo = r.IsDBNull(8) ? "" : r.GetString(10),
-                                PurchaseDate = r.GetDateTime(11),
-                                SupplierId = Convert.ToInt64(r.GetValue(12)),
-                                SupplierName = r.IsDBNull(11) ? "" : r.GetString(13),
-                                GstPercent = r.IsDBNull(12) ? 0 : Convert.ToDecimal(r.GetValue(14)),
+//                                InvoiceNo = r.IsDBNull(8) ? "" : r.GetString(10),
+//                                PurchaseDate = r.GetDateTime(11),
+//                                SupplierId = Convert.ToInt64(r.GetValue(12)),
+//                                SupplierName = r.IsDBNull(11) ? "" : r.GetString(13),
+//                                GstPercent = r.IsDBNull(12) ? 0 : Convert.ToDecimal(r.GetValue(14)),
 
-                            };
-                        }
-                    }
-                }
+//                            };
+//                        }
+//                    }
+//                }
 
-                return null;
-            }
-        }
-        public PurchaseReturnResult SavePurchaseReturn(PurchaseReturnDto dto)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
-                using (var tran = conn.BeginTransaction())
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.Transaction = tran;
+//                return null;
+//            }
+//        }
+        //public PurchaseReturnResult SavePurchaseReturn(PurchaseReturnDto dto)
+        //{
+        //    using (var conn = new SQLiteConnection(_connectionString))
+        //    {
+        //        conn.Open();
+        //        using (var tran = conn.BeginTransaction())
+        //        using (var cmd = conn.CreateCommand())
+        //        {
+        //            cmd.Transaction = tran;
 
-                    // 1️⃣ Get next ReturnNum
-                    long nextNum;
-                    using (var cmdNum = conn.CreateCommand())
-                    {
-                        cmdNum.Transaction = tran;
-                        cmdNum.CommandText = "SELECT IFNULL(MAX(ReturnNum), 0) + 1 FROM PurchaseReturn";
-                        nextNum = Convert.ToInt64(cmdNum.ExecuteScalar());
-                    }
+        //            // 1️⃣ Get next ReturnNum
+        //            long nextNum;
+        //            using (var cmdNum = conn.CreateCommand())
+        //            {
+        //                cmdNum.Transaction = tran;
+        //                cmdNum.CommandText = "SELECT IFNULL(MAX(ReturnNum), 0) + 1 FROM PurchaseReturn";
+        //                nextNum = Convert.ToInt64(cmdNum.ExecuteScalar());
+        //            }
 
-                    string nextNo = $"PR/{nextNum}";
+        //            string nextNo = $"PR/{nextNum}";
 
-                    // 2️⃣ Insert
-                    cmd.CommandText =
-                    @"INSERT INTO PurchaseReturn
-            (ReturnNo, ReturnNum, itemDetailsId, itemId, returnDate, returnQty,
-             rate, discountPercent, netrate, batchno, gstPercent,
-             amount, cgst, sgst, igst, totalAmount,
-             SupplierId, remarks, createdat, createdby)
-          VALUES
-            (@ReturnNo, @ReturnNum, @itemDetailsId, @itemId, @returnDate, @returnQty,
-             @rate, @discountPercent, @netrate, @batchno, @gstPercent,
-             @amount, @cgst, @sgst, @igst, @totalAmount,
-             @SupplierId, @remarks, DATETIME('now'), @createdBy);
+        //            // 2️⃣ Insert
+        //            cmd.CommandText =
+        //            @"INSERT INTO PurchaseReturn
+        //    (ReturnNo, ReturnNum, itemDetailsId, itemId, returnDate, returnQty,
+        //     rate, discountPercent, netrate, batchno, gstPercent,
+        //     amount, cgst, sgst, igst, totalAmount,
+        //     SupplierId, remarks, createdat, createdby)
+        //  VALUES
+        //    (@ReturnNo, @ReturnNum, @itemDetailsId, @itemId, @returnDate, @returnQty,
+        //     @rate, @discountPercent, @netrate, @batchno, @gstPercent,
+        //     @amount, @cgst, @sgst, @igst, @totalAmount,
+        //     @SupplierId, @remarks, DATETIME('now'), @createdBy);
 
-          SELECT last_insert_rowid();";
+        //  SELECT last_insert_rowid();";
 
-                    cmd.Parameters.AddWithValue("@ReturnNo", nextNo);
-                    cmd.Parameters.AddWithValue("@ReturnNum", nextNum);
-                    cmd.Parameters.AddWithValue("@itemDetailsId", dto.ItemDetailsId);
-                    cmd.Parameters.AddWithValue("@itemId", dto.ItemId);
-                    cmd.Parameters.AddWithValue("@returnDate", dto.ReturnDate);
-                    cmd.Parameters.AddWithValue("@returnQty", dto.Qty);
+        //            cmd.Parameters.AddWithValue("@ReturnNo", nextNo);
+        //            cmd.Parameters.AddWithValue("@ReturnNum", nextNum);
+        //            cmd.Parameters.AddWithValue("@itemDetailsId", dto.ItemDetailsId);
+        //            cmd.Parameters.AddWithValue("@itemId", dto.ItemId);
+        //            cmd.Parameters.AddWithValue("@returnDate", dto.ReturnDate);
+        //            cmd.Parameters.AddWithValue("@returnQty", dto.Qty);
 
-                    cmd.Parameters.AddWithValue("@rate", dto.Rate);
-                    cmd.Parameters.AddWithValue("@discountPercent", dto.DiscountPercent);
-                    cmd.Parameters.AddWithValue("@netrate", dto.NetRate);
-                    cmd.Parameters.AddWithValue("@batchno", dto.BatchNo ?? "");
+        //            cmd.Parameters.AddWithValue("@rate", dto.Rate);
+        //            cmd.Parameters.AddWithValue("@discountPercent", dto.DiscountPercent);
+        //            cmd.Parameters.AddWithValue("@netrate", dto.NetRate);
+        //            cmd.Parameters.AddWithValue("@batchno", dto.BatchNo ?? "");
 
-                    cmd.Parameters.AddWithValue("@gstPercent", dto.GstPercent);
-                    cmd.Parameters.AddWithValue("@amount", dto.Amount);
-                    cmd.Parameters.AddWithValue("@cgst", dto.Cgst);
-                    cmd.Parameters.AddWithValue("@sgst", dto.Sgst);
-                    cmd.Parameters.AddWithValue("@igst", dto.Igst);
-                    cmd.Parameters.AddWithValue("@totalAmount", dto.TotalAmount);
+        //            cmd.Parameters.AddWithValue("@gstPercent", dto.GstPercent);
+        //            cmd.Parameters.AddWithValue("@amount", dto.Amount);
+        //            cmd.Parameters.AddWithValue("@cgst", dto.Cgst);
+        //            cmd.Parameters.AddWithValue("@sgst", dto.Sgst);
+        //            cmd.Parameters.AddWithValue("@igst", dto.Igst);
+        //            cmd.Parameters.AddWithValue("@totalAmount", dto.TotalAmount);
 
-                    cmd.Parameters.AddWithValue("@SupplierId", dto.SupplierId);
-                    cmd.Parameters.AddWithValue("@remarks", dto.Remarks ?? "");
-                    cmd.Parameters.AddWithValue("@createdBy", dto.CreatedBy ?? "");
+        //            cmd.Parameters.AddWithValue("@SupplierId", dto.SupplierId);
+        //            cmd.Parameters.AddWithValue("@remarks", dto.Remarks ?? "");
+        //            cmd.Parameters.AddWithValue("@createdBy", dto.CreatedBy ?? "");
 
-                    long newId = Convert.ToInt64(cmd.ExecuteScalar());
-                    ItemLedger ledgerEntry = new ItemLedger();
-                    ledgerEntry.ItemId = dto.ItemId;
-                    ledgerEntry.BatchNo = dto.BatchNo;
-                    ledgerEntry.Date = dto.ReturnDate.ToString("yyyy-MM-dd HH:mm:ss");
-                    ledgerEntry.TxnType = "Purchase Return";
-                    ledgerEntry.RefNo = dto.ReturnNo;
-                    ledgerEntry.Qty = dto.Qty;
-                    ledgerEntry.Rate = dto.Rate;
-                    ledgerEntry.DiscountPercent = dto.DiscountPercent;
-                    decimal netRate = dto.Rate - (dto.Rate * dto.DiscountPercent / 100);
-                    ledgerEntry.NetRate = netRate;
-                    ledgerEntry.TotalAmount = dto.TotalAmount;
-                    ledgerEntry.Remarks = "Purchase Return";
-                    ledgerEntry.CreatedBy = dto.CreatedBy;
-                    AddItemLedger(ledgerEntry, conn, tran);
-                    UpdateItemBalanceSales(ledgerEntry, conn, tran);
-                    tran.Commit();
+        //            long newId = Convert.ToInt64(cmd.ExecuteScalar());
+        //            ItemLedger ledgerEntry = new ItemLedger();
+        //            ledgerEntry.ItemId = dto.ItemId;
+        //            ledgerEntry.BatchNo = dto.BatchNo;
+        //            ledgerEntry.Date = dto.ReturnDate.ToString("yyyy-MM-dd HH:mm:ss");
+        //            ledgerEntry.TxnType = "Purchase Return";
+        //            ledgerEntry.RefNo = dto.ReturnNo;
+        //            ledgerEntry.Qty = dto.Qty;
+        //            ledgerEntry.Rate = dto.Rate;
+        //            ledgerEntry.DiscountPercent = dto.DiscountPercent;
+        //            decimal netRate = dto.Rate - (dto.Rate * dto.DiscountPercent / 100);
+        //            ledgerEntry.NetRate = netRate;
+        //            ledgerEntry.TotalAmount = dto.TotalAmount;
+        //            ledgerEntry.Remarks = "Purchase Return";
+        //            ledgerEntry.CreatedBy = dto.CreatedBy;
+        //            AddItemLedger(ledgerEntry, conn, tran);
+        //            UpdateItemBalanceSales(ledgerEntry, conn, tran);
+        //            tran.Commit();
 
-                    return new PurchaseReturnResult
-                    {
-                        ReturnId = newId,
-                        ReturnNum = nextNum,
-                        ReturnNo = nextNo
-                    };
-                }
-            }
-        }
-        public List<object> SearchPurchaseReturns(DateTime date)
-        {
-            var list = new List<object>();
+        //            return new PurchaseReturnResult
+        //            {
+        //                ReturnId = newId,
+        //                ReturnNum = nextNum,
+        //                ReturnNo = nextNo
+        //            };
+        //        }
+        //    }
+        //}
+        //public List<object> SearchPurchaseReturns(DateTime date)
+        //{
+        //    var list = new List<object>();
 
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
-                using (var cmd = conn.CreateCommand())
-                {
-                    // Use DATE(...) to compare only the date part
-                    cmd.CommandText = @"
-            SELECT 
-                pr.id AS ReturnId,
-                pr.ReturnNo,
-                pr.returnDate,
-                d.refno AS InvoiceNo,
-                COALESCE(s.supplierName, '') AS SupplierName,
-                pr.totalAmount
-            FROM PurchaseReturn pr
-            LEFT JOIN ItemDetails d ON pr.itemDetailsId = d.id
-            LEFT JOIN Suppliers s ON pr.SupplierId = s.supplierId
-            WHERE DATE(pr.returnDate) = DATE(@date)
-            ORDER BY pr.returnDate DESC, pr.id DESC;
-        ";
+        //    using (var conn = new SQLiteConnection(_connectionString))
+        //    {
+        //        conn.Open();
+        //        using (var cmd = conn.CreateCommand())
+        //        {
+        //            // Use DATE(...) to compare only the date part
+        //            cmd.CommandText = @"
+        //    SELECT 
+        //        pr.id AS ReturnId,
+        //        pr.ReturnNo,
+        //        pr.returnDate,
+        //        d.refno AS InvoiceNo,
+        //        COALESCE(s.supplierName, '') AS SupplierName,
+        //        pr.totalAmount
+        //    FROM PurchaseReturn pr
+        //    LEFT JOIN ItemDetails d ON pr.itemDetailsId = d.id
+        //    LEFT JOIN Suppliers s ON pr.SupplierId = s.supplierId
+        //    WHERE DATE(pr.returnDate) = DATE(@date)
+        //    ORDER BY pr.returnDate DESC, pr.id DESC;
+        //";
 
-                    cmd.Parameters.AddWithValue("@date", date);
+        //            cmd.Parameters.AddWithValue("@date", date);
 
-                    using (var reader = cmd.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            var id = reader.GetInt64(0);
-                            var returnNo = reader.IsDBNull(1) ? "" : reader.GetString(1);
-                            var dt = reader.IsDBNull(2) ? (DateTime?)null : reader.GetDateTime(2);
-                            var invoiceNo = reader.IsDBNull(3) ? "" : reader.GetString(3);
-                            var supplierName = reader.IsDBNull(4) ? "" : reader.GetString(4);
-                            var totalAmount = reader.IsDBNull(5) ? 0m : Convert.ToDecimal(reader.GetValue(5));
+        //            using (var reader = cmd.ExecuteReader())
+        //            {
+        //                while (reader.Read())
+        //                {
+        //                    var id = reader.GetInt64(0);
+        //                    var returnNo = reader.IsDBNull(1) ? "" : reader.GetString(1);
+        //                    var dt = reader.IsDBNull(2) ? (DateTime?)null : reader.GetDateTime(2);
+        //                    var invoiceNo = reader.IsDBNull(3) ? "" : reader.GetString(3);
+        //                    var supplierName = reader.IsDBNull(4) ? "" : reader.GetString(4);
+        //                    var totalAmount = reader.IsDBNull(5) ? 0m : Convert.ToDecimal(reader.GetValue(5));
 
-                            list.Add(new
-                            {
-                                Id = id,
-                                ReturnNo = returnNo,
-                                ReturnDate = dt?.ToString("yyyy-MM-dd") ?? "",
-                                InvoiceNo = invoiceNo,
-                                SupplierName = supplierName,
-                                TotalAmount = totalAmount
-                            });
-                        }
-                    }
-                }
+        //                    list.Add(new
+        //                    {
+        //                        Id = id,
+        //                        ReturnNo = returnNo,
+        //                        ReturnDate = dt?.ToString("yyyy-MM-dd") ?? "",
+        //                        InvoiceNo = invoiceNo,
+        //                        SupplierName = supplierName,
+        //                        TotalAmount = totalAmount
+        //                    });
+        //                }
+        //            }
+        //        }
 
-                return list;
-            }
-        }
+        //        return list;
+        //    }
+        //}
 
-        public object GetPurchaseReturnDetail(long returnId)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
+        //public object GetPurchaseReturnDetail(long returnId)
+        //{
+        //    using (var conn = new SQLiteConnection(_connectionString))
+        //    {
+        //        conn.Open();
 
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-                SELECT 
-                    pr.id,
-                    pr.ReturnNo,
-                    pr.returnDate,
-                    d.refno AS InvoiceNo,
-                    s.supplierName AS SupplierName,
-                    pr.remarks,
-                    i.name AS ItemName,
-                    pr.batchNo,
-                    pr.returnQty,
-                    pr.Rate,
-                    pr.gstPercent,
-                    pr.cgst,
-                    pr.sgst,
-                    pr.amount,
-                    pr.totalAmount
-                FROM PurchaseReturn pr
-                LEFT JOIN ItemDetails d ON pr.itemDetailsId = d.id
-                LEFT JOIN Suppliers s ON pr.SupplierId = s.supplierId
-                LEFT JOIN Item i ON pr.itemId = i.id
-                WHERE pr.id = @id;
-            ";
+        //        using (var cmd = conn.CreateCommand())
+        //        {
+        //            cmd.CommandText = @"
+        //        SELECT 
+        //            pr.id,
+        //            pr.ReturnNo,
+        //            pr.returnDate,
+        //            d.refno AS InvoiceNo,
+        //            s.supplierName AS SupplierName,
+        //            pr.remarks,
+        //            i.name AS ItemName,
+        //            pr.batchNo,
+        //            pr.returnQty,
+        //            pr.Rate,
+        //            pr.gstPercent,
+        //            pr.cgst,
+        //            pr.sgst,
+        //            pr.amount,
+        //            pr.totalAmount
+        //        FROM PurchaseReturn pr
+        //        LEFT JOIN ItemDetails d ON pr.itemDetailsId = d.id
+        //        LEFT JOIN Suppliers s ON pr.SupplierId = s.supplierId
+        //        LEFT JOIN Item i ON pr.itemId = i.id
+        //        WHERE pr.id = @id;
+        //    ";
 
-                    cmd.Parameters.AddWithValue("@id", returnId);
+        //            cmd.Parameters.AddWithValue("@id", returnId);
 
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        if (!r.Read()) return null;
+        //            using (var r = cmd.ExecuteReader())
+        //            {
+        //                if (!r.Read()) return null;
 
-                        decimal cgst = Convert.ToDecimal(r["cgst"]);
-                        decimal sgst = Convert.ToDecimal(r["sgst"]);
+        //                decimal cgst = Convert.ToDecimal(r["cgst"]);
+        //                decimal sgst = Convert.ToDecimal(r["sgst"]);
 
-                        return new
-                        {
-                            Id = r.GetInt64(0),
-                            ReturnNo = r.IsDBNull(1) ? "" : r.GetString(1),
-                            ReturnDate = r.IsDBNull(2) ? "" : r.GetDateTime(2).ToString("yyyy-MM-dd"),
-                            InvoiceNo = r.IsDBNull(3) ? "" : r.GetString(3),
-                            SupplierName = r.IsDBNull(4) ? "" : r.GetString(4),
-                            Notes = r.IsDBNull(5) ? "" : r.GetString(5),
+        //                return new
+        //                {
+        //                    Id = r.GetInt64(0),
+        //                    ReturnNo = r.IsDBNull(1) ? "" : r.GetString(1),
+        //                    ReturnDate = r.IsDBNull(2) ? "" : r.GetDateTime(2).ToString("yyyy-MM-dd"),
+        //                    InvoiceNo = r.IsDBNull(3) ? "" : r.GetString(3),
+        //                    SupplierName = r.IsDBNull(4) ? "" : r.GetString(4),
+        //                    Notes = r.IsDBNull(5) ? "" : r.GetString(5),
 
-                            // item fields
-                            ItemName = r.IsDBNull(6) ? "" : r.GetString(6),
-                            BatchNo = r.IsDBNull(7) ? "" : r.GetString(7),
-                            Qty = Convert.ToDecimal(r["returnQty"]),
-                            Rate = Convert.ToDecimal(r["Rate"]),
-                            GstPercent = Convert.ToDecimal(r["gstPercent"]),
-                            GstValue = cgst + sgst,
-                            LineSubTotal = Convert.ToDecimal(r["amount"]),
-                            LineTotal = Convert.ToDecimal(r["totalAmount"])
-                        };
-                    }
-                }
-            }
-        }
+        //                    // item fields
+        //                    ItemName = r.IsDBNull(6) ? "" : r.GetString(6),
+        //                    BatchNo = r.IsDBNull(7) ? "" : r.GetString(7),
+        //                    Qty = Convert.ToDecimal(r["returnQty"]),
+        //                    Rate = Convert.ToDecimal(r["Rate"]),
+        //                    GstPercent = Convert.ToDecimal(r["gstPercent"]),
+        //                    GstValue = cgst + sgst,
+        //                    LineSubTotal = Convert.ToDecimal(r["amount"]),
+        //                    LineTotal = Convert.ToDecimal(r["totalAmount"])
+        //                };
+        //            }
+        //        }
+        //    }
+        //}
         public int GetNextBatchNumForItem(long itemId)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -3601,6 +3601,24 @@ VALUES
                 }
             }
         }
+        public long GetNextSalesInvoiceNum()
+        {
+            using (var con = new SQLiteConnection(_connectionString))
+            {
+                con.Open();
+
+                string sql = @"
+            SELECT IFNULL(MAX(InvoiceNum), 0)
+            FROM Invoice;
+        ";
+
+                using (var cmd = new SQLiteCommand(sql, con))
+                {
+                    long last = Convert.ToInt64(cmd.ExecuteScalar());
+                    return last + 1;
+                }
+            }
+        }
 
         public string GetFinancialYear()
         {
@@ -3659,7 +3677,7 @@ VALUES
                 string sql = @"
             SELECT PurchaseId, InvoiceNo
             FROM PurchaseHeader
-            WHERE DATE(InvoiceDate) = DATE(@Date)
+            WHERE DATE(InvoiceDate) = DATE(@Date) and status=1
             ORDER BY PurchaseId DESC;
         ";
 
@@ -3994,12 +4012,12 @@ ORDER BY pi.PurchaseItemId
 
                 var dto = new PurchaseInvoiceDto();
 
-                // Load header
+                // ---------- LOAD HEADER ----------
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = @"SELECT PurchaseId, InvoiceNo, InvoiceDate, SupplierId,
-                                   TotalAmount, TotalTax, RoundOff, Notes
-                            FROM PurchaseHeader WHERE PurchaseId=@id";
+                    cmd.CommandText = @"SELECT PurchaseId, InvoiceNo,InvoiceNum, InvoiceDate, SupplierId,
+                           TotalAmount, TotalTax, RoundOff, Notes
+                    FROM PurchaseHeader WHERE PurchaseId=@id";
 
                     cmd.Parameters.AddWithValue("@id", purchaseId);
 
@@ -4009,24 +4027,54 @@ ORDER BY pi.PurchaseItemId
 
                         dto.PurchaseId = r.GetInt64(0);
                         dto.InvoiceNo = r.IsDBNull(1) ? "" : r.GetString(1);
-                        dto.InvoiceDate = r.IsDBNull(2) ? "" : r.GetString(2);
-                        dto.SupplierId = r.GetInt64(3);
-                        dto.TotalAmount = r.GetDecimal(4);
-                        dto.TotalTax = r.GetDecimal(5);
-                        dto.RoundOff = r.GetDecimal(6);
-                        dto.Notes = r.IsDBNull(7) ? "" : r.GetString(7);
+                        dto.InvoiceNum = r.GetInt64(2);
+                        dto.InvoiceDate = r.IsDBNull(3) ? "" : r.GetString(3);
+                        dto.SupplierId = r.GetInt64(4);
+                        dto.TotalAmount = r.GetDecimal(5);
+                        dto.TotalTax = r.GetDecimal(6);
+                        dto.RoundOff = r.GetDecimal(7);
+                        dto.Notes = r.IsDBNull(8) ? "" : r.GetString(8);
                     }
                 }
-                // Load items
+
+                // ---------- LOAD ITEMS WITH AVAILABLE QTY ----------
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = @"SELECT PurchaseItemId, ItemId,item.name as itemname, batchNo,item.hsncode as HsnCode, Qty, Rate, DiscountPercent,
-                                   NetRate, GstPercent, GstValue, CgstPercent, CgstValue,
-                                   SgstPercent, SgstValue, IgstPercent, IgstValue,
-                                   LineSubTotal, LineTotal, Notes
-                            FROM PurchaseItem
-                            inner join item on item.id=PurchaseItem.itemid
-                            WHERE PurchaseId=@id";
+                    cmd.CommandText = @"
+                SELECT 
+                    pi.PurchaseItemId,
+                    pi.ItemId,
+                    item.Name AS ItemName,
+                    pi.BatchNo,
+                    pi.BatchNum,
+                    item.HsnCode,
+                    pi.Qty AS PurchasedQty,
+                    pi.Rate,
+                    pi.DiscountPercent,
+                    pi.NetRate,
+                    pi.GstPercent,
+                    pi.GstValue,
+                    pi.CgstPercent,
+                    pi.CgstValue,
+                    pi.SgstPercent,
+                    pi.SgstValue,
+                    pi.IgstPercent,
+                    pi.IgstValue,
+                    pi.LineSubTotal,
+                    pi.LineTotal,
+                    pi.Notes,
+
+                    /* Available qty calculation */
+                    (pi.Qty - IFNULL((
+                        SELECT SUM(Qty) 
+                        FROM PurchaseReturnItem 
+                        WHERE PurchaseItemId = pi.PurchaseItemId
+                    ), 0)) AS AvailableQty
+                    
+                FROM PurchaseItem pi
+                INNER JOIN Item item ON item.Id = pi.ItemId
+                WHERE pi.PurchaseId = @id;
+            ";
 
                     cmd.Parameters.AddWithValue("@id", purchaseId);
 
@@ -4036,33 +4084,41 @@ ORDER BY pi.PurchaseItemId
                         {
                             var it = new PurchaseInvoiceItemDto
                             {
+                                PurchaseItemId = r.GetInt64(0),
                                 ItemId = r.GetInt64(1),
                                 ItemName = r.IsDBNull(2) ? "" : r.GetString(2),
                                 BatchNo = r.IsDBNull(3) ? "" : r.GetString(3),
-                                HsnCode = r.IsDBNull(4) ? "" : r.GetString(4),
-                                Qty = r.GetDecimal(5),
-                                Rate = r.GetDecimal(6),
-                                DiscountPercent = r.GetDecimal(7),
-                                NetRate = r.GetDecimal(8),
-                                GstPercent = r.GetDecimal(9),
-                                GstValue = r.GetDecimal(10),
-                                CgstPercent = r.GetDecimal(11),
-                                CgstValue = r.GetDecimal(12),
-                                SgstPercent = r.GetDecimal(13),
-                                SgstValue = r.GetDecimal(14),
-                                IgstPercent = r.GetDecimal(15),
-                                IgstValue = r.GetDecimal(16),
-                                LineSubTotal = r.GetDecimal(17),
-                                LineTotal = r.GetDecimal(18),
-                                Notes = r.IsDBNull(17) ? "" : r.GetString(19)
+                                BatchNum = r.GetInt32(4),
+                                HsnCode = r.IsDBNull(5) ? "" : r.GetString(5),
+                                Qty = r.GetDecimal(6),
+                                Rate = r.GetDecimal(7),
+                                DiscountPercent = r.GetDecimal(8),
+                                NetRate = r.GetDecimal(9),
+                                GstPercent = r.GetDecimal(10),
+                                GstValue = r.GetDecimal(11),
+                                CgstPercent = r.GetDecimal(12),
+                                CgstValue = r.GetDecimal(13),
+                                SgstPercent = r.GetDecimal(14),
+                                SgstValue = r.GetDecimal(15),
+                                IgstPercent = r.GetDecimal(16),
+                                IgstValue = r.GetDecimal(17),
+                                LineSubTotal = r.GetDecimal(18),
+                                LineTotal = r.GetDecimal(19),
+                                Notes = r.IsDBNull(20) ? "" : r.GetString(20),
+
+                                AvailableQty = r.GetDecimal(21)
                             };
 
-
-                            // Load extra details
+                            // ---------- load extra item details ----------
                             using (var cmdD = conn.CreateCommand())
                             {
-                                cmdD.CommandText = "SELECT salesPrice, mrp, description, mfgdate, expdate, modelno, brand, size, color, weight, dimension FROM PurchaseItemDetails WHERE PurchaseItemId=@pid";
-                                cmdD.Parameters.AddWithValue("@pid", r.GetInt64(0));
+                                cmdD.CommandText = @"SELECT 
+                                                salesPrice, mrp, description, mfgdate, expdate, 
+                                                modelno, brand, size, color, weight, dimension 
+                                             FROM PurchaseItemDetails 
+                                             WHERE PurchaseItemId=@pid";
+
+                                cmdD.Parameters.AddWithValue("@pid", it.PurchaseItemId);
 
                                 using (var rd = cmdD.ExecuteReader())
                                 {
@@ -4092,6 +4148,7 @@ ORDER BY pi.PurchaseItemId
             }
         }
 
+
         public (bool Success, string Message, long NewPurchaseId) UpdatePurchaseInvoice(PurchaseInvoiceDto dto)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -4117,31 +4174,34 @@ ORDER BY pi.PurchaseItemId
                         {
                             cmd.Transaction = tx;
                             cmd.CommandText = @"SELECT ItemId, batchNo, Qty, Rate, DiscountPercent, NetRate, LineSubTotal
-                                FROM PurchaseItem WHERE PurchaseId=@id";
+                                        FROM PurchaseItem WHERE PurchaseId=@id";
                             cmd.Parameters.AddWithValue("@id", oldId);
 
                             using (var r = cmd.ExecuteReader())
                             {
                                 while (r.Read())
                                 {
-                                    var ItemId = r.GetInt64(0);
-                                    var BatchNo = r.IsDBNull(1) ? "" : r.GetString(1);
-                                    var Qty = r.GetDouble(2);
-                                    var Rate = r.GetDouble(3);
-                                    var Disc = r.GetDouble(4);
-                                    var NetRate = r.GetDouble(5);
-                                    var SubTotal = r.GetDouble(6);
+                                    long ItemId = r.GetInt64(0);
+                                    string BatchNo = r.IsDBNull(1) ? "" : r.GetString(1);
+                                    //int BatchNum= r.GetInt32(2);
+                                    double Qty = r.GetDouble(2);
+                                    double Rate = r.GetDouble(3);
+                                    double Disc = r.GetDouble(4);
+                                    double NetRate = r.GetDouble(5);
+                                    double SubTotal = r.GetDouble(6);
 
                                     using (var cmdRev = conn.CreateCommand())
                                     {
                                         cmdRev.Transaction = tx;
-
                                         cmdRev.CommandText =
-                                        @"INSERT INTO ItemLedger (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
-                  VALUES (@ItemId, @BatchNo, @Dt, 'PURCHASE-REVERSAL', @RefNo, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
+                                        @"INSERT INTO ItemLedger 
+                                (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
+                                VALUES 
+                                (@ItemId, @BatchNo, @Dt, 'PURCHASE-REVERSAL', @RefNo, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
 
                                         cmdRev.Parameters.AddWithValue("@ItemId", ItemId);
                                         cmdRev.Parameters.AddWithValue("@BatchNo", BatchNo);
+                                        //cmdRev.Parameters.AddWithValue("@BatchNum", BatchNum);
                                         cmdRev.Parameters.AddWithValue("@Dt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                                         cmdRev.Parameters.AddWithValue("@RefNo", $"PI-{oldId}");
 
@@ -4164,13 +4224,12 @@ ORDER BY pi.PurchaseItemId
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = tx;
-
                             cmd.CommandText = @"
-                INSERT INTO PurchaseHeader
-                (InvoiceNo, InvoiceDate, SupplierId, TotalAmount, TotalTax, RoundOff, Notes, CreatedBy, CreatedAt, Status)
-                VALUES
-                (@InvoiceNo, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax, @RoundOff, @Notes, @User, @Now, 1);
-                SELECT last_insert_rowid();";
+                    INSERT INTO PurchaseHeader
+                    (InvoiceNo, InvoiceDate, SupplierId, TotalAmount, TotalTax, RoundOff, Notes, CreatedBy, CreatedAt,InvoiceNum, Status)
+                    VALUES
+                    (@InvoiceNo, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax, @RoundOff, @Notes, @User, @Now,@InvoiceNum, 1);
+                    SELECT last_insert_rowid();";
 
                             cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo);
                             cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate);
@@ -4181,11 +4240,11 @@ ORDER BY pi.PurchaseItemId
                             cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
                             cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
                             cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-
+                            cmd.Parameters.AddWithValue("@InvoiceNum", dto.InvoiceNum);
                             newPurchaseId = (long)cmd.ExecuteScalar();
                         }
 
-                        // STEP 4: Insert PurchaseItems + PurchaseItemDetails + Ledger
+                        // STEP 4: Insert Items + Details + Ledger
                         foreach (var it in dto.Items)
                         {
                             long newItemId;
@@ -4194,18 +4253,19 @@ ORDER BY pi.PurchaseItemId
                                 cmd.Transaction = tx;
                                 cmd.CommandText =
                                 @"INSERT INTO PurchaseItem
-                  (PurchaseId, ItemId, batchNo, Qty, Rate, DiscountPercent, NetRate, 
-                   GstPercent, GstValue, CgstPercent, CgstValue, SgstPercent, SgstValue,
-                   IgstPercent, IgstValue, LineSubTotal, LineTotal, Notes)
-                  VALUES
-                  (@Pid, @ItemId, @Batch, @Qty, @Rate, @Disc, @NetRate,
-                   @GstP, @GstV, @CgstP, @CgstV, @SgstP, @SgstV, @IgstP, @IgstV,
-                   @Sub, @Total, @Notes);
-                  SELECT last_insert_rowid();";
+                        (PurchaseId, ItemId, batchNo,batchNum, Qty, Rate, DiscountPercent, NetRate, 
+                        GstPercent, GstValue, CgstPercent, CgstValue, SgstPercent, SgstValue,
+                        IgstPercent, IgstValue, LineSubTotal, LineTotal, Notes)
+                        VALUES
+                        (@Pid, @ItemId, @Batch,@BatchNum, @Qty, @Rate, @Disc, @NetRate,
+                         @GstP, @GstV, @CgstP, @CgstV, @SgstP, @SgstV, @IgstP, @IgstV,
+                         @Sub, @Total, @Notes);
+                        SELECT last_insert_rowid();";
 
                                 cmd.Parameters.AddWithValue("@Pid", newPurchaseId);
                                 cmd.Parameters.AddWithValue("@ItemId", it.ItemId);
                                 cmd.Parameters.AddWithValue("@Batch", it.BatchNo);
+                                cmd.Parameters.AddWithValue("@BatchNum", it.BatchNum);
                                 cmd.Parameters.AddWithValue("@Qty", it.Qty);
                                 cmd.Parameters.AddWithValue("@Rate", it.Rate);
                                 cmd.Parameters.AddWithValue("@Disc", it.DiscountPercent);
@@ -4227,19 +4287,20 @@ ORDER BY pi.PurchaseItemId
                                 newItemId = (long)cmd.ExecuteScalar();
                             }
 
-                            // Insert details
+                            // INSERT PurchaseItemDetails
                             using (var cmd = conn.CreateCommand())
                             {
                                 cmd.Transaction = tx;
-
                                 cmd.CommandText =
                                 @"INSERT INTO PurchaseItemDetails
-                  (PurchaseItemId, salesPrice, mrp, description, mfgdate, expdate,
-                   modelno, brand, size, color, weight, dimension, createdby, createdat)
-                  VALUES
-                  (@Pid, @SP, @MRP, @Desc, @MFG, @EXP, @Model, @Brand, @Size, @Color, @Weight, @Dim, @User, @Now)";
+                        (PurchaseItemId, salesPrice, mrp, description, mfgdate, expdate,
+                         modelno, brand, size, color, weight, dimension, createdby, createdat)
+                        VALUES
+                        (@Pid, @SP, @MRP, @Desc, @MFG, @EXP, @Model, @Brand, @Size, @Color, @Weight, @Dim, @User, @Now)";
 
                                 cmd.Parameters.AddWithValue("@Pid", newItemId);
+
+                                // Mapping correctly from JS fields
                                 cmd.Parameters.AddWithValue("@SP", it.SalesPrice);
                                 cmd.Parameters.AddWithValue("@MRP", it.Mrp);
                                 cmd.Parameters.AddWithValue("@Desc", it.Description ?? "");
@@ -4258,20 +4319,20 @@ ORDER BY pi.PurchaseItemId
                                 cmd.ExecuteNonQuery();
                             }
 
-                            // Insert ledger entry for NEW PURCHASE
+                            // INSERT ITEM LEDGER (unchanged)
                             using (var cmd = conn.CreateCommand())
                             {
                                 cmd.Transaction = tx;
                                 cmd.CommandText =
                                 @"INSERT INTO ItemLedger
-                  (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
-                  VALUES
-                  (@ItemId, @BatchNo, @Dt, 'PURCHASE', @Ref, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
+                        (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
+                        VALUES
+                        (@ItemId, @BatchNo, @Dt, 'PURCHASE', @Ref, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
 
                                 cmd.Parameters.AddWithValue("@ItemId", it.ItemId);
                                 cmd.Parameters.AddWithValue("@BatchNo", it.BatchNo);
                                 cmd.Parameters.AddWithValue("@Dt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                                cmd.Parameters.AddWithValue("@Ref", $"PI-{newPurchaseId}");
+                                cmd.Parameters.AddWithValue("@Ref", newPurchaseId);
 
                                 cmd.Parameters.AddWithValue("@Qty", it.Qty);
                                 cmd.Parameters.AddWithValue("@Rate", it.Rate);
@@ -4279,17 +4340,34 @@ ORDER BY pi.PurchaseItemId
                                 cmd.Parameters.AddWithValue("@NetRate", it.NetRate);
                                 cmd.Parameters.AddWithValue("@Total", it.LineSubTotal);
 
-                                cmd.Parameters.AddWithValue("@Rem", "Purchase created after edit");
+                                cmd.Parameters.AddWithValue("@Rem", it.Description ?? "");
                                 cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
 
                                 cmd.ExecuteNonQuery();
                             }
+
+                            // Update balance
+                            UpdateItemBalanceSales(new ItemLedger
+                            {
+                                ItemId = (int)it.ItemId,
+                                BatchNo = it.BatchNo,
+                                Date = dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                                TxnType = "Purchase",
+                                RefNo = dto.InvoiceNo ?? "",
+                                Qty = it.Qty,
+                                Rate = it.Rate,
+                                DiscountPercent = it.DiscountPercent,
+                                NetRate = it.NetRate,
+                                TotalAmount = it.LineTotal,
+                                Remarks = it.Description ?? "",
+                                CreatedBy = dto.CreatedBy,
+                                CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                            }, conn, tx);
                         }
 
                         tx.Commit();
                         return (true, "Updated Successfully", newPurchaseId);
                     }
-
                     catch (Exception ex)
                     {
                         tx.Rollback();
@@ -4298,6 +4376,7 @@ ORDER BY pi.PurchaseItemId
                 }
             }
         }
+
         public (bool Success, string Message, long NewPurchaseId) UpdatePurchaseInvoiceNew(PurchaseInvoiceDto dto)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -4506,6 +4585,624 @@ ORDER BY pi.PurchaseItemId
 
         }
 
+        public long SavePurchaseReturn(PurchaseReturnDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    // 1) Validate quantities against remaining balance
+                    using (var cmdCheck = conn.CreateCommand())
+                    {
+                        cmdCheck.Transaction = tx;
+                        cmdCheck.CommandText = @"
+                    SELECT 
+                        pi.PurchaseItemId,
+                        pi.Qty AS PurchasedQty,
+                        IFNULL(SUM(pri.Qty), 0) AS AlreadyReturned
+                    FROM PurchaseItem pi
+                    LEFT JOIN PurchaseReturnItem pri 
+                          ON pri.PurchaseItemId = pi.PurchaseItemId
+                    WHERE pi.PurchaseItemId = @pid
+                    GROUP BY pi.PurchaseItemId, pi.Qty;
+                ";
+
+                        foreach (var it in dto.Items)
+                        {
+                            if (it.Qty <= 0) continue; // only validate positive returns
+
+                            cmdCheck.Parameters.Clear();
+                            cmdCheck.Parameters.AddWithValue("@pid", it.PurchaseItemId);
+
+                            decimal purchasedQty = 0;
+                            decimal alreadyReturned = 0;
+
+                            using (var r = cmdCheck.ExecuteReader())
+                            {
+                                if (r.Read())
+                                {
+                                    purchasedQty = r.GetDecimal(1);
+                                    alreadyReturned = r.GetDecimal(2);
+                                }
+                            }
+
+                            var balance = purchasedQty - alreadyReturned;
+                            if (it.Qty > balance)
+                            {
+                                throw new Exception(
+                                    $"Return qty ({it.Qty}) exceeds available qty ({balance}) for item {it.ItemName}."
+                                );
+                            }
+
+                        }
+                    }
+
+                    long nextReturnNum;
+                    string nextReturnNo;
+
+                    using (var cmdAuto = conn.CreateCommand())
+                    {
+                        cmdAuto.Transaction = tx;
+                        cmdAuto.CommandText = @"
+        SELECT IFNULL(MAX(ReturnNum), 0) + 1 
+        FROM PurchaseReturnHeader;
+    ";
+
+                        nextReturnNum = Convert.ToInt64(cmdAuto.ExecuteScalar());
+                        nextReturnNo = "PR-" + nextReturnNum.ToString().PadLeft(5, '0');
+                    }
+
+                    long newReturnId;
+
+                    // 2) Insert header
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+                    INSERT INTO PurchaseReturnHeader
+                    (PurchaseId, SupplierId, ReturnNo, ReturnNum, ReturnDate,
+                     TotalAmount, TotalTax, RoundOff, SubTotal,
+                     Notes, CreatedBy)
+                    VALUES
+                    (@PurchaseId, @SupplierId, @ReturnNo, @ReturnNum, @ReturnDate,
+                     @TotalAmount, @TotalTax, @RoundOff, @SubTotal,
+                     @Notes, @CreatedBy);
+
+                    SELECT last_insert_rowid();
+                ";
+
+                        cmd.Parameters.AddWithValue("@PurchaseId", dto.PurchaseId);
+                        cmd.Parameters.AddWithValue("@SupplierId", dto.SupplierId);
+                        cmd.Parameters.AddWithValue("@ReturnNo", nextReturnNo);
+                        cmd.Parameters.AddWithValue("@ReturnNum", nextReturnNum);
+
+                        cmd.Parameters.AddWithValue("@ReturnDate", DateTime.Now.ToString("yyyy-MM-dd"));
+                        cmd.Parameters.AddWithValue("@TotalAmount", dto.TotalAmount);
+                        cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
+                        cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
+                        cmd.Parameters.AddWithValue("@SubTotal", dto.SubTotal);
+                        cmd.Parameters.AddWithValue("@Notes", (object)dto.Notes ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@CreatedBy", (object)dto.CreatedBy ?? "system");
+
+                        newReturnId = (long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)cmd.ExecuteScalar();
+                    }
+
+                    // 3) Insert items
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+                    INSERT INTO PurchaseReturnItem
+                    (PurchaseReturnId, PurchaseItemId, ItemId, ItemName,
+                     BatchNo, BatchNum, Qty, Rate, DiscountPercent, NetRate,
+                     GstPercent, GstValue, CgstPercent, CgstValue,
+                     SgstPercent, SgstValue, IgstPercent, IgstValue,
+                     LineSubTotal, LineTotal, Notes)
+                    VALUES
+                    (@PurchaseReturnId, @PurchaseItemId, @ItemId, @ItemName,
+                     @BatchNo, @BatchNum, @Qty, @Rate, @DiscountPercent, @NetRate,
+                     @GstPercent, @GstValue, @CgstPercent, @CgstValue,
+                     @SgstPercent, @SgstValue, @IgstPercent, @IgstValue,
+                     @LineSubTotal, @LineTotal, @Notes);
+                ";
+
+                        var pReturnId = cmd.Parameters.Add("@PurchaseReturnId", DbType.Int64);
+                        var pPurchaseItemId = cmd.Parameters.Add("@PurchaseItemId", DbType.Int64);
+                        var pItemId = cmd.Parameters.Add("@ItemId", DbType.Int64);
+                        var pItemName = cmd.Parameters.Add("@ItemName", DbType.String);
+                        var pBatchNo = cmd.Parameters.Add("@BatchNo", DbType.String);
+                        var pBatchNum = cmd.Parameters.Add("@BatchNum", DbType.Int32);
+                        var pQty = cmd.Parameters.Add("@Qty", DbType.Decimal);
+                        var pRate = cmd.Parameters.Add("@Rate", DbType.Decimal);
+                        var pDisc = cmd.Parameters.Add("@DiscountPercent", DbType.Decimal);
+                        var pNetRate = cmd.Parameters.Add("@NetRate", DbType.Decimal);
+                        var pGstPercent = cmd.Parameters.Add("@GstPercent", DbType.Decimal);
+                        var pGstValue = cmd.Parameters.Add("@GstValue", DbType.Decimal);
+                        var pCgstPercent = cmd.Parameters.Add("@CgstPercent", DbType.Decimal);
+                        var pCgstValue = cmd.Parameters.Add("@CgstValue", DbType.Decimal);
+                        var pSgstPercent = cmd.Parameters.Add("@SgstPercent", DbType.Decimal);
+                        var pSgstValue = cmd.Parameters.Add("@SgstValue", DbType.Decimal);
+                        var pIgstPercent = cmd.Parameters.Add("@IgstPercent", DbType.Decimal);
+                        var pIgstValue = cmd.Parameters.Add("@IgstValue", DbType.Decimal);
+                        var pLineSubTotal = cmd.Parameters.Add("@LineSubTotal", DbType.Decimal);
+                        var pLineTotal = cmd.Parameters.Add("@LineTotal", DbType.Decimal);
+                        var pNotes = cmd.Parameters.Add("@Notes", DbType.String);
+
+                        foreach (var it in dto.Items)
+                        {
+                            if (it.Qty <= 0) continue; // ignore non-return lines
+
+                            pReturnId.Value = newReturnId;
+                            pPurchaseItemId.Value = it.PurchaseItemId;
+                            pItemId.Value = it.ItemId;
+                            pItemName.Value = it.ItemName ?? "";
+                            pBatchNo.Value = it.BatchNo ?? "";
+                            pBatchNum.Value = it.BatchNum;
+                            pQty.Value = it.Qty;
+                            pRate.Value = it.Rate;
+                            pDisc.Value = it.DiscountPercent;
+                            pNetRate.Value = it.NetRate;
+                            pGstPercent.Value = it.GstPercent;
+                            pGstValue.Value = it.GstValue;
+                            pCgstPercent.Value = it.CgstPercent;
+                            pCgstValue.Value = it.CgstValue;
+                            pSgstPercent.Value = it.SgstPercent;
+                            pSgstValue.Value = it.SgstValue;
+                            pIgstPercent.Value = it.IgstPercent;
+                            pIgstValue.Value = it.IgstValue;
+                            pLineSubTotal.Value = it.LineSubTotal;
+                            pLineTotal.Value = it.LineTotal;
+                            pNotes.Value = (object)it.Notes ?? DBNull.Value;
+
+                            cmd.ExecuteNonQuery();
+
+                            ItemLedger ledgerEntry = new ItemLedger();
+                            ledgerEntry.ItemId = (int)it.ItemId;
+                            ledgerEntry.BatchNo = it.BatchNo;
+                            ledgerEntry.Date = dto.ReturnDate;
+                            ledgerEntry.TxnType = "Purchase Return";
+                            ledgerEntry.RefNo = dto.PurchaseId.ToString();
+                            ledgerEntry.Qty = it.Qty;
+                            ledgerEntry.Rate = it.Rate;
+                            ledgerEntry.DiscountPercent = it.DiscountPercent;
+                            ledgerEntry.NetRate = it.NetRate;
+                            ledgerEntry.TotalAmount = it.LineTotal;
+                            ledgerEntry.Remarks = "Purchase Return";
+                            ledgerEntry.CreatedBy = dto.CreatedBy;
+
+                            AddItemLedger(ledgerEntry, conn, tx);
+                            UpdateItemBalanceSales(ledgerEntry, conn, tx);
+                            // TODO: Insert negative stock ledger entry here if you have ItemLedger table
+                            // e.g. InsertItemLedger(conn, tx, it.ItemId, -it.Qty, ...);
+                        }
+                    }
+
+                    tx.Commit();
+                    return newReturnId;
+                }
+            }
+        }
+        public SaveSalesReturnResult SaveSalesReturn(SalesReturnDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    // STEP 1: Validation against available qty
+                    using (var cmdCheck = conn.CreateCommand())
+                    {
+                        cmdCheck.Transaction = tx;
+                        cmdCheck.CommandText = @"
+                    SELECT Qty, ReturnedQty
+                    FROM InvoiceItems
+                    WHERE Id=@invoiceItemId";
+
+                        foreach (var it in dto.Items)
+                        {
+                            if (it.SoldQty <= 0) continue;
+
+                            cmdCheck.Parameters.Clear();
+                            cmdCheck.Parameters.AddWithValue("@invoiceItemId", it.InvoiceItemId);
+
+                            decimal soldQty = 0, alreadyReturned = 0;
+
+                            using (var rd = cmdCheck.ExecuteReader())
+                            {
+                                if (rd.Read())
+                                {
+                                    soldQty = rd.GetDecimal(0);
+                                    alreadyReturned = rd.GetDecimal(1);
+                                }
+                            }
+
+                            var available = soldQty - alreadyReturned;
+                            if (it.SoldQty > available)
+                            {
+                                throw new Exception(
+                                    $"Return Qty {it.SoldQty} exceeds available {available} for item {it.ItemName}"
+                                );
+                            }
+                        }
+                    }
+                    long nextReturnNum;
+                    string nextReturnNo;
+
+                    using (var cmdAuto = conn.CreateCommand())
+                    {
+                        cmdAuto.Transaction = tx;
+                        cmdAuto.CommandText = @"
+        SELECT IFNULL(MAX(ReturnNum), 0) + 1 
+        FROM SalesReturnHeader;
+    ";
+
+                        nextReturnNum = Convert.ToInt64(cmdAuto.ExecuteScalar());
+                        nextReturnNo = "SR-" + nextReturnNum.ToString().PadLeft(5, '0');
+                    }
+                    long newReturnId;
+
+                    // STEP 2: Insert into header table
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+                INSERT INTO SalesReturnHeader
+                (InvoiceId, CustomerId, ReturnNo, ReturnNum, ReturnDate,
+                 TotalAmount, TotalTax, RoundOff, SubTotal,
+                 Notes, CreatedBy)
+                VALUES
+                (@InvoiceId, @CustomerId, @ReturnNo, @ReturnNum, @ReturnDate,
+                 @TotalAmount, @TotalTax, @RoundOff, @SubTotal,
+                 @Notes, @CreatedBy);
+
+                SELECT last_insert_rowid();
+                ";
+
+                        cmd.Parameters.AddWithValue("@InvoiceId", dto.InvoiceId);
+                        cmd.Parameters.AddWithValue("@CustomerId", dto.CustomerId);
+                        cmd.Parameters.AddWithValue("@ReturnNo", nextReturnNo);
+                        cmd.Parameters.AddWithValue("@ReturnNum",nextReturnNum);
+                        cmd.Parameters.AddWithValue("@ReturnDate", DateTime.Now.ToString("yyyy-MM-dd"));
+                        cmd.Parameters.AddWithValue("@TotalAmount", dto.TotalAmount);
+                        cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
+                        cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
+                        cmd.Parameters.AddWithValue("@SubTotal", dto.SubTotal);
+                        cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
+                        cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy ?? "system");
+
+                        newReturnId = Convert.ToInt64(cmd.ExecuteScalar());
+                    }
+
+                    // STEP 3: Insert return items & update stock ledger
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+
+                        cmd.CommandText = @"
+                    INSERT INTO SalesReturnItem
+                    (SalesReturnId, InvoiceItemId, ItemId, ItemName,
+                     BatchNo, Qty, Rate, DiscountPercent, NetRate,
+                     GstPercent, GstValue,
+                     CgstPercent, CgstValue,
+                     SgstPercent, SgstValue,
+                     IgstPercent, IgstValue,
+                     LineSubTotal, LineTotal, Notes)
+                    VALUES
+                    (@SalesReturnId, @InvoiceItemId, @ItemId, @ItemName,
+                     @BatchNo, @Qty, @Rate, @DiscountPercent, @NetRate,
+                     @GstPercent, @GstValue,
+                     @CgstPercent, @CgstValue,
+                     @SgstPercent, @SgstValue,
+                     @IgstPercent, @IgstValue,
+                     @LineSubTotal, @LineTotal);
+                ";
+
+                        var pReturnId = cmd.Parameters.Add("@SalesReturnId", DbType.Int64);
+                        var pInvoiceIt = cmd.Parameters.Add("@InvoiceItemId", DbType.Int64);
+                        var pItemId = cmd.Parameters.Add("@ItemId", DbType.Int64);
+                        var pItemName = cmd.Parameters.Add("@ItemName", DbType.String);
+                        var pBatchNo = cmd.Parameters.Add("@BatchNo", DbType.String);
+                        var pQty = cmd.Parameters.Add("@Qty", DbType.Decimal);
+                        var pRate = cmd.Parameters.Add("@Rate", DbType.Decimal);
+                        var pDisc = cmd.Parameters.Add("@DiscountPercent", DbType.Decimal);
+                        var pNetRate = cmd.Parameters.Add("@NetRate", DbType.Decimal);
+                        var pGstPct = cmd.Parameters.Add("@GstPercent", DbType.Decimal);
+                        var pGst = cmd.Parameters.Add("@GstValue", DbType.Decimal);
+                        var pCgstPct = cmd.Parameters.Add("@CgstPercent", DbType.Decimal);
+                        var pCgst = cmd.Parameters.Add("@CgstValue", DbType.Decimal);
+                        var pSgstPct = cmd.Parameters.Add("@SgstPercent", DbType.Decimal);
+                        var pSgst = cmd.Parameters.Add("@SgstValue", DbType.Decimal);
+                        var pIgstPct = cmd.Parameters.Add("@IgstPercent", DbType.Decimal);
+                        var pIgst = cmd.Parameters.Add("@IgstValue", DbType.Decimal);
+                        var pSub = cmd.Parameters.Add("@LineSubTotal", DbType.Decimal);
+                        var pTotal = cmd.Parameters.Add("@LineTotal", DbType.Decimal);
+                        //var pNotes = cmd.Parameters.Add("@Notes", DbType.String);
+
+                        foreach (var it in dto.Items)
+                        {
+                            if (it.SoldQty <= 0) continue;
+
+                            pReturnId.Value = newReturnId;
+                            pInvoiceIt.Value = it.InvoiceItemId;
+                            pItemId.Value = it.ItemId;
+                            pItemName.Value = it.ItemName;
+                            pBatchNo.Value = it.BatchNo ?? "";
+                            pQty.Value = it.SoldQty;
+                            pRate.Value = it.Rate;
+                            pDisc.Value = it.DiscountPercent;
+                            pNetRate.Value = it.NetRate;
+                            pGstPct.Value = it.GstPercent;
+                            pGst.Value = it.GstValue;
+                            pCgstPct.Value = it.CgstPercent;
+                            pCgst.Value = it.CgstValue;
+                            pSgstPct.Value = it.SgstPercent;
+                            pSgst.Value = it.SgstValue;
+                            pIgstPct.Value = it.IgstPercent;
+                            pIgst.Value = it.IgstValue;
+                            pSub.Value = it.LineSubTotal;
+                            pTotal.Value = it.LineTotal;
+                            //pNotes.Value = it.Notes ?? "";
+
+                            cmd.ExecuteNonQuery();
+
+                            // Insert item ledger to increase stock
+                            var ledger = new ItemLedger
+                            {
+                                ItemId = (int)it.ItemId,
+                                BatchNo = it.BatchNo,
+                                Qty = it.SoldQty,   // RETURNS MEANS STOCK INCREASE
+                                Rate = it.Rate,
+                                DiscountPercent = it.DiscountPercent,
+                                NetRate = it.NetRate,
+                                TotalAmount = it.LineTotal,
+                                TxnType = "Sales Return",
+                                RefNo = dto.InvoiceId.ToString(),
+                                Date = dto.InvoiceDate,
+                                CreatedBy = dto.CreatedBy,
+                                Remarks= "Sales Return"
+                            };
+
+                            
+                            AddItemLedger(ledger, conn, tx);
+                            UpdateItemBalance(ledger, conn, tx);
+                        }
+                    }
+
+                    // STEP 4: Update returned qty in InvoiceItems
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+
+                        cmd.CommandText = @"
+                    UPDATE InvoiceItems
+                    SET ReturnedQty = ReturnedQty + @addQty
+                    WHERE Id=@invoiceItemId";
+
+                        var pQty = cmd.Parameters.Add("@addQty", DbType.Decimal);
+                        var pId = cmd.Parameters.Add("@invoiceItemId", DbType.Int64);
+
+                        foreach (var it in dto.Items)
+                        {
+                            if (it.SoldQty <= 0) continue;
+
+                            pQty.Value = it.SoldQty;
+                            pId.Value = it.InvoiceItemId;
+
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    tx.Commit();
+                    return new SaveSalesReturnResult
+                    {
+                        Success = true,
+                        ReturnId = newReturnId,
+                        Message = "Return saved successfully."
+                    };
+
+                }
+            }
+        }
+
+        public SalesInvoiceDto LoadSalesInvoice(long invoiceId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                var dto = new SalesInvoiceDto();
+
+                // Load header
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT Id, InvoiceNo, InvoiceNum, InvoiceDate, CustomerId,
+                       CustomerName, CustomerPhone, CustomerState, Notes
+                FROM Invoice
+                WHERE Id=@id";
+
+                    cmd.Parameters.AddWithValue("@id", invoiceId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read()) return null;
+
+                        dto.InvoiceId = r.GetInt64(0);
+                        dto.InvoiceNo = r.GetString(1);
+                        dto.InvoiceNum = r.GetInt64(2);
+                        dto.InvoiceDate = r.GetString(3);
+                        dto.CustomerId = r.GetInt64(4);
+                        dto.CustomerName = r.IsDBNull(5) ? "" : r.GetString(5);
+                        dto.CustomerPhone = r.IsDBNull(6) ? "" : r.GetString(6);
+                        dto.CustomerState = r.IsDBNull(7) ? "" : r.GetString(7);
+                        dto.Notes = r.IsDBNull(8) ? "" : r.GetString(8);
+                    }
+                }
+
+                // Load invoice items
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    ii.Id, ii.ItemId, it.Name as ItemName, ii.BatchNo,
+                    ii.HsnCode, ii.Qty as SoldQty, ii.ReturnedQty,
+                    ii.Rate, ii.DiscountPercent, ii.GstPercent,
+                    ii.CgstPercent, ii.SgstPercent, ii.IgstPercent
+                FROM InvoiceItems ii
+                INNER JOIN Item it ON it.Id = ii.ItemId
+                WHERE ii.InvoiceId=@id";
+
+                    cmd.Parameters.AddWithValue("@id", invoiceId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            var soldQty = r.GetDecimal(5);
+                            var returnedQty = r.GetDecimal(6);
+                            var availableQty = soldQty - returnedQty;
+
+                            dto.Items.Add(new SalesInvoiceItemDto
+                            {
+                                InvoiceItemId = r.GetInt64(0),
+                                ItemId = r.GetInt64(1),
+                                ItemName = r.GetString(2),
+                                BatchNo = r.IsDBNull(3) ? "" : r.GetString(3),
+                                HsnCode = r.IsDBNull(4) ? "" : r.GetString(4),
+                                SoldQty = soldQty,
+                                ReturnedQty = returnedQty,
+                                AvailableQty = availableQty,
+                                Rate = r.GetDecimal(7),
+                                DiscountPercent = r.GetDecimal(8),
+                                GstPercent = r.GetDecimal(9),
+                                CgstPercent = r.GetDecimal(10),
+                                SgstPercent = r.GetDecimal(11),
+                                IgstPercent = r.GetDecimal(12)
+                            });
+                        }
+                    }
+                }
+
+                return dto;
+            }
+        }
+        public SalesReturnDetailDto LoadSalesReturnDetail(long returnId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                var dto = new SalesReturnDetailDto();
+
+                // =============================
+                // 1) LOAD RETURN HEADER
+                // =============================
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    sr.Id, sr.InvoiceId, sr.CustomerId,
+                    sr.ReturnNo, sr.ReturnNum, sr.ReturnDate,
+                    sr.TotalAmount, sr.TotalTax, sr.RoundOff,
+                    sr.SubTotal, sr.Notes, sr.CreatedBy
+                FROM SalesReturnHeader sr
+                WHERE sr.Id = @id";
+
+                    cmd.Parameters.AddWithValue("@id", returnId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read()) return null;
+
+                        dto.ReturnId = r.GetInt64(0);
+                        dto.InvoiceId = r.GetInt64(1);
+                        dto.CustomerId = r.GetInt64(2);
+                        dto.ReturnNo = r.IsDBNull(3) ? "" : r.GetString(3);
+                        dto.ReturnNum = r.IsDBNull(4) ? 0 : r.GetInt64(4);
+                        dto.ReturnDate = r.IsDBNull(5) ? "" : r.GetString(5);
+                        dto.TotalAmount = r.GetDecimal(6);
+                        dto.TotalTax = r.GetDecimal(7);
+                        dto.RoundOff = r.GetDecimal(8);
+                        dto.SubTotal = r.GetDecimal(9);
+                        dto.Notes = r.IsDBNull(10) ? "" : r.GetString(10);
+                        dto.CreatedBy = r.IsDBNull(11) ? "" : r.GetString(11);
+                    }
+                }
+
+                // =============================
+                // 2) LOAD CUSTOMER INFO
+                // =============================
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT Name, Phone, State, Address FROM Customers WHERE Id=@cid";
+                    cmd.Parameters.AddWithValue("@cid", dto.CustomerId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (r.Read())
+                        {
+                            dto.CustomerName = r.IsDBNull(0) ? "" : r.GetString(0);
+                            dto.CustomerPhone = r.IsDBNull(1) ? "" : r.GetString(1);
+                            dto.CustomerState = r.IsDBNull(2) ? "" : r.GetString(2);
+                            dto.CustomerAddress = r.IsDBNull(3) ? "" : r.GetString(3);
+                        }
+                    }
+                }
+
+                // =============================
+                // 3) LOAD RETURN ITEMS
+                // =============================
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    sri.Id, sri.InvoiceItemId, sri.ItemId, sri.ItemName,
+                    sri.BatchNo, sri.Qty, sri.Rate, sri.DiscountPercent,
+                    sri.NetRate, sri.GstPercent, sri.GstValue,
+                    sri.CgstPercent, sri.CgstValue,
+                    sri.SgstPercent, sri.SgstValue,
+                    sri.IgstPercent, sri.IgstValue,
+                    sri.LineSubTotal, sri.LineTotal, sri.Notes
+                FROM SalesReturnItem sri
+                WHERE sri.SalesReturnId=@rid";
+
+                    cmd.Parameters.AddWithValue("@rid", returnId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            dto.Items.Add(new SalesReturnItemDetailDto
+                            {
+                                ReturnItemId = r.GetInt64(0),
+                                InvoiceItemId = r.GetInt64(1),
+                                ItemId = r.GetInt64(2),
+                                ItemName = r.GetString(3),
+                                BatchNo = r.IsDBNull(4) ? "" : r.GetString(4),
+                                Qty = r.GetDecimal(5),
+                                Rate = r.GetDecimal(6),
+                                DiscountPercent = r.GetDecimal(7),
+                                NetRate = r.GetDecimal(8),
+                                GstPercent = r.GetDecimal(9),
+                                GstValue = r.GetDecimal(10),
+                                CgstPercent = r.GetDecimal(11),
+                                CgstValue = r.GetDecimal(12),
+                                SgstPercent = r.GetDecimal(13),
+                                SgstValue = r.GetDecimal(14),
+                                IgstPercent = r.GetDecimal(15),
+                                IgstValue = r.GetDecimal(16),
+                                LineSubTotal = r.GetDecimal(17),
+                                LineTotal = r.GetDecimal(18),
+                                Notes = r.IsDBNull(19) ? "" : r.GetString(19)
+                            });
+                        }
+                    }
+                }
+
+                return dto;
+            }
+        }
 
 
     }

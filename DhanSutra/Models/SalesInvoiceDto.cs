@@ -6,22 +6,21 @@ using System.Threading.Tasks;
 
 namespace DhanSutra.Models
 {
-    public class SalesReturnDto
+    public class SalesInvoiceDto
     {
         public long InvoiceId { get; set; }
-        public long CustomerId { get; set; }
         public string InvoiceNo { get; set; }
         public long InvoiceNum { get; set; }
         public string InvoiceDate { get; set; }
-
-        public decimal SubTotal { get; set; }
-        public decimal TotalTax { get; set; }
-        public decimal TotalAmount { get; set; }
-        public decimal RoundOff { get; set; }
+        public long CustomerId { get; set; }
+        public string CustomerName { get; set; }
+        public string CustomerPhone { get; set; }
+        public string CustomerState { get; set; }
         public string Notes { get; set; }
 
-        public string CreatedBy { get; set; }
-
-        public List<SalesInvoiceItemDto> Items { get; set; }
+        public List<SalesInvoiceItemDto> Items { get; set; } = new List<SalesInvoiceItemDto>();
     }
+    
+
+
 }

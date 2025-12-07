@@ -8,6 +8,8 @@ namespace DhanSutra.Models
 {
     public class CreateInvoiceDto
     {
+        public string InvoiceNo { get; set; }
+        public long InvoiceNum { get; set; }
         public string InvoiceDate { get; set; }
         public int CompanyId { get; set; }
 

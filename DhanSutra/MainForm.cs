@@ -1547,201 +1547,201 @@ namespace DhanSutra
                             break;
                             //return JsonConvert.SerializeObject(new { success = true, data = suppliers });
                         }
-                    case "SearchPurchaseItemsByDate":
-                        {
-                            try
-                            {
-                                var payload = req.Payload as JObject;
-                                if (payload == null) break;
-                                string dateStr = payload["Date"]?.ToObject<string>();
+                    //case "SearchPurchaseItemsByDate":
+                    //    {
+                    //        try
+                    //        {
+                    //            var payload = req.Payload as JObject;
+                    //            if (payload == null) break;
+                    //            string dateStr = payload["Date"]?.ToObject<string>();
 
-                                DateTime date = DateTime.Parse(dateStr);
-                                var items = db.SearchPurchaseItemsByDate(date);
+                    //            DateTime date = DateTime.Parse(dateStr);
+                    //            var items = db.SearchPurchaseItemsByDate(date);
 
-                                var response = new
-                                {
-                                    action = "SearchPurchaseItemsByDateResponse",
-                                    success = true,
-                                    items = items
-                                };
+                    //            var response = new
+                    //            {
+                    //                action = "SearchPurchaseItemsByDateResponse",
+                    //                success = true,
+                    //                items = items
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            }
-                            catch (Exception ex)
-                            {
-                                var response = new
-                                {
-                                    action = "SearchPurchaseItemsByDate",
-                                    success = false,
-                                    error = ex.Message
-                                };
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            var response = new
+                    //            {
+                    //                action = "SearchPurchaseItemsByDate",
+                    //                success = false,
+                    //                error = ex.Message
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            }
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        }
 
-                            break;
-                        }
-                    case "SearchPurchaseReturns":
-                        {
-                            try
-                            {
-                                var payload = req.Payload as JObject;
-                                if (payload == null) break;
+                    //        break;
+                    //    }
+                    //case "SearchPurchaseReturns":
+                    //    {
+                    //        try
+                    //        {
+                    //            var payload = req.Payload as JObject;
+                    //            if (payload == null) break;
 
-                                // accept both "Date" and "date" casing just in case
-                                var dateToken = payload["Date"] ?? payload["date"];
-                                if (dateToken == null)
-                                {
-                                    var respErr = new { action = "SearchPurchaseReturnsResponse", success = false, error = "Date not provided" };
-                                    webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(respErr));
-                                    break;
-                                }
+                    //            // accept both "Date" and "date" casing just in case
+                    //            var dateToken = payload["Date"] ?? payload["date"];
+                    //            if (dateToken == null)
+                    //            {
+                    //                var respErr = new { action = "SearchPurchaseReturnsResponse", success = false, error = "Date not provided" };
+                    //                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(respErr));
+                    //                break;
+                    //            }
 
-                                string dateStr = dateToken.ToObject<string>();
-                                DateTime date = DateTime.Parse(dateStr);
+                    //            string dateStr = dateToken.ToObject<string>();
+                    //            DateTime date = DateTime.Parse(dateStr);
 
-                                var returns = db.SearchPurchaseReturns(date);
+                    //            var returns = db.SearchPurchaseReturns(date);
 
-                                var response = new
-                                {
-                                    action = "SearchPurchaseReturnsResponse",
-                                    success = true,
-                                    returns = returns
-                                };
+                    //            var response = new
+                    //            {
+                    //                action = "SearchPurchaseReturnsResponse",
+                    //                success = true,
+                    //                returns = returns
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            }
-                            catch (Exception ex)
-                            {
-                                var response = new
-                                {
-                                    action = "SearchPurchaseReturnsResponse",
-                                    success = false,
-                                    error = ex.Message
-                                };
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            var response = new
+                    //            {
+                    //                action = "SearchPurchaseReturnsResponse",
+                    //                success = false,
+                    //                error = ex.Message
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            }
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        }
 
-                            break;
-                        }
+                    //        break;
+                    //    }
 
 
-                    case "LoadPurchaseForReturn":
-                        {
-                            try
-                            {
-                                var payload = req.Payload as JObject;
-                                if (payload == null) break;
-                                long itemDetailsId = payload["ItemDetailsId"].ToObject<long>();
+                    //case "LoadPurchaseForReturn":
+                    //    {
+                    //        try
+                    //        {
+                    //            var payload = req.Payload as JObject;
+                    //            if (payload == null) break;
+                    //            long itemDetailsId = payload["ItemDetailsId"].ToObject<long>();
 
                                 
 
-                                var detail = db.LoadPurchaseForReturn(itemDetailsId);
+                    //            var detail = db.LoadPurchaseForReturn(itemDetailsId);
 
-                                var response = new
-                                {
-                                    action = "LoadPurchaseForReturnResponse",
-                                    success = true,
-                                    data = detail
-                                };
+                    //            var response = new
+                    //            {
+                    //                action = "LoadPurchaseForReturnResponse",
+                    //                success = true,
+                    //                data = detail
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            }
-                            catch (Exception ex)
-                            {
-                                var response = new
-                                {
-                                    action = "LoadPurchaseForReturn",
-                                    success = false,
-                                    error = ex.Message
-                                };
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            var response = new
+                    //            {
+                    //                action = "LoadPurchaseForReturn",
+                    //                success = false,
+                    //                error = ex.Message
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            }
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        }
 
-                            break;
-                        }
-                    case "LoadPurchaseReturnDetail":
-                        {
-                            try
-                            {
-                                var payload = req.Payload as JObject;
-                                if (payload == null) break;
+                    //        break;
+                    //    }
+                    //case "LoadPurchaseReturnDetail":
+                    //    {
+                    //        try
+                    //        {
+                    //            var payload = req.Payload as JObject;
+                    //            if (payload == null) break;
 
-                                long returnId = payload["ReturnId"]?.ToObject<long>() ?? 0;
+                    //            long returnId = payload["ReturnId"]?.ToObject<long>() ?? 0;
 
-                                var data = db.GetPurchaseReturnDetail(returnId);
+                    //            var data = db.GetPurchaseReturnDetail(returnId);
 
-                                var response = new
-                                {
-                                    action = "LoadPurchaseReturnDetailResponse",
-                                    success = true,
-                                    returnData = data
-                                };
+                    //            var response = new
+                    //            {
+                    //                action = "LoadPurchaseReturnDetailResponse",
+                    //                success = true,
+                    //                returnData = data
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(
-                                    JsonConvert.SerializeObject(response)
-                                );
-                            }
-                            catch (Exception ex)
-                            {
-                                var response = new
-                                {
-                                    action = "LoadPurchaseReturnDetailResponse",
-                                    success = false,
-                                    error = ex.Message
-                                };
+                    //            webView.CoreWebView2.PostWebMessageAsJson(
+                    //                JsonConvert.SerializeObject(response)
+                    //            );
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            var response = new
+                    //            {
+                    //                action = "LoadPurchaseReturnDetailResponse",
+                    //                success = false,
+                    //                error = ex.Message
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(
-                                    JsonConvert.SerializeObject(response)
-                                );
-                            }
+                    //            webView.CoreWebView2.PostWebMessageAsJson(
+                    //                JsonConvert.SerializeObject(response)
+                    //            );
+                    //        }
 
-                            break;
-                        }
+                    //        break;
+                    //    }
 
 
-                    case "SavePurchaseReturn":
-                        {
-                            try
-                            {
-                                var payload = req.Payload as JObject;
-                                if (payload == null) break;
+                    //case "SavePurchaseReturn":
+                    //    {
+                    //        try
+                    //        {
+                    //            var payload = req.Payload as JObject;
+                    //            if (payload == null) break;
 
-                                var dto = payload.ToObject<PurchaseReturnDto>();
-                                //var dto = payload.ToObject<PurchaseReturnDto>();
+                    //            var dto = payload.ToObject<PurchaseReturnDto>();
+                    //            //var dto = payload.ToObject<PurchaseReturnDto>();
 
-                                var result = db.SavePurchaseReturn(dto);
+                    //            var result = db.SavePurchaseReturn(dto);
 
-                                var response = new
-                                {
-                                    action = "SavePurchaseReturnResponse",
-                                    success = true,
-                                    data = new
-                                    {
-                                        returnId = result.ReturnId,
-                                        returnNo = result.ReturnNo,
-                                        returnNum = result.ReturnNum
-                                    }
-                                };
+                    //            var response = new
+                    //            {
+                    //                action = "SavePurchaseReturnResponse",
+                    //                success = true,
+                    //                data = new
+                    //                {
+                    //                    returnId = result.ReturnId,
+                    //                    returnNo = result.ReturnNo,
+                    //                    returnNum = result.ReturnNum
+                    //                }
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            }
-                            catch (Exception ex)
-                            {
-                                var response = new
-                                {
-                                    action = "SavePurchaseReturn",
-                                    success = false,
-                                    error = ex.Message
-                                };
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            var response = new
+                    //            {
+                    //                action = "SavePurchaseReturn",
+                    //                success = false,
+                    //                error = ex.Message
+                    //            };
 
-                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            }
+                    //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        }
 
-                            break;
-                        }
+                    //        break;
+                    //    }
                     case "GetNextPurchaseInvoiceNum":
                         {
                             long nextNum = db.GetNextPurchaseInvoiceNum();
@@ -1762,7 +1762,26 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
+                    case "GetNextSalesInvoiceNum":
+                        {
+                            long nextNum = db.GetNextSalesInvoiceNum();
 
+                            string fy = GetFinancialYear();   // EX: "24-25"
+                            string padded = nextNum.ToString("D5"); // 00001, 00002
+
+                            string invoiceNo = $"SINV-{fy}/{padded}";
+
+                            var response = new
+                            {
+                                action = "GetNextSalesInvoiceNumResponse",
+                                nextNum = nextNum,
+                                fy = fy,
+                                invoiceNo = invoiceNo
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
 
                     case "SavePurchaseInvoice":
                         {
@@ -2191,6 +2210,39 @@ namespace DhanSutra
                             break;
                         }
 
+                    case "SavePurchaseReturn":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null) break;
+
+                                var dto = payload.ToObject<PurchaseReturnDto>();
+                                var newId = db.SavePurchaseReturn(dto);
+
+                                var response = new
+                                {
+                                    action = "SavePurchaseReturnResponse",
+                                    success = true,
+                                    newReturnId = newId
+                                };
+                                webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                                break;
+
+
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "SavePurchaseReturnResponse",
+                                    success = false,
+                                    message = ex.Message
+                                };
+                                
+                            }
+                            break;
+                        }
 
 
                         //case "GetNextPurchaseInvoiceNum":

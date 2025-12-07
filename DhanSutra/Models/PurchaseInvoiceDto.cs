@@ -65,6 +65,8 @@ namespace DhanSutra.Models
         public string Color { get; set; }
         public decimal? Weight { get; set; }
         public string Dimension { get; set; }
+        public decimal AvailableQty { get; set; }
+
     }
 
 
