@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace DhanSutra.Models
 {
-    public class SalesInvoiceItemDto
+    public class LoadSalesInvoiceItemDto
     {
         public long InvoiceItemId { get; set; }
         public long ItemId { get; set; }
@@ -14,8 +14,6 @@ namespace DhanSutra.Models
         public string BatchNo { get; set; }
         public string HsnCode { get; set; }
 
-        public decimal Qty { get; set; }
-        public decimal ReturnedQty { get; set; }
         public decimal AvailableQty { get; set; }
 
         public decimal Rate { get; set; }
@@ -28,7 +26,6 @@ namespace DhanSutra.Models
         public decimal CgstValue { get; set; }
         public decimal SgstPercent { get; set; }
         public decimal SgstValue { get; set; }
-
         public decimal IgstPercent { get; set; }
         public decimal IgstValue { get; set; }
 

@@ -58,11 +58,11 @@ namespace DhanSutra.Models
             {
                 dto.Customer = new CustomerDto
                 {
-                    Id = (int?)cust["Id"] ?? 0,
-                    Name = (string)cust["Name"],
-                    Phone = (string)cust["Phone"],
-                    State = (string)cust["State"],
-                    Address = (string)cust["Address"]
+                    CustomerId = (int?)cust["Id"] ?? 0,
+                    CustomerName = (string)cust["Name"],
+                    Mobile = (string)cust["Phone"],
+                    BillingState = (string)cust["State"],
+                    BillingAddress = (string)cust["Address"]
                 };
             }
 

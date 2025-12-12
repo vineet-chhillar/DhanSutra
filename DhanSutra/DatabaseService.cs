@@ -57,7 +57,7 @@ namespace DhanSutra
         {
             using (var connection = new SQLiteConnection(_connectionString))
                 return connection.Query<DhanSutra.Models.Item>("SELECT i.Id, i.Name, i.ItemCode,i.hsnCode, c.CategoryName, \r\n      " +
-                    " u.UnitName, g.GstPercent, i.Description, i.[Date]\r\nFROM Item i\r\nLEFT JOIN CategoryMaster c" +
+                    " u.UnitName, g.GstPercent, i.Description, i.[Date],i.reorderlevel\r\nFROM Item i\r\nLEFT JOIN CategoryMaster c" +
                     " ON i.CategoryId = c.Id\r\nLEFT JOIN UnitMaster u ON i.UnitId = u.Id\r\nLEFT JOIN GstMaster g ON i.GstId = g.Id;");
         }
         public IEnumerable<ItemForInvoice> GetItemsForInvoice()
@@ -73,17 +73,17 @@ namespace DhanSutra
             using (var connection = new SQLiteConnection(_connectionString))
                 return connection.Query<ItemForPurchaseInvoice>("select i.id AS Id, i.Name, i.ItemCode, i.hsncode, u.unitname, g.gstpercent\r\nfrom item i LEFT JOIN UnitMaster u ON i.UnitId = u.Id LEFT JOIN GstMaster g ON i.GstId = g.Id order by i.id;");
         }
-        public IEnumerable<ItemDetails> GetItemDetails(int itemId)
-        {
-            using (var connection = new SQLiteConnection(_connectionString))
-            {
-                Console.Write(itemId.ToString());
-                return connection.Query<ItemDetails>(
-           "SELECT itemdetails.*,suppliers.suppliername as SupplierName FROM ItemDetails\r\nleft join suppliers on suppliers.supplierid=itemdetails.supplierid\r\nWHERE item_id = @ItemId\r\n",
-           new { ItemId = itemId }
-           );
-            }
-        }
+        //public IEnumerable<ItemDetails> GetItemDetails(int itemId)
+        //{
+        //    using (var connection = new SQLiteConnection(_connectionString))
+        //    {
+        //        Console.Write(itemId.ToString());
+        //        return connection.Query<ItemDetails>(
+        //   "SELECT itemdetails.*,suppliers.suppliername as SupplierName FROM ItemDetails\r\nleft join suppliers on suppliers.supplierid=itemdetails.supplierid\r\nWHERE item_id = @ItemId\r\n",
+        //   new { ItemId = itemId }
+        //   );
+        //    }
+        //}
         public void AddItem(DhanSutra.Models.Item item)
         {
             using (var connection = new SQLiteConnection(_connectionString))
@@ -92,109 +92,109 @@ namespace DhanSutra
                 Console.WriteLine("📥 AddItem() received:");
                 Console.WriteLine(JsonConvert.SerializeObject(item, Formatting.Indented));
                 connection.Execute(
-                "INSERT INTO Item (name, itemcode, hsnCode,categoryid,[date], description, unitid, gstid,createdby,createdat) " +
+                "INSERT INTO Item (name, itemcode, hsnCode,categoryid,[date], description, unitid, gstid,createdby,createdat,reorderlevel) " +
                 "VALUES" +
-                " (@Name, @ItemCode,@HsnCode, @CategoryId,@Date, @Description, @UnitId, @GstId,@CreatedBy,@CreatedAt)", item);
+                " (@Name, @ItemCode,@HsnCode, @CategoryId,@Date, @Description, @UnitId, @GstId,@CreatedBy,@CreatedAt,@ReorderLevel)", item);
             }
         }
 
-        public bool AddItemDetails(ItemDetails details, SQLiteConnection conn, SQLiteTransaction txn)
-        {
-            try
-            {
-                // Debug log
-                Console.WriteLine("📥 AddItemDetails() received:");
-                Console.WriteLine(JsonConvert.SerializeObject(details, Formatting.Indented));
+        //public bool AddItemDetails(ItemDetails details, SQLiteConnection conn, SQLiteTransaction txn)
+        //{
+        //    try
+        //    {
+        //        // Debug log
+        //        Console.WriteLine("📥 AddItemDetails() received:");
+        //        Console.WriteLine(JsonConvert.SerializeObject(details, Formatting.Indented));
 
-                // ---------------------------
-                // 🛑 STEP 1: Validate
-                // ---------------------------
-                var validationErrors = ValidateInventoryDetails(details);
+        //        // ---------------------------
+        //        // 🛑 STEP 1: Validate
+        //        // ---------------------------
+        //        var validationErrors = ValidateInventoryDetails(details);
 
-                if (validationErrors.Count > 0)
-                {
-                    // Log validation errors
-                    Console.WriteLine("❌ Validation failed:");
-                    foreach (var err in validationErrors)
-                    {
-                        Console.WriteLine(" - " + err);
-                    }
+        //        if (validationErrors.Count > 0)
+        //        {
+        //            // Log validation errors
+        //            Console.WriteLine("❌ Validation failed:");
+        //            foreach (var err in validationErrors)
+        //            {
+        //                Console.WriteLine(" - " + err);
+        //            }
 
-                    // ❗ Since function must return bool → return false on validation failure
-                    return false;
-                }
+        //            // ❗ Since function must return bool → return false on validation failure
+        //            return false;
+        //        }
 
-                // ---------------------------
-                // 🟢 STEP 2: Insert if valid
-                // ---------------------------
-                string sql = @"
-            INSERT INTO ItemDetails 
-                (
-                    item_id,
+        //        // ---------------------------
+        //        // 🟢 STEP 2: Insert if valid
+        //        // ---------------------------
+        //        string sql = @"
+        //    INSERT INTO ItemDetails 
+        //        (
+        //            item_id,
                      
-                    batchNo,
-                    refno,
-                    [Date],
-                    quantity,
-                    purchasePrice,
-                    discountPercent,
-                    netPurchasePrice, 
-                    amount,
-                    salesPrice,
-                    mrp, 
-                    goodsOrServices,
-                    description, 
-                    mfgdate,
-                    expdate,
-                    modelno, 
-                    brand, 
-                    size,
-                    color,
-                    weight,
-                    dimension,
-                    createdby,
-                    createdat,
-                    SupplierId
-                )
-            VALUES 
-                (
-                    @Item_Id,
-                    @BatchNo,
-                    @refno,
-                    @Date,
-                    @Quantity,
-                    @PurchasePrice,
-                    @DiscountPercent, 
-                    @NetPurchasePrice,
-                    @Amount,
-                    @SalesPrice,
-                    @Mrp,
-                    @GoodsOrServices,
-                    @Description, 
-                    @MfgDate,
-                    @ExpDate,
-                    @ModelNo,
-                    @Brand,
-                    @Size,
-                    @Color,
-                    @Weight,
-                    @Dimension,
-                    @CreatedBy,
-                    @CreatedAt,
-                    @SupplierId
-                );
-        ";
+        //            batchNo,
+        //            refno,
+        //            [Date],
+        //            quantity,
+        //            purchasePrice,
+        //            discountPercent,
+        //            netPurchasePrice, 
+        //            amount,
+        //            salesPrice,
+        //            mrp, 
+        //            goodsOrServices,
+        //            description, 
+        //            mfgdate,
+        //            expdate,
+        //            modelno, 
+        //            brand, 
+        //            size,
+        //            color,
+        //            weight,
+        //            dimension,
+        //            createdby,
+        //            createdat,
+        //            SupplierId
+        //        )
+        //    VALUES 
+        //        (
+        //            @Item_Id,
+        //            @BatchNo,
+        //            @refno,
+        //            @Date,
+        //            @Quantity,
+        //            @PurchasePrice,
+        //            @DiscountPercent, 
+        //            @NetPurchasePrice,
+        //            @Amount,
+        //            @SalesPrice,
+        //            @Mrp,
+        //            @GoodsOrServices,
+        //            @Description, 
+        //            @MfgDate,
+        //            @ExpDate,
+        //            @ModelNo,
+        //            @Brand,
+        //            @Size,
+        //            @Color,
+        //            @Weight,
+        //            @Dimension,
+        //            @CreatedBy,
+        //            @CreatedAt,
+        //            @SupplierId
+        //        );
+        //";
 
-                int rowsAffected = conn.Execute(sql, details, transaction: txn);
+        //        int rowsAffected = conn.Execute(sql, details, transaction: txn);
 
-                return rowsAffected > 0;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("❌ Error inserting ItemDetails: " + ex.Message);
-                return false;
-            }
-        }
+        //        return rowsAffected > 0;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine("❌ Error inserting ItemDetails: " + ex.Message);
+        //        return false;
+        //    }
+        //}
 
 
 
@@ -219,26 +219,52 @@ namespace DhanSutra
             }
         }
 
-        public string GetCategoryById(int id)
+        public object GetCategoryById(int id)
         {
-            using (var connection = new SQLiteConnection(_connectionString))
+            using (var conn = new SQLiteConnection(_connectionString))
             {
-                // 🧠 Query the database for the item ID
-                string query = "SELECT * FROM CategoryMaster WHERE id = @id LIMIT 1";
-
-                var result = connection.ExecuteScalar<object>(query, new { id = id });
-
-                if (result != null && result != DBNull.Value)
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
                 {
-                    return Convert.ToString(result);
-                }
-                else
-                {
-                    Console.WriteLine($"⚠️ Category not found: {id}");
-                    return null; // Or -1 if you prefer an integer default
+                    cmd.CommandText = @"
+                SELECT 
+                    c.Id,
+                    c.CategoryName,
+                    c.Description,
+                    c.DefaultHsnId,
+                    c.DefaultGstId,
+                    h.HsnCode AS DefaultHsn,
+                    g.GstPercent AS DefaultGstPercent
+                FROM CategoryMaster c
+                LEFT JOIN HsnMaster h ON h.Id = c.DefaultHsnId
+                LEFT JOIN GstMaster g ON g.Id = c.DefaultGstId
+                WHERE c.Id = @id";
+
+                    cmd.Parameters.AddWithValue("@id", id);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            return new
+                            {
+                                Id = reader.GetInt32(0),
+                                CategoryName = reader.GetString(1),
+                                Description = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                                DefaultHsnId = reader.IsDBNull(3) ? 0 : reader.GetInt32(3),
+                                DefaultGstId = reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
+                                DefaultHsn = reader.IsDBNull(5) ? "" : reader.GetString(5),
+                                DefaultGstPercent = reader.IsDBNull(6) ? "" : reader.GetString(6)
+                            };
+                        }
+                    }
                 }
             }
+
+            return null;
         }
+
+
 
         public string GetUnitNameById(int id)
         {
@@ -370,7 +396,7 @@ namespace DhanSutra
                 string deleteQuery = @"
                 DELETE FROM Item
                 WHERE Id = @ItemId
-                AND NOT EXISTS (SELECT 1 FROM ItemDetails WHERE item_id = @ItemId);
+                AND NOT EXISTS (SELECT 1 FROM purchaseitem WHERE itemid = @ItemId);
             ";
 
                 using (var cmd = new SQLiteCommand(deleteQuery, conn))
@@ -402,7 +428,8 @@ namespace DhanSutra
                 u.id as UnitId,                
                 u.UnitName AS UnitName,
                 g.id as GstId,
-                g.gstpercent AS GstPercent
+                g.gstpercent AS GstPercent,
+i.reorderlevel
             FROM Item i
             LEFT JOIN categoryMaster c ON i.categoryId = c.Id
             LEFT JOIN UnitMaster u ON i.unitid = u.Id
@@ -442,7 +469,8 @@ namespace DhanSutra
                                 UnitId = reader["UnitId"],
                                 UnitName = reader["UnitName"],
                                 GstId = reader["GstId"],
-                                GstPercent = reader["GstPercent"]
+                                GstPercent = reader["GstPercent"],
+                                ReorderLevel = reader["ReorderLevel"]
                             });
                         }
                     }
@@ -451,7 +479,7 @@ namespace DhanSutra
 
             return items;
         }
-        public bool UpdateItem(int id, string name, string itemCode, string hsncode, int? categoryId, string date, string description, int? unitId, int? gstId)
+        public bool UpdateItem(int id, string name, string itemCode, string hsncode, int? categoryId, string date, string description, int? unitId, int? gstId,decimal reorderlevel)
         {
             string sql = @"
         UPDATE Item
@@ -463,7 +491,8 @@ namespace DhanSutra
             date = @date,
             description = @description,
             unitid = @unitId,
-            gstid = @gstId
+            gstid = @gstId,
+reorderlevel=@reorderlevel
         WHERE id = @id;
     ";
 
@@ -485,6 +514,7 @@ namespace DhanSutra
                         unitId == null ? (object)DBNull.Value : (object)unitId;
                     cmd.Parameters.Add("@gstId", DbType.Int32).Value =
                         gstId == null ? (object)DBNull.Value : (object)gstId;
+                    cmd.Parameters.AddWithValue("@reorderlevel", reorderlevel);
 
                     int rows = cmd.ExecuteNonQuery();
                     return rows > 0;
@@ -517,149 +547,149 @@ namespace DhanSutra
         }
         // ✅ SEARCH INVENTORY
         // ✅ Search
-        public List<JObject> SearchInventory(string queryText)
-        {
-            var list = new List<JObject>();
+//        public List<JObject> SearchInventory(string queryText)
+//        {
+//            var list = new List<JObject>();
 
-            try
-            {
-                using (var conn = new SQLiteConnection(_connectionString))
-                {
-                    conn.Open();
+//            try
+//            {
+//                using (var conn = new SQLiteConnection(_connectionString))
+//                {
+//                    conn.Open();
 
-                    string sql = @"
-                SELECT 
-    Item_Id,    BatchNo,    refno,    Date,    Quantity,    PurchasePrice,    discountPercent,    netPurchasePrice,    amount,
-    SalesPrice,
-    Mrp,
-    GoodsOrServices,
-    Description,
-    MfgDate,
-    ExpDate,
-    ModelNo,
-    Brand,
-    Size,
-    Color,
-    Weight,
-    Dimension,
-    suppliers.suppliername,
-suppliers.supplierId
-FROM ItemDetails
-left join suppliers on suppliers.supplierid=itemdetails.supplierid
-WHERE 
-     item_id=@query
-                     ORDER BY Date DESC;";
+//                    string sql = @"
+//                SELECT 
+//    Item_Id,    BatchNo,    refno,    Date,    Quantity,    PurchasePrice,    discountPercent,    netPurchasePrice,    amount,
+//    SalesPrice,
+//    Mrp,
+//    GoodsOrServices,
+//    Description,
+//    MfgDate,
+//    ExpDate,
+//    ModelNo,
+//    Brand,
+//    Size,
+//    Color,
+//    Weight,
+//    Dimension,
+//    suppliers.suppliername,
+//suppliers.supplierId
+//FROM ItemDetails
+//left join suppliers on suppliers.supplierid=itemdetails.supplierid
+//WHERE 
+//     item_id=@query
+//                     ORDER BY Date DESC;";
 
-                    using (var cmd = new SQLiteCommand(sql, conn))
-                    {
-                        cmd.Parameters.AddWithValue("@query", queryText);
+//                    using (var cmd = new SQLiteCommand(sql, conn))
+//                    {
+//                        cmd.Parameters.AddWithValue("@query", queryText);
 
-                        using (var reader = cmd.ExecuteReader())
-                        {
-                            while (reader.Read())
-                            {
-                                var row = new JObject();
+//                        using (var reader = cmd.ExecuteReader())
+//                        {
+//                            while (reader.Read())
+//                            {
+//                                var row = new JObject();
 
-                                for (int i = 0; i < reader.FieldCount; i++)
-                                {
-                                    string colName = reader.GetName(i);
-                                    object value = reader.IsDBNull(i) ? "" : reader.GetValue(i);
-                                    row[colName] = JToken.FromObject(value);
-                                }
+//                                for (int i = 0; i < reader.FieldCount; i++)
+//                                {
+//                                    string colName = reader.GetName(i);
+//                                    object value = reader.IsDBNull(i) ? "" : reader.GetValue(i);
+//                                    row[colName] = JToken.FromObject(value);
+//                                }
 
-                                list.Add(row);
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Error in SearchInventory: {ex.Message}");
-            }
+//                                list.Add(row);
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//            catch (Exception ex)
+//            {
+//                Console.WriteLine($"❌ Error in SearchInventory: {ex.Message}");
+//            }
 
-            return list;
-        }
+//            return list;
+//        }
 
 
-        public bool UpdateInventoryRecord(
-           SQLiteConnection conn,
-           SQLiteTransaction tran,
-           string itemId, string batchNo, string refno, string date,
-           string quantity, string purchasePrice, string discountPercent,
-           string netpurchasePrice, string amount, string salesPrice, string mrp,
-           string goodsOrServices, string description, string mfgDate, string expDate,
-           string modelNo, string brand, string size, string color, string weight,
-           string dimension, string invbatchno, int supplierid)
-        {
-            try
-            {
-                string query = @"
-            UPDATE ItemDetails
-            SET 
-                batchNo = @BatchNo,
-                refno=@refno,
-                date = @Date,
-                quantity = @Quantity,
-                purchasePrice = @PurchasePrice,
-                discountPercent=@DiscountPercent,
-                netpurchasePrice= @NetPurchasePrice,
-                amount= @Amount,
-                salesPrice = @SalesPrice,
-                mrp = @Mrp,
-                goodsOrServices = @GoodsOrServices,
-                description = @Description,
-                mfgdate = @MfgDate,
-                expdate = @ExpDate,
-                modelno = @ModelNo,
-                brand = @Brand,
-                size = @Size,
-                color = @Color,
-                weight = @Weight,
-                dimension = @Dimension,
-supplierid=@SupplierId
-            WHERE item_Id = @ItemId 
-              AND batchNo = @invbatchno;
-        ";
+//        public bool UpdateInventoryRecord(
+//           SQLiteConnection conn,
+//           SQLiteTransaction tran,
+//           string itemId, string batchNo, string refno, string date,
+//           string quantity, string purchasePrice, string discountPercent,
+//           string netpurchasePrice, string amount, string salesPrice, string mrp,
+//           string goodsOrServices, string description, string mfgDate, string expDate,
+//           string modelNo, string brand, string size, string color, string weight,
+//           string dimension, string invbatchno, int supplierid)
+//        {
+//            try
+//            {
+//                string query = @"
+//            UPDATE ItemDetails
+//            SET 
+//                batchNo = @BatchNo,
+//                refno=@refno,
+//                date = @Date,
+//                quantity = @Quantity,
+//                purchasePrice = @PurchasePrice,
+//                discountPercent=@DiscountPercent,
+//                netpurchasePrice= @NetPurchasePrice,
+//                amount= @Amount,
+//                salesPrice = @SalesPrice,
+//                mrp = @Mrp,
+//                goodsOrServices = @GoodsOrServices,
+//                description = @Description,
+//                mfgdate = @MfgDate,
+//                expdate = @ExpDate,
+//                modelno = @ModelNo,
+//                brand = @Brand,
+//                size = @Size,
+//                color = @Color,
+//                weight = @Weight,
+//                dimension = @Dimension,
+//supplierid=@SupplierId
+//            WHERE item_Id = @ItemId 
+//              AND batchNo = @invbatchno;
+//        ";
 
-                using (var cmd = new SQLiteCommand(query, conn, tran))
-                {
+//                using (var cmd = new SQLiteCommand(query, conn, tran))
+//                {
 
-                    cmd.Parameters.AddWithValue("@Date", date);
-                    cmd.Parameters.AddWithValue("@Quantity", quantity);
-                    cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
-                    cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
-                    cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
-                    cmd.Parameters.AddWithValue("@Amount", amount);
-                    cmd.Parameters.AddWithValue("@SalesPrice", salesPrice);
-                    cmd.Parameters.AddWithValue("@Mrp", mrp);
-                    cmd.Parameters.AddWithValue("@GoodsOrServices", goodsOrServices);
-                    cmd.Parameters.AddWithValue("@Description", description);
-                    cmd.Parameters.AddWithValue("@MfgDate", mfgDate);
-                    cmd.Parameters.AddWithValue("@ExpDate", expDate);
-                    cmd.Parameters.AddWithValue("@ModelNo", modelNo);
-                    cmd.Parameters.AddWithValue("@Brand", brand);
-                    cmd.Parameters.AddWithValue("@Size", size);
-                    cmd.Parameters.AddWithValue("@Color", color);
-                    cmd.Parameters.AddWithValue("@Weight", weight);
-                    cmd.Parameters.AddWithValue("@Dimension", dimension);
+//                    cmd.Parameters.AddWithValue("@Date", date);
+//                    cmd.Parameters.AddWithValue("@Quantity", quantity);
+//                    cmd.Parameters.AddWithValue("@PurchasePrice", purchasePrice);
+//                    cmd.Parameters.AddWithValue("@DiscountPercent", discountPercent);
+//                    cmd.Parameters.AddWithValue("@NetPurchasePrice", netpurchasePrice);
+//                    cmd.Parameters.AddWithValue("@Amount", amount);
+//                    cmd.Parameters.AddWithValue("@SalesPrice", salesPrice);
+//                    cmd.Parameters.AddWithValue("@Mrp", mrp);
+//                    cmd.Parameters.AddWithValue("@GoodsOrServices", goodsOrServices);
+//                    cmd.Parameters.AddWithValue("@Description", description);
+//                    cmd.Parameters.AddWithValue("@MfgDate", mfgDate);
+//                    cmd.Parameters.AddWithValue("@ExpDate", expDate);
+//                    cmd.Parameters.AddWithValue("@ModelNo", modelNo);
+//                    cmd.Parameters.AddWithValue("@Brand", brand);
+//                    cmd.Parameters.AddWithValue("@Size", size);
+//                    cmd.Parameters.AddWithValue("@Color", color);
+//                    cmd.Parameters.AddWithValue("@Weight", weight);
+//                    cmd.Parameters.AddWithValue("@Dimension", dimension);
 
-                    cmd.Parameters.AddWithValue("@ItemId", itemId);
-                    cmd.Parameters.AddWithValue("@BatchNo", batchNo);
-                    cmd.Parameters.AddWithValue("@refno", refno);
-                    cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
-                    cmd.Parameters.AddWithValue("@SupplierId", supplierid);
+//                    cmd.Parameters.AddWithValue("@ItemId", itemId);
+//                    cmd.Parameters.AddWithValue("@BatchNo", batchNo);
+//                    cmd.Parameters.AddWithValue("@refno", refno);
+//                    cmd.Parameters.AddWithValue("@invbatchno", invbatchno);
+//                    cmd.Parameters.AddWithValue("@SupplierId", supplierid);
 
-                    int rows = cmd.ExecuteNonQuery();
-                    return rows > 0;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error updating inventory: " + ex.Message);
-                return false;
-            }
-        }
+//                    int rows = cmd.ExecuteNonQuery();
+//                    return rows > 0;
+//                }
+//            }
+//            catch (Exception ex)
+//            {
+//                Console.WriteLine("Error updating inventory: " + ex.Message);
+//                return false;
+//            }
+//        }
 
 
         public bool UpdateItemLedger(
@@ -757,33 +787,33 @@ supplierid=@SupplierId
         }
 
 
-        public JObject GetLastItemWithInventory()
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
-                using (var cmd = new SQLiteCommand(@"
-            SELECT i.Item_Id, it.Name 
-FROM itemdetails i
-JOIN Item it ON i.Item_Id = it.Id
-ORDER BY i.CreatedAt DESC
-LIMIT 1;", conn))
-                {
-                    using (var reader = cmd.ExecuteReader())
-                    {
-                        if (reader.Read())
-                        {
-                            return new JObject
-                            {
-                                ["Item_Id"] = reader["Item_Id"].ToString(),
-                                ["ItemName"] = reader["Name"].ToString()
-                            };
-                        }
-                    }
-                }
-            }
-            return null;
-        }
+//        public JObject GetLastItemWithInventory()
+//        {
+//            using (var conn = new SQLiteConnection(_connectionString))
+//            {
+//                conn.Open();
+//                using (var cmd = new SQLiteCommand(@"
+//            SELECT i.Item_Id, it.Name 
+//FROM itemdetails i
+//JOIN Item it ON i.Item_Id = it.Id
+//ORDER BY i.CreatedAt DESC
+//LIMIT 1;", conn))
+//                {
+//                    using (var reader = cmd.ExecuteReader())
+//                    {
+//                        if (reader.Read())
+//                        {
+//                            return new JObject
+//                            {
+//                                ["Item_Id"] = reader["Item_Id"].ToString(),
+//                                ["ItemName"] = reader["Name"].ToString()
+//                            };
+//                        }
+//                    }
+//                }
+//            }
+//            return null;
+//        }
         public bool UpdateItemBalance(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
         {
             try
@@ -1022,6 +1052,7 @@ LIMIT 1;", conn))
             }
             catch (Exception ex)
             {
+                txn.Rollback();
                 Console.WriteLine("❌ AddItemDetails failed: " + ex.Message);
                 return false;
             }
@@ -1343,93 +1374,15 @@ LIMIT 1;", conn))
                 {
                     try
                     {
-                        //-------------------------------------
-                        // 1️⃣ Insert or Update Customer (Merged)
-                        //-------------------------------------
-
-                        int customerId = 0;
+                       
 
                         if (dto.Customer != null)
                         {
                             var cust = dto.Customer;
-
-                            // 🔍 Check existing by phone
-                            if (!string.IsNullOrWhiteSpace(cust.Phone))
-                            {
-                                using (var cmd = conn.CreateCommand())
-                                {
-                                    cmd.Transaction = tx;
-                                    cmd.CommandText = "SELECT Id FROM Customers WHERE Phone = @phone LIMIT 1;";
-                                    cmd.Parameters.AddWithValue("@phone", cust.Phone);
-
-                                    var existingId = cmd.ExecuteScalar();
-                                    if (existingId != null)
-                                    {
-                                        customerId = Convert.ToInt32(existingId);
-                                    }
-                                }
-                            }
-
-                            // ➕ If not found → insert new customer
-                            if (customerId == 0)
-                            {
-                                using (var cmd = conn.CreateCommand())
-                                {
-                                    cmd.Transaction = tx;
-                                    cmd.CommandText = @"
-                                INSERT INTO Customers (Name, Phone, State, Address)
-                                VALUES (@Name, @Phone, @State, @Address);
-
-                                SELECT last_insert_rowid();
-                            ";
-
-                                    cmd.Parameters.AddWithValue("@Name", cust.Name ?? "");
-                                    cmd.Parameters.AddWithValue("@Phone", cust.Phone ?? "");
-                                    cmd.Parameters.AddWithValue("@State", cust.State ?? "");
-                                    cmd.Parameters.AddWithValue("@Address", cust.Address ?? "");
-
-                                    customerId = Convert.ToInt32(cmd.ExecuteScalar());
-                                }
-                            }
-
-                            // assign back
-                            dto.Customer.Id = customerId;
+                           
                         }
 
-                        //-------------------------------------
-                        // 2️⃣ Generate Invoice Number (Merged)
-                        //-------------------------------------
-
-                        //string prefix = "";
-                        //long startNo = 1;
-                        //long currentNo = 1;
-
-                        //using (var cmd = conn.CreateCommand())
-                        //{
-                        //    cmd.Transaction = tx;
-                        //    cmd.CommandText = @"
-                        //SELECT InvoicePrefix, InvoiceStartNo, CurrentInvoiceNo 
-                        //FROM CompanyProfile ORDER BY Id LIMIT 1";
-
-                        //    using (var r = cmd.ExecuteReader())
-                        //    {
-                        //        if (!r.Read())
-                        //            throw new Exception("Company profile not found");
-
-                        //        prefix = r.IsDBNull(0) ? "" : r.GetString(0);
-                        //        startNo = r.IsDBNull(1) ? 1 : r.GetInt64(1);
-                        //        currentNo = r.IsDBNull(2) ? startNo : r.GetInt64(2);
-                        //    }
-                        //}
-
-                        //int nextNo = (int)(currentNo + 1);
-                        //string fullInvoiceNo = prefix + nextNo.ToString();
-
-                        //-------------------------------------
-                        // 3️⃣ Insert Invoice Header
-                        //-------------------------------------
-
-
+                        
                         long invoiceId;
                         using (var cmd = conn.CreateCommand())
                         {
@@ -1439,14 +1392,14 @@ LIMIT 1;", conn))
                         INSERT INTO Invoice (
                             InvoiceNo, InvoiceNum,
                             InvoiceDate, CompanyProfileId,
-                            CustomerId, CustomerName, CustomerPhone, CustomerState, CustomerAddress,
+                            CustomerId, 
                             SubTotal, TotalTax, TotalAmount, RoundOff,
                             CreatedBy
                         )
                         VALUES (
                             @InvoiceNo, @InvoiceNum,
                             @InvoiceDate, @CompanyProfileId,
-                            @CustomerId, @CustomerName, @CustomerPhone, @CustomerState, @CustomerAddress,
+                            @CustomerId, 
                             @SubTotal, @TotalTax, @TotalAmount, @RoundOff,
                             @CreatedBy
                         );
@@ -1460,11 +1413,8 @@ LIMIT 1;", conn))
                             cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate);
                             cmd.Parameters.AddWithValue("@CompanyProfileId", dto.CompanyId);
 
-                            cmd.Parameters.AddWithValue("@CustomerId", dto.Customer.Id);
-                            cmd.Parameters.AddWithValue("@CustomerName", dto.Customer.Name);
-                            cmd.Parameters.AddWithValue("@CustomerPhone", dto.Customer.Phone);
-                            cmd.Parameters.AddWithValue("@CustomerState", dto.Customer.State);
-                            cmd.Parameters.AddWithValue("@CustomerAddress", dto.Customer.Address);
+                            cmd.Parameters.AddWithValue("@CustomerId", dto.Customer.CustomerId);
+                           
 
                             cmd.Parameters.AddWithValue("@SubTotal", dto.SubTotal);
                             cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
@@ -1472,8 +1422,7 @@ LIMIT 1;", conn))
                             cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
 
                             cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy);
-                            //cmd.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-
+                            
                             invoiceId = (long)cmd.ExecuteScalar();
                         }
 
@@ -1544,7 +1493,7 @@ LIMIT 1;", conn))
                             ItemLedger ledgerEntry = new ItemLedger();
                             ledgerEntry.ItemId = item.ItemId;
                             ledgerEntry.BatchNo = item.BatchNo;
-                            ledgerEntry.Date = dto.InvoiceDate;
+                            ledgerEntry.Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                             ledgerEntry.TxnType = "SALE";
                             ledgerEntry.RefNo = dto.InvoiceNo;
                             ledgerEntry.Qty = item.Qty;
@@ -1555,30 +1504,59 @@ LIMIT 1;", conn))
                             ledgerEntry.Remarks = "Invoice Sale";
                             ledgerEntry.CreatedBy = dto.CreatedBy;
 
-                            AddItemLedger(ledgerEntry, conn, tx);
-
-
-                            //UpdateItemBalance(ledgerEntry, conn, tx);
-                            // Update balances
+                            AddItemLedger(ledgerEntry, conn, tx);                            
                             DecreaseItemBalance(ledgerEntry, conn, tx);
                             DecreaseItemBalanceBatchWise(ledgerEntry, conn, tx);
+
+                            //Accounting Part
+                            var custAccountId = 0L;
+                            if (dto.Customer != null)
+                            {
+                                // create/get customer party account
+                                custAccountId = GetOrCreatePartyAccount(conn, tx, "Customer", dto.Customer.CustomerId, dto.Customer.CustomerName);
+                            }
+                            else
+                            {
+                                // fallback generic AR account
+                                custAccountId = GetOrCreateAccountByName(conn, tx, "Accounts Receivable", "Asset", "Debit");
+                            }
+
+                            var salesAccId = GetOrCreateAccountByName(conn, tx, "Sale", "Income", "Credit");
+                            var outputGstAccId = GetOrCreateAccountByName(conn, tx, "Output GST", "Liability", "Credit");
+                            var roundingAccId = GetOrCreateAccountByName(conn, tx, "Rounding Gain/Loss", "Expense", "Debit"); // we'll credit/debit as needed
+
+                            // prepare numbers
+                            decimal subTotal = dto.SubTotal;
+                            decimal tax = dto.TotalTax;
+                            decimal total = dto.TotalAmount;
+                            decimal roundOff = dto.RoundOff;
+
+                            // Insert journal header
+                            var jid = InsertJournalEntry(conn, tx, dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd"), $"Sales Invoice #{invoiceId} ({dto.InvoiceNo})", "SalesInvoice", invoiceId);
+
+                            // 1) Debit Customer A/c (Total Amount)
+                            InsertJournalLine(conn, tx, jid, custAccountId, total, 0);
+
+                            // 2) Credit Sales A/c (Taxable/SubTotal)
+                            if (subTotal != 0) InsertJournalLine(conn, tx, jid, salesAccId, 0, subTotal);
+
+                            // 3) Credit Output GST (tax)
+                            if (tax != 0) InsertJournalLine(conn, tx, jid, outputGstAccId, 0, tax);
+
+                            // 4) Handle RoundOff (if any)
+                            if (roundOff != 0)
+                            {
+                                // convention: positive RoundOff increases invoice total (customer pays more) -> credit rounding (gain)
+                                // if roundOff > 0 -> credit rounding account; if roundOff < 0 -> debit rounding account
+                                if (roundOff > 0)
+                                    InsertJournalLine(conn, tx, jid, roundingAccId, 0, roundOff);
+                                else
+                                    InsertJournalLine(conn, tx, jid, roundingAccId, Math.Abs(roundOff), 0);
+                            }
+
                         }
 
-                        //-------------------------------------
-                        // 5️⃣ Update CurrentInvoiceNo
-                        //-------------------------------------
-
-                        //using (var cmd = conn.CreateCommand())
-                        //{
-                        //    cmd.Transaction = tx;
-                        //    cmd.CommandText = "UPDATE CompanyProfile SET CurrentInvoiceNo = @n";
-                        //    cmd.Parameters.AddWithValue("@n", nextNo);
-                        //    cmd.ExecuteNonQuery();
-                        //}
-
-                        //-------------------------------------
-                        // 6️⃣ Commit and return both values
-                        //-------------------------------------
+                        
 
                         tx.Commit();
                         return (invoiceId, dto.InvoiceNo);
@@ -1606,17 +1584,18 @@ LIMIT 1;", conn))
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-                SELECT 
-                    Id,
-                    InvoiceNo, InvoiceNum,
-                    InvoiceDate,
-                    CompanyProfileId,
+               SELECT 
+     Id,
+     InvoiceNo, InvoiceNum,
+     InvoiceDate,
+     CompanyProfileId,
 
-                    CustomerId, CustomerName, CustomerPhone, CustomerState, CustomerAddress,
+     invoice.CustomerId, customers.CustomerName, customers.mobile, customers.BillingState, Customers.BillingAddress,
 
-                    SubTotal, TotalTax, TotalAmount, RoundOff
-                FROM Invoice
-                WHERE Id = @Id
+     SubTotal, TotalTax, TotalAmount, RoundOff
+ FROM Invoice
+ left join customers on invoice.customerid=customers.customerid
+ WHERE Id = @Id
             ";
                     cmd.Parameters.AddWithValue("@Id", invoiceId);
 
@@ -1982,13 +1961,13 @@ LIMIT 1;", conn))
 
                 string sql = @"
             SELECT 
-                Id,
-                Name,
-                Phone,
-State,
-                Address
+                CustomerId,
+                CustomerName,
+                Mobile,
+BillingState,
+                BillingAddress
             FROM Customers
-            ORDER BY Name ASC;
+            ORDER BY CustomerName ASC;
         ";
 
                 using (var cmd = new SQLiteCommand(sql, conn))
@@ -1998,11 +1977,11 @@ State,
                     {
                         list.Add(new CustomerDto
                         {
-                            Id = reader.GetInt32(0),
-                            Name = reader.GetString(1),
-                            Phone = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                            State = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                            Address = reader.IsDBNull(3) ? "" : reader.GetString(3)
+                            CustomerId = reader.GetInt32(0),
+                            CustomerName = reader.GetString(1),
+                            Mobile = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                            BillingState = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                            BillingAddress = reader.IsDBNull(4) ? "" : reader.GetString(4)
                         });
                     }
                 }
@@ -2010,44 +1989,44 @@ State,
 
             return list;
         }
-        public int InsertOrUpdateCustomer(CustomerDto c)
-        {
-            if (c == null) return 0;
+//        public int InsertOrUpdateCustomer(CustomerDto c)
+//        {
+//            if (c == null) return 0;
 
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
+//            using (var conn = new SQLiteConnection(_connectionString))
+//            {
+//                conn.Open();
 
-                // 1. If phone exists, update + return ID
-                if (!string.IsNullOrWhiteSpace(c.Phone))
-                {
-                    string sqlFind = "SELECT Id FROM Customers WHERE Phone = @phone LIMIT 1;";
-                    using (var cmd = new SQLiteCommand(sqlFind, conn))
-                    {
-                        cmd.Parameters.AddWithValue("@phone", c.Phone);
-                        var existingId = cmd.ExecuteScalar();
-                        if (existingId != null)
-                        {
-                            return Convert.ToInt32(existingId);
-                        }
-                    }
-                }
+//                // 1. If phone exists, update + return ID
+//                if (!string.IsNullOrWhiteSpace(c.Mobile))
+//                {
+//                    string sqlFind = "SELECT Id FROM Customers WHERE Phone = @phone LIMIT 1;";
+//                    using (var cmd = new SQLiteCommand(sqlFind, conn))
+//                    {
+//                        cmd.Parameters.AddWithValue("@phone", c.Mobile);
+//                        var existingId = cmd.ExecuteScalar();
+//                        if (existingId != null)
+//                        {
+//                            return Convert.ToInt32(existingId);
+//                        }
+//                    }
+//                }
 
-                // 2. Insert new customer
-                string sqlInsert = @"
-INSERT INTO Customers (Name, Phone, State, Address)
-VALUES (@Name, @Phone, @State, @Address);";
+//                // 2. Insert new customer
+//                string sqlInsert = @"
+//INSERT INTO Customers (Name, Phone, State, Address)
+//VALUES (@Name, @Phone, @State, @Address);";
 
-                using (var cmd = new SQLiteCommand(sqlInsert, conn))
-                {
-                    cmd.Parameters.AddWithValue("@Name", c.Name ?? "");
-                    cmd.Parameters.AddWithValue("@Phone", c.Phone ?? "");
-                    cmd.Parameters.AddWithValue("@State", c.State ?? "");
-                    cmd.Parameters.AddWithValue("@Address", c.Address ?? "");
-                    return Convert.ToInt32(cmd.ExecuteScalar());
-                }
-            }
-        }
+//                using (var cmd = new SQLiteCommand(sqlInsert, conn))
+//                {
+//                    cmd.Parameters.AddWithValue("@Name", c.CustomerName ?? "");
+//                    cmd.Parameters.AddWithValue("@Phone", c.Mobile ?? "");
+//                    cmd.Parameters.AddWithValue("@State", c.BillingState ?? "");
+//                    cmd.Parameters.AddWithValue("@Address", c.BillingAddress ?? "");
+//                    return Convert.ToInt32(cmd.ExecuteScalar());
+//                }
+//            }
+//        }
         public (string fullNo, int nextNo) GenerateNextInvoiceNo()
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -2460,64 +2439,64 @@ VALUES (@Name, @Phone, @State, @Address);";
         }
 
 
-        public InvoiceForReturnDto LoadInvoiceForReturn(int invoiceId)
-        {
-            var conn = new SQLiteConnection(_connectionString);
-            var invoice = conn.QuerySingleOrDefault<InvoiceForReturnDto>(
-                "SELECT Id, InvoiceNo, CustomerId, CustomerName FROM Invoice WHERE Id=@id",
-                new { id = invoiceId });
+        //public InvoiceForReturnDto LoadInvoiceForReturn(int invoiceId)
+        //{
+        //    var conn = new SQLiteConnection(_connectionString);
+        //    var invoice = conn.QuerySingleOrDefault<InvoiceForReturnDto>(
+        //        "SELECT Id, InvoiceNo, CustomerId, CustomerName FROM Invoice WHERE Id=@id",
+        //        new { id = invoiceId });
 
-            var items = conn.Query<InvoiceReturnItemDto>(@"
-        SELECT 
-            ii.Id AS InvoiceItemId,
-            ii.ItemId,
-            it.name,
-            ii.BatchNo,
-            ii.Qty AS OriginalQty,
-            ii.Rate,
-            ii.DiscountPercent AS DiscountPercent,
-            ii.GstPercent AS GstPercent,
-            ii.CgstPercent AS CgstPercent,
-            ii.SgstPercent AS SgstPercent,
-            ii.IgstPercent AS IgstPercent,
-            ii.GstValue AS GstValue,
-            ii.LineTotal AS LineSubTotal,
-            ii.ReturnedQty,
-            (ii.Qty - ii.ReturnedQty) AS AvailableReturnQty
-        FROM InvoiceItems ii
-        JOIN Item it ON it.Id = ii.ItemId
-        WHERE InvoiceId = @id",
-                new { id = invoiceId }).ToList();
+        //    var items = conn.Query<InvoiceReturnItemDto>(@"
+        //SELECT 
+        //    ii.Id AS InvoiceItemId,
+        //    ii.ItemId,
+        //    it.name,
+        //    ii.BatchNo,
+        //    ii.Qty AS OriginalQty,
+        //    ii.Rate,
+        //    ii.DiscountPercent AS DiscountPercent,
+        //    ii.GstPercent AS GstPercent,
+        //    ii.CgstPercent AS CgstPercent,
+        //    ii.SgstPercent AS SgstPercent,
+        //    ii.IgstPercent AS IgstPercent,
+        //    ii.GstValue AS GstValue,
+        //    ii.LineTotal AS LineSubTotal,
+        //    ii.ReturnedQty,
+        //    (ii.Qty - ii.ReturnedQty) AS AvailableReturnQty
+        //FROM InvoiceItems ii
+        //JOIN Item it ON it.Id = ii.ItemId
+        //WHERE InvoiceId = @id",
+        //        new { id = invoiceId }).ToList();
 
-            invoice.ReturnItems = items;
-            return invoice;
-        }
+        //    invoice.ReturnItems = items;
+        //    return invoice;
+        //}
 
-        public List<SalesReturnSearchRowDto> SearchSalesReturns(string date)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
+        //public List<SalesReturnSearchRowDto> SearchSalesReturns(string date)
+        //{
+        //    using (var conn = new SQLiteConnection(_connectionString))
+        //    {
+        //        conn.Open();
 
-                //DateTime d = DateTime.Parse(date);
-                //DateTime next = d.AddDays(1);
+        //        //DateTime d = DateTime.Parse(date);
+        //        //DateTime next = d.AddDays(1);
 
-                const string sql = @"
-        SELECT 
-            SalesReturn.Id,
-            ReturnNo,
-            ReturnDate,
-            InvoiceNo,
-            Customers.Name AS CustomerName,
-            TotalAmount
-        FROM SalesReturn
-        INNER JOIN Customers ON Customers.Id = SalesReturn.CustomerId
-        WHERE substr(ReturnDate, 1, 10) = @date
-        ORDER BY ReturnNo";
+        //        const string sql = @"
+        //SELECT 
+        //    SalesReturn.Id,
+        //    ReturnNo,
+        //    ReturnDate,
+        //    InvoiceNo,
+        //    Customers.Name AS CustomerName,
+        //    TotalAmount
+        //FROM SalesReturn
+        //INNER JOIN Customers ON Customers.Id = SalesReturn.CustomerId
+        //WHERE substr(ReturnDate, 1, 10) = @date
+        //ORDER BY ReturnNo";
 
-                return conn.Query<SalesReturnSearchRowDto>(sql, new { date }).ToList();
-            }
-        }
+        //        return conn.Query<SalesReturnSearchRowDto>(sql, new { date }).ToList();
+        //    }
+        //}
 
 
         public InvoiceForReturnDto GetInvoiceForReturn(string invoiceNo)
@@ -2525,12 +2504,12 @@ VALUES (@Name, @Phone, @State, @Address);";
             var conn = new SQLiteConnection(_connectionString);
             const string invoiceSql = @"
         SELECT inv.Id,
-               inv.InvoiceNo,
-               inv.CustomerId,
-               c.Name AS CustomerName
-        FROM Invoice inv
-        JOIN Customer c ON c.Id = inv.CustomerId
-        WHERE inv.InvoiceNo = @InvoiceNo;
+       inv.InvoiceNo,
+       inv.CustomerId,
+       c.customerName AS CustomerName
+FROM Invoice inv
+JOIN Customers c ON c.customerId = inv.CustomerId
+WHERE inv.InvoiceNo = @InvoiceNo;
     ";
 
             var invoice = conn.QuerySingleOrDefault<InvoiceForReturnDto>(
@@ -2656,73 +2635,73 @@ VALUES (@Name, @Phone, @State, @Address);";
 
         //        return conn.QuerySingleOrDefault<SalesReturnPrintHeaderDto>(sql, new { Id = id });
         //    }
-        public SalesReturnLoadDto GetSalesReturn(long salesReturnId)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
+    //    public SalesReturnLoadDto GetSalesReturn(long salesReturnId)
+    //    {
+    //        using (var conn = new SQLiteConnection(_connectionString))
+    //        {
+    //            conn.Open();
 
-                // 1) Header + customer info
-                const string headerSql = @"
-        SELECT 
-            sr.Id,
-            sr.ReturnNo,
-            sr.ReturnNum,
-            sr.ReturnDate,
-            sr.InvoiceId,
-            sr.InvoiceNo,
-            sr.CustomerId,
-            c.Name        AS CustomerName,
-            c.Phone       AS CustomerPhone,
-            c.State       AS CustomerState,
-            c.Address     AS CustomerAddress,
-            sr.SubTotal,
-            sr.TotalTax,
-            sr.TotalAmount,
-            sr.RoundOff,
-            sr.Notes,
-            sr.CreatedBy,
-            sr.CreatedAt
-        FROM SalesReturn sr
-        LEFT JOIN Customers c ON c.Id = sr.CustomerId
-        WHERE sr.Id = @id;
-    ";
+    //            // 1) Header + customer info
+    //            const string headerSql = @"
+    //    SELECT 
+    //        sr.Id,
+    //        sr.ReturnNo,
+    //        sr.ReturnNum,
+    //        sr.ReturnDate,
+    //        sr.InvoiceId,
+    //        sr.InvoiceNo,
+    //        sr.CustomerId,
+    //        c.Name        AS CustomerName,
+    //        c.Phone       AS CustomerPhone,
+    //        c.State       AS CustomerState,
+    //        c.Address     AS CustomerAddress,
+    //        sr.SubTotal,
+    //        sr.TotalTax,
+    //        sr.TotalAmount,
+    //        sr.RoundOff,
+    //        sr.Notes,
+    //        sr.CreatedBy,
+    //        sr.CreatedAt
+    //    FROM SalesReturn sr
+    //    LEFT JOIN Customers c ON c.Id = sr.CustomerId
+    //    WHERE sr.Id = @id;
+    //";
 
-                var header = conn.QuerySingleOrDefault<SalesReturnLoadDto>(headerSql, new { id = salesReturnId });
-                if (header == null)
-                    return null;
+    //            var header = conn.QuerySingleOrDefault<SalesReturnLoadDto>(headerSql, new { id = salesReturnId });
+    //            if (header == null)
+    //                return null;
 
-                // 2) Items
-                const string itemsSql = @"
-        SELECT
-            sri.InvoiceItemId,
-            sri.ItemId,
-            it.Name AS ItemName,
-            sri.BatchNo,
-            sri.Qty,
-            sri.Rate,
-            sri.DiscountPercent,
-            sri.GstPercent,
-            sri.GstValue,
-            sri.CgstPercent,
-            sri.CgstValue,
-            sri.SgstPercent,
-            sri.SgstValue,
-            sri.IgstPercent,
-            sri.IgstValue,
-            sri.LineSubTotal,
-            sri.LineTotal
-         FROM SalesReturnItem sri
-        JOIN Item it ON it.Id = sri.ItemId
-        WHERE SalesReturnId = @id;
-    ";
+    //            // 2) Items
+    //            const string itemsSql = @"
+    //    SELECT
+    //        sri.InvoiceItemId,
+    //        sri.ItemId,
+    //        it.Name AS ItemName,
+    //        sri.BatchNo,
+    //        sri.Qty,
+    //        sri.Rate,
+    //        sri.DiscountPercent,
+    //        sri.GstPercent,
+    //        sri.GstValue,
+    //        sri.CgstPercent,
+    //        sri.CgstValue,
+    //        sri.SgstPercent,
+    //        sri.SgstValue,
+    //        sri.IgstPercent,
+    //        sri.IgstValue,
+    //        sri.LineSubTotal,
+    //        sri.LineTotal
+    //     FROM SalesReturnItem sri
+    //    JOIN Item it ON it.Id = sri.ItemId
+    //    WHERE SalesReturnId = @id;
+    //";
 
-                var items = conn.Query<SalesReturnItemForPrintDto>(itemsSql, new { id = salesReturnId }).ToList();
-                header.Items = items;
+    //            var items = conn.Query<SalesReturnItemForPrintDto>(itemsSql, new { id = salesReturnId }).ToList();
+    //            header.Items = items;
 
-                return header;
-            }
-        }
+    //            return header;
+    //        }
+    //    }
 
         public List<SalesReturnItemForPrintDto> GetSalesReturnItems(int id)
         {
@@ -2746,26 +2725,199 @@ VALUES (@Name, @Phone, @State, @Address);";
 
             return conn.Query<SalesReturnItemForPrintDto>(sql, new { Id = id }).ToList();
         }
-        public List<InvoiceSearchRowDto> SearchInvoicesForReturn(string date)
+        //public List<InvoiceSearchRowDto> SearchInvoicesForReturn(string date)
+        //{
+        //    using (var conn = new SQLiteConnection(_connectionString))
+        //    {
+        //        conn.Open();
+
+        //        DateTime d = DateTime.Parse(date);
+        //        DateTime next = d.AddDays(1);
+
+        //        const string sql = @"
+        //SELECT Id, InvoiceNo, InvoiceDate, CustomerName, TotalAmount
+        //FROM Invoice
+        //WHERE InvoiceDate >= @start AND InvoiceDate < @end
+        //ORDER BY InvoiceNo";
+
+        //        return conn.Query<InvoiceSearchRowDto>(
+        //            sql,
+        //            new { start = d, end = next }
+        //        ).ToList();
+        //    }
+        //}
+        public CustomerDto LoadCustomer(int id)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT * FROM Customers WHERE CustomerId = @id";
+                    cmd.Parameters.AddWithValue("@id", id);
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+
+                        if (rd.Read())
+                            return ReadCustomer(rd);
+                    }
+                }
+            }
+
+            return null;
+        }
+
+
+        public List<CustomerDto> SearchCustomers(string keyword)
+        {
+            var list = new List<CustomerDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    keyword = $"%{keyword}%";
+
+                    cmd.CommandText = @"
+                SELECT * FROM Customers
+                WHERE CustomerName LIKE @kw OR Mobile LIKE @kw OR GSTIN LIKE @kw
+                ORDER BY CustomerName";
+                    cmd.Parameters.AddWithValue("@kw", keyword);
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        while (rd.Read())
+                        {
+                            list.Add(ReadCustomer(rd));
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+        public bool SaveCustomer(CustomerDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            { 
+            conn.Open();
+
+            using (var cmd = conn.CreateCommand())
+            {
+
+                if (dto.CustomerId == 0) // INSERT
+                {
+                    cmd.CommandText = @"
+INSERT INTO Customers 
+(CustomerName, ContactPerson, Mobile, Email, GSTIN,
+ BillingAddress, BillingCity, BillingPincode, BillingState,
+ ShippingAddress, ShippingCity, ShippingPincode, ShippingState,
+ OpeningBalance, Balance, CreditDays, CreditLimit, CreatedBy, CreatedAt)
+VALUES 
+(@CustomerName, @ContactPerson, @Mobile, @Email, @GSTIN,
+ @BillingAddress, @BillingCity, @BillingPincode, @BillingState,
+ @ShippingAddress, @ShippingCity, @ShippingPincode, @ShippingState,
+ @OpeningBalance, @OpeningBalance, @CreditDays, @CreditLimit, @CreatedBy, @CreatedAt)";
+
+                    dto.CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                }
+                else // UPDATE
+                {
+                    cmd.CommandText = @"
+UPDATE Customers SET
+ CustomerName=@CustomerName,
+ ContactPerson=@ContactPerson,
+ Mobile=@Mobile,
+ Email=@Email,
+ GSTIN=@GSTIN,
+ BillingAddress=@BillingAddress,
+ BillingCity=@BillingCity,
+ BillingPincode=@BillingPincode,
+ BillingState=@BillingState,
+ ShippingAddress=@ShippingAddress,
+ ShippingCity=@ShippingCity,
+ ShippingPincode=@ShippingPincode,
+ ShippingState=@ShippingState,
+ CreditDays=@CreditDays,
+ CreditLimit=@CreditLimit
+WHERE CustomerId=@CustomerId";
+                }
+
+                AssignCustomerParams(cmd, dto);
+                cmd.ExecuteNonQuery();
+                return true;
+            }
+        }
+        }
+        public bool DeleteCustomer(int id)
         {
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
 
-                DateTime d = DateTime.Parse(date);
-                DateTime next = d.AddDays(1);
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "DELETE FROM Customers WHERE CustomerId=@id";
+                    cmd.Parameters.AddWithValue("@id", id);
 
-                const string sql = @"
-        SELECT Id, InvoiceNo, InvoiceDate, CustomerName, TotalAmount
-        FROM Invoice
-        WHERE InvoiceDate >= @start AND InvoiceDate < @end
-        ORDER BY InvoiceNo";
-
-                return conn.Query<InvoiceSearchRowDto>(
-                    sql,
-                    new { start = d, end = next }
-                ).ToList();
+                    return cmd.ExecuteNonQuery() > 0;
+                }
             }
+        }
+        public CustomerDto ReadCustomer(SQLiteDataReader rd)
+        {
+            return new CustomerDto
+            {
+                CustomerId = Convert.ToInt32(rd["CustomerId"]),
+                CustomerName = rd["CustomerName"]?.ToString(),
+                ContactPerson = rd["ContactPerson"]?.ToString(),
+                Mobile = rd["Mobile"]?.ToString(),
+                Email = rd["Email"]?.ToString(),
+                GSTIN = rd["GSTIN"]?.ToString(),
+                BillingAddress = rd["BillingAddress"]?.ToString(),
+                BillingCity = rd["BillingCity"]?.ToString(),
+                BillingPincode = rd["BillingPincode"]?.ToString(),
+                BillingState = rd["BillingState"]?.ToString(),
+                ShippingAddress = rd["ShippingAddress"]?.ToString(),
+                ShippingCity = rd["ShippingCity"]?.ToString(),
+                ShippingPincode = rd["ShippingPincode"]?.ToString(),
+                ShippingState = rd["ShippingState"]?.ToString(),
+                OpeningBalance = Convert.ToDouble(rd["OpeningBalance"]),
+                Balance = Convert.ToDouble(rd["Balance"]),
+                CreditDays = Convert.ToInt32(rd["CreditDays"]),
+                CreditLimit = Convert.ToDouble(rd["CreditLimit"]),
+                CreatedBy = rd["CreatedBy"]?.ToString(),
+                CreatedAt = rd["CreatedAt"]?.ToString()
+            };
+        }
+        public void AssignCustomerParams(SQLiteCommand cmd, CustomerDto dto)
+        {
+            cmd.Parameters.AddWithValue("@CustomerId", dto.CustomerId);
+            cmd.Parameters.AddWithValue("@CustomerName", dto.CustomerName);
+            cmd.Parameters.AddWithValue("@ContactPerson", dto.ContactPerson ?? "");
+            cmd.Parameters.AddWithValue("@Mobile", dto.Mobile ?? "");
+            cmd.Parameters.AddWithValue("@Email", dto.Email ?? "");
+            cmd.Parameters.AddWithValue("@GSTIN", dto.GSTIN ?? "");
+
+            cmd.Parameters.AddWithValue("@BillingAddress", dto.BillingAddress ?? "");
+            cmd.Parameters.AddWithValue("@BillingCity", dto.BillingCity ?? "");
+            cmd.Parameters.AddWithValue("@BillingPincode", dto.BillingPincode ?? "");
+            cmd.Parameters.AddWithValue("@BillingState", dto.BillingState ?? "");
+
+            cmd.Parameters.AddWithValue("@ShippingAddress", dto.ShippingAddress ?? "");
+            cmd.Parameters.AddWithValue("@ShippingCity", dto.ShippingCity ?? "");
+            cmd.Parameters.AddWithValue("@ShippingPincode", dto.ShippingPincode ?? "");
+            cmd.Parameters.AddWithValue("@ShippingState", dto.ShippingState ?? "");
+
+            cmd.Parameters.AddWithValue("@CreditDays", dto.CreditDays);
+            cmd.Parameters.AddWithValue("@CreditLimit", dto.CreditLimit);
+            cmd.Parameters.AddWithValue("@OpeningBalance", dto.OpeningBalance);
+            cmd.Parameters.AddWithValue("@Balance", dto.Balance);
+
+            cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy ?? "");
+            cmd.Parameters.AddWithValue("@CreatedAt", dto.CreatedAt ?? "");
         }
 
         public List<SupplierDto> SearchSuppliers(string keyword)
@@ -3568,6 +3720,40 @@ VALUES
                                 itemledger.CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                                 AddItemLedger(itemledger, conn, tran);
                                 UpdateItemBalance(itemledger, conn, tran);
+
+                                // ---------- ACCOUNTING: create journal entry for this purchase ----------
+                                var supplierAccId = GetOrCreatePartyAccount(conn, tran, "Supplier", dto.SupplierId, null);
+                                var purchaseAccId = GetOrCreateAccountByName(conn, tran, "Purchase", "Expense", "Debit");
+                                var inputGstAccId = GetOrCreateAccountByName(conn, tran, "Input GST", "Asset", "Debit");
+                                var roundingAccId = GetOrCreateAccountByName(conn, tran, "Rounding Gain/Loss", "Expense", "Debit");
+
+                                decimal subTotal = dto.Items.Sum(i => i.LineSubTotal); // or dto.SubTotal if you have it
+                                decimal tax = dto.TotalTax;
+                                decimal total = dto.TotalAmount;
+                                decimal roundOff = dto.RoundOff;
+
+                                var jid = InsertJournalEntry(conn, tran, dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd"), $"Purchase Invoice #{purchaseId} ({dto.InvoiceNo})", "PurchaseInvoice", purchaseId);
+
+                                // Debit Purchase (taxable amount)
+                                if (subTotal != 0) InsertJournalLine(conn, tran, jid, purchaseAccId, subTotal, 0);
+
+                                // Debit Input GST
+                                if (tax != 0) InsertJournalLine(conn, tran, jid, inputGstAccId, tax, 0);
+
+                                // Credit Supplier A/c (total)
+                                InsertJournalLine(conn, tran, jid, supplierAccId, 0, total);
+
+                                // Roundoff handling
+                                if (roundOff != 0)
+                                {
+                                    if (roundOff > 0)
+                                        InsertJournalLine(conn, tran, jid, roundingAccId, roundOff, 0); // positive -> debit rounding expense
+                                    else
+                                        InsertJournalLine(conn, tran, jid, roundingAccId, 0, Math.Abs(roundOff));
+                                }
+
+
+
                             } // end foreach item
 
                             tran.Commit();
@@ -4159,6 +4345,61 @@ ORDER BY pi.PurchaseItemId
                     try
                     {
                         long oldId = dto.PurchaseId;
+                        // =========================================================
+                        // STEP 0: REVERSE OLD ACCOUNTING ENTRY  (IMPORTANT)
+                        // =========================================================
+
+                        // Try to find JournalEntries linked to this PurchaseInvoice
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+                        SELECT JournalId FROM JournalEntries
+                        WHERE VoucherType='PurchaseInvoice' AND VoucherId=@id;
+                    ";
+                            cmd.Parameters.AddWithValue("@id", oldId);
+
+                            var oldJournalIdObj = cmd.ExecuteScalar();
+
+                            if (oldJournalIdObj != null && oldJournalIdObj != DBNull.Value)
+                            {
+                                long oldJournalId = Convert.ToInt64(oldJournalIdObj);
+
+                                // Reverse each JournalLine by swapping debit/credit.
+                                using (var cmdLine = conn.CreateCommand())
+                                {
+                                    cmdLine.Transaction = tx;
+                                    cmdLine.CommandText = @"
+                                SELECT AccountId, Debit, Credit
+                                FROM JournalLines
+                                WHERE JournalId=@jid;
+                            ";
+                                    cmdLine.Parameters.AddWithValue("@jid", oldJournalId);
+
+                                    using (var rd = cmdLine.ExecuteReader())
+                                    {
+                                        // Create a reversing journal entry
+                                        long reverseJid = InsertJournalEntry(
+                                            conn, tx,
+                                            DateTime.Now.ToString("yyyy-MM-dd"),
+                                            $"Reversal of PurchaseInvoice #{oldId}",
+                                            "Reversal",
+                                            oldId
+                                        );
+
+                                        while (rd.Read())
+                                        {
+                                            long acc = rd.GetInt64(0);
+                                            decimal debit = rd.GetDecimal(1);
+                                            decimal credit = rd.GetDecimal(2);
+
+                                            // Reverse = swap debit/credit
+                                            InsertJournalLine(conn, tx, reverseJid, acc, credit, debit);
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         // STEP 1: Mark old invoice as rejected
                         using (var cmd = conn.CreateCommand())
@@ -4197,7 +4438,7 @@ ORDER BY pi.PurchaseItemId
                                         @"INSERT INTO ItemLedger 
                                 (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
                                 VALUES 
-                                (@ItemId, @BatchNo, @Dt, 'PURCHASE-REVERSAL', @RefNo, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
+                                (@ItemId, @BatchNo, @Dt, 'Purchase Return', @RefNo, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
 
                                         cmdRev.Parameters.AddWithValue("@ItemId", ItemId);
                                         cmdRev.Parameters.AddWithValue("@BatchNo", BatchNo);
@@ -4364,7 +4605,49 @@ ORDER BY pi.PurchaseItemId
                                 CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
                             }, conn, tx);
                         }
+                        // =========================================================
+                        // STEP 5: INSERT NEW ACCOUNTING ENTRY (Option A)
+                        // =========================================================
 
+                        // Get accounts
+                        var supplierAccId = GetOrCreatePartyAccount(conn, tx, "Supplier", dto.SupplierId);
+                        var purchaseAccId = GetOrCreateAccountByName(conn, tx, "Purchases", "Expense", "Debit");
+                        var inputGstAccId = GetOrCreateAccountByName(conn, tx, "Input GST", "Asset", "Debit");
+                        var roundingAccId = GetOrCreateAccountByName(conn, tx, "Rounding Gain/Loss", "Expense", "Debit");
+
+                        decimal subTotal = ((dto.TotalAmount)-(dto.TotalTax));
+                        decimal tax = dto.TotalTax;
+                        decimal total = dto.TotalAmount;
+                        decimal roundOff = dto.RoundOff;
+
+                        // Journal Header
+                        var newJournalId = InsertJournalEntry(
+                            conn, tx,
+                            dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                            $"Updated Purchase Invoice #{newPurchaseId}",
+                            "PurchaseInvoice",
+                            newPurchaseId
+                        );
+
+                        // Debit Purchases
+                        if (subTotal != 0)
+                            InsertJournalLine(conn, tx, newJournalId, purchaseAccId, subTotal, 0);
+
+                        // Debit Input GST
+                        if (tax != 0)
+                            InsertJournalLine(conn, tx, newJournalId, inputGstAccId, tax, 0);
+
+                        // Credit Supplier (Total)
+                        InsertJournalLine(conn, tx, newJournalId, supplierAccId, 0, total);
+
+                        // Roundoff
+                        if (roundOff != 0)
+                        {
+                            if (roundOff > 0)
+                                InsertJournalLine(conn, tx, newJournalId, roundingAccId, roundOff, 0);
+                            else
+                                InsertJournalLine(conn, tx, newJournalId, roundingAccId, 0, Math.Abs(roundOff));
+                        }
                         tx.Commit();
                         return (true, "Updated Successfully", newPurchaseId);
                     }
@@ -4375,6 +4658,169 @@ ORDER BY pi.PurchaseItemId
                     }
                 }
             }
+        }
+        public List<TrialBalanceRowDto> GetTrialBalance()
+        {
+            var rows = new List<TrialBalanceRowDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    a.AccountId,
+                    a.AccountName,
+                    a.AccountType,
+                    a.NormalSide,
+                    IFNULL(SUM(jl.Debit), 0) AS TotalDebit,
+                    IFNULL(SUM(jl.Credit), 0) AS TotalCredit
+                FROM Accounts a
+                LEFT JOIN JournalLines jl ON jl.AccountId = a.AccountId
+                WHERE a.IsActive = 1
+                GROUP BY a.AccountId, a.AccountName, a.AccountType, a.NormalSide
+                ORDER BY a.AccountType, a.AccountName;";
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        while (rd.Read())
+                        {
+                            var debit = rd.GetDecimal(4);
+                            var credit = rd.GetDecimal(5);
+
+                            decimal closing = debit - credit;
+                            string side = closing >= 0 ? "Dr" : "Cr";
+
+                            rows.Add(new TrialBalanceRowDto
+                            {
+                                AccountId = rd.GetInt64(0),
+                                AccountName = rd.GetString(1),
+                                AccountType = rd.GetString(2),
+                                NormalSide = rd.GetString(3),
+                                TotalDebit = debit,
+                                TotalCredit = credit,
+                                ClosingBalance = Math.Abs(closing),
+                                ClosingSide = side
+                            });
+                        }
+                    }
+                }
+            }
+
+            return rows;
+        }
+        public LedgerReportDto GetLedgerReport(long accountId, string from, string to)
+        {
+            var report = new LedgerReportDto();
+            report.AccountId = accountId;
+            report.From = from;
+            report.To = to;
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // Account name
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT AccountName FROM Accounts WHERE AccountId=@aid LIMIT 1;";
+                    cmd.Parameters.AddWithValue("@aid", accountId);
+                    var o = cmd.ExecuteScalar();
+                    report.AccountName = o == null ? $"Account {accountId}" : o.ToString();
+                }
+
+                // Opening balance (debit - credit before from date)
+                decimal opening = 0m;
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT IFNULL(SUM(jl.Debit) - SUM(jl.Credit), 0) AS Opening
+                FROM JournalLines jl
+                JOIN JournalEntries je ON jl.JournalId = je.JournalId
+                WHERE jl.AccountId = @aid
+                  AND Date(je.Date) < Date(@from);
+            ";
+                    cmd.Parameters.AddWithValue("@aid", accountId);
+                    cmd.Parameters.AddWithValue("@from", from);
+                    var o = cmd.ExecuteScalar();
+                    opening = o == DBNull.Value || o == null ? 0m : Convert.ToDecimal(o);
+                }
+
+                // Determine side for opening (Dr if positive, Cr if negative)
+                if (opening >= 0)
+                {
+                    report.OpeningBalance = Math.Abs(opening);
+                    report.OpeningSide = "Dr";
+                }
+                else
+                {
+                    report.OpeningBalance = Math.Abs(opening);
+                    report.OpeningSide = "Cr";
+                }
+
+                // Fetch rows in range
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT jl.LineId, je.Date, je.VoucherType, je.VoucherId, je.Description,
+                       jl.Debit, jl.Credit
+                FROM JournalLines jl
+                JOIN JournalEntries je ON jl.JournalId = je.JournalId
+                WHERE jl.AccountId = @aid
+                  AND Date(je.Date) BETWEEN Date(@from) AND Date(@to)
+                ORDER BY Date(je.Date), jl.LineId;
+            ";
+                    cmd.Parameters.AddWithValue("@aid", accountId);
+                    cmd.Parameters.AddWithValue("@from", from);
+                    cmd.Parameters.AddWithValue("@to", to);
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        decimal running = opening; // running = debit - credit (can be negative)
+                        while (rd.Read())
+                        {
+                            long lineId = rd.GetInt64(0);
+                            string date = rd.IsDBNull(1) ? "" : rd.GetString(1);
+                            string vtype = rd.IsDBNull(2) ? "" : rd.GetString(2);
+                            long vid = rd.IsDBNull(3) ? 0 : rd.GetInt64(3);
+                            string desc = rd.IsDBNull(4) ? "" : rd.GetString(4);
+                            decimal debit = rd.IsDBNull(5) ? 0m : rd.GetDecimal(5);
+                            decimal credit = rd.IsDBNull(6) ? 0m : rd.GetDecimal(6);
+
+                            running += (debit - credit);
+
+                            report.Rows.Add(new LedgerRowDto
+                            {
+                                LineId = lineId,
+                                Date = date,
+                                VoucherType = vtype,
+                                VoucherId = vid,
+                                Narration = desc,
+                                Debit = debit,
+                                Credit = credit,
+                                RunningBalance = Math.Abs(running) // normalized to positive; side in ClosingSide ultimately
+                            });
+                        }
+
+                        // final running => closing
+                        decimal closing = running;
+                        if (closing >= 0)
+                        {
+                            report.ClosingBalance = Math.Abs(closing);
+                            report.ClosingSide = "Dr";
+                        }
+                        else
+                        {
+                            report.ClosingBalance = Math.Abs(closing);
+                            report.ClosingSide = "Cr";
+                        }
+                    }
+                }
+            }
+
+            return report;
         }
 
         public (bool Success, string Message, long NewPurchaseId) UpdatePurchaseInvoiceNew(PurchaseInvoiceDto dto)
@@ -4424,7 +4870,7 @@ ORDER BY pi.PurchaseItemId
 
                                 cmdRev.CommandText =
                                 @"INSERT INTO ItemLedger (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, DiscountPercent, NetRate, TotalAmount, Remarks, CreatedBy)
-                  VALUES (@ItemId, @BatchNo, @Dt, 'PURCHASE-REVERSAL', @RefNo, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
+                  VALUES (@ItemId, @BatchNo, @Dt, 'Purchase Return', @RefNo, @Qty, @Rate, @Disc, @NetRate, @Total, @Rem, @User)";
 
                                 cmdRev.Parameters.AddWithValue("@ItemId", ItemId);
                                 cmdRev.Parameters.AddWithValue("@BatchNo", BatchNo);
@@ -4760,7 +5206,7 @@ ORDER BY pi.PurchaseItemId
                             ItemLedger ledgerEntry = new ItemLedger();
                             ledgerEntry.ItemId = (int)it.ItemId;
                             ledgerEntry.BatchNo = it.BatchNo;
-                            ledgerEntry.Date = dto.ReturnDate;
+                            ledgerEntry.Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
                             ledgerEntry.TxnType = "Purchase Return";
                             ledgerEntry.RefNo = dto.PurchaseId.ToString();
                             ledgerEntry.Qty = it.Qty;
@@ -4773,8 +5219,39 @@ ORDER BY pi.PurchaseItemId
 
                             AddItemLedger(ledgerEntry, conn, tx);
                             UpdateItemBalanceSales(ledgerEntry, conn, tx);
-                            // TODO: Insert negative stock ledger entry here if you have ItemLedger table
-                            // e.g. InsertItemLedger(conn, tx, it.ItemId, -it.Qty, ...);
+
+
+                            // ---------- ACCOUNTING: create journal entry for this purchase return ----------
+                            var supplierAccId = GetOrCreatePartyAccount(conn, tx, "Supplier", dto.SupplierId, null);
+                            var purchaseReturnAccId = GetOrCreateAccountByName(conn, tx, "Purchase Return", "Expense", "Credit"); // purchase return normally credit to purchase returns
+                            var inputGstAccId = GetOrCreateAccountByName(conn, tx, "Input GST", "Asset", "Debit");
+                            var roundingAccId = GetOrCreateAccountByName(conn, tx, "Rounding Gain/Loss", "Expense", "Debit");
+
+                            decimal subTotal = dto.SubTotal;
+                            decimal tax = dto.TotalTax;
+                            decimal total = dto.TotalAmount;
+                            decimal roundOff = dto.RoundOff;
+
+                            var jid = InsertJournalEntry(conn, tx, DateTime.Now.ToString("yyyy-MM-dd"), $"Purchase Return #{newReturnId}", "PurchaseReturn", newReturnId);
+
+                            // Debit Supplier A/c (reduce payable)
+                            InsertJournalLine(conn, tx, jid, supplierAccId, total, 0);
+
+                            // Credit Purchase Return (reverse purchases)
+                            if (subTotal != 0) InsertJournalLine(conn, tx, jid, purchaseReturnAccId, 0, subTotal);
+
+                            // Credit Input GST (reverse input GST)
+                            if (tax != 0) InsertJournalLine(conn, tx, jid, inputGstAccId, 0, tax);
+
+                            // Roundoff handling
+                            if (roundOff != 0)
+                            {
+                                if (roundOff > 0)
+                                    InsertJournalLine(conn, tx, jid, roundingAccId, 0, roundOff);
+                                else
+                                    InsertJournalLine(conn, tx, jid, roundingAccId, Math.Abs(roundOff), 0);
+                            }
+
                         }
                     }
 
@@ -4801,7 +5278,7 @@ ORDER BY pi.PurchaseItemId
 
                         foreach (var it in dto.Items)
                         {
-                            if (it.SoldQty <= 0) continue;
+                            if (it.Qty <= 0) continue;
 
                             cmdCheck.Parameters.Clear();
                             cmdCheck.Parameters.AddWithValue("@invoiceItemId", it.InvoiceItemId);
@@ -4818,10 +5295,10 @@ ORDER BY pi.PurchaseItemId
                             }
 
                             var available = soldQty - alreadyReturned;
-                            if (it.SoldQty > available)
+                            if (it.Qty > available)
                             {
                                 throw new Exception(
-                                    $"Return Qty {it.SoldQty} exceeds available {available} for item {it.ItemName}"
+                                    $"Return Qty {it.Qty} exceeds available {available} for item {it.ItemName}"
                                 );
                             }
                         }
@@ -4887,7 +5364,7 @@ ORDER BY pi.PurchaseItemId
                      CgstPercent, CgstValue,
                      SgstPercent, SgstValue,
                      IgstPercent, IgstValue,
-                     LineSubTotal, LineTotal, Notes)
+                     LineSubTotal, LineTotal)
                     VALUES
                     (@SalesReturnId, @InvoiceItemId, @ItemId, @ItemName,
                      @BatchNo, @Qty, @Rate, @DiscountPercent, @NetRate,
@@ -4921,14 +5398,14 @@ ORDER BY pi.PurchaseItemId
 
                         foreach (var it in dto.Items)
                         {
-                            if (it.SoldQty <= 0) continue;
+                            if (it.Qty <= 0) continue;
 
                             pReturnId.Value = newReturnId;
                             pInvoiceIt.Value = it.InvoiceItemId;
                             pItemId.Value = it.ItemId;
                             pItemName.Value = it.ItemName;
                             pBatchNo.Value = it.BatchNo ?? "";
-                            pQty.Value = it.SoldQty;
+                            pQty.Value = it.Qty;
                             pRate.Value = it.Rate;
                             pDisc.Value = it.DiscountPercent;
                             pNetRate.Value = it.NetRate;
@@ -4951,7 +5428,7 @@ ORDER BY pi.PurchaseItemId
                             {
                                 ItemId = (int)it.ItemId,
                                 BatchNo = it.BatchNo,
-                                Qty = it.SoldQty,   // RETURNS MEANS STOCK INCREASE
+                                Qty = it.Qty,   // RETURNS MEANS STOCK INCREASE
                                 Rate = it.Rate,
                                 DiscountPercent = it.DiscountPercent,
                                 NetRate = it.NetRate,
@@ -4984,13 +5461,43 @@ ORDER BY pi.PurchaseItemId
 
                         foreach (var it in dto.Items)
                         {
-                            if (it.SoldQty <= 0) continue;
+                            if (it.Qty <= 0) continue;
 
-                            pQty.Value = it.SoldQty;
+                            pQty.Value = it.Qty;
                             pId.Value = it.InvoiceItemId;
 
                             cmd.ExecuteNonQuery();
                         }
+                    }
+                    // ---------- ACCOUNTING: create journal entry for this sales return ----------
+                    var customerAccId = GetOrCreatePartyAccount(conn, tx, "Customer", dto.CustomerId, null);
+                    var salesReturnAccId = GetOrCreateAccountByName(conn, tx, "Sales Return", "Income", "Debit"); // returns typically debit to Sales Returns
+                    var outputGstAccId = GetOrCreateAccountByName(conn, tx, "Output GST", "Liability", "Credit");
+                    var roundingAccId = GetOrCreateAccountByName(conn, tx, "Rounding Gain/Loss", "Expense", "Debit");
+
+                    decimal subTotal = dto.SubTotal;
+                    decimal tax = dto.TotalTax;
+                    decimal total = dto.TotalAmount;
+                    decimal roundOff = dto.RoundOff;
+
+                    var jid = InsertJournalEntry(conn, tx, DateTime.Now.ToString("yyyy-MM-dd"), $"Sales Return #{newReturnId}", "SalesReturn", newReturnId);
+
+                    // Debit Sales Returns (reverse of sales)
+                    if (subTotal != 0) InsertJournalLine(conn, tx, jid, salesReturnAccId, subTotal, 0);
+
+                    // Debit Output GST (reverse GST)
+                    if (tax != 0) InsertJournalLine(conn, tx, jid, outputGstAccId, tax, 0);
+
+                    // Credit Customer A/c (reduce receivable)
+                    InsertJournalLine(conn, tx, jid, customerAccId, 0, total);
+
+                    // Roundoff handling
+                    if (roundOff != 0)
+                    {
+                        if (roundOff > 0)
+                            InsertJournalLine(conn, tx, jid, roundingAccId, 0, roundOff);
+                        else
+                            InsertJournalLine(conn, tx, jid, roundingAccId, Math.Abs(roundOff), 0);
                     }
 
                     tx.Commit();
@@ -5004,89 +5511,177 @@ ORDER BY pi.PurchaseItemId
                 }
             }
         }
-
-        public SalesInvoiceDto LoadSalesInvoice(long invoiceId)
+        public List<InvoiceSummaryDto> GetSalesInvoiceNumbersByDate(string date)
         {
+            var list = new List<InvoiceSummaryDto>();
+
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
 
-                var dto = new SalesInvoiceDto();
-
-                // Load header
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-                SELECT Id, InvoiceNo, InvoiceNum, InvoiceDate, CustomerId,
-                       CustomerName, CustomerPhone, CustomerState, Notes
-                FROM Invoice
-                WHERE Id=@id";
+                SELECT
+    InvoiceNo,
+    InvoiceNum,
+    customers.CustomerName,
+    TotalAmount
+FROM Invoice 
+left join customers on customers.customerid=invoice.customerid
+WHERE date(InvoiceDate) = date(@dt)
+ORDER BY InvoiceNum DESC;
+            ";
 
-                    cmd.Parameters.AddWithValue("@id", invoiceId);
+                    cmd.Parameters.AddWithValue("@dt", date);
 
-                    using (var r = cmd.ExecuteReader())
+                    using (var reader = cmd.ExecuteReader())
                     {
-                        if (!r.Read()) return null;
-
-                        dto.InvoiceId = r.GetInt64(0);
-                        dto.InvoiceNo = r.GetString(1);
-                        dto.InvoiceNum = r.GetInt64(2);
-                        dto.InvoiceDate = r.GetString(3);
-                        dto.CustomerId = r.GetInt64(4);
-                        dto.CustomerName = r.IsDBNull(5) ? "" : r.GetString(5);
-                        dto.CustomerPhone = r.IsDBNull(6) ? "" : r.GetString(6);
-                        dto.CustomerState = r.IsDBNull(7) ? "" : r.GetString(7);
-                        dto.Notes = r.IsDBNull(8) ? "" : r.GetString(8);
-                    }
-                }
-
-                // Load invoice items
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-                SELECT 
-                    ii.Id, ii.ItemId, it.Name as ItemName, ii.BatchNo,
-                    ii.HsnCode, ii.Qty as SoldQty, ii.ReturnedQty,
-                    ii.Rate, ii.DiscountPercent, ii.GstPercent,
-                    ii.CgstPercent, ii.SgstPercent, ii.IgstPercent
-                FROM InvoiceItems ii
-                INNER JOIN Item it ON it.Id = ii.ItemId
-                WHERE ii.InvoiceId=@id";
-
-                    cmd.Parameters.AddWithValue("@id", invoiceId);
-
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
+                        while (reader.Read())
                         {
-                            var soldQty = r.GetDecimal(5);
-                            var returnedQty = r.GetDecimal(6);
-                            var availableQty = soldQty - returnedQty;
-
-                            dto.Items.Add(new SalesInvoiceItemDto
+                            list.Add(new InvoiceSummaryDto
                             {
-                                InvoiceItemId = r.GetInt64(0),
-                                ItemId = r.GetInt64(1),
-                                ItemName = r.GetString(2),
-                                BatchNo = r.IsDBNull(3) ? "" : r.GetString(3),
-                                HsnCode = r.IsDBNull(4) ? "" : r.GetString(4),
-                                SoldQty = soldQty,
-                                ReturnedQty = returnedQty,
-                                AvailableQty = availableQty,
-                                Rate = r.GetDecimal(7),
-                                DiscountPercent = r.GetDecimal(8),
-                                GstPercent = r.GetDecimal(9),
-                                CgstPercent = r.GetDecimal(10),
-                                SgstPercent = r.GetDecimal(11),
-                                IgstPercent = r.GetDecimal(12)
+                                InvoiceNo = reader.GetString(0),
+                                InvoiceNum = reader.GetInt64(1),
+                                CustomerName = reader.GetString(2),
+                                TotalAmount = Convert.ToDecimal(reader.GetDouble(3))
                             });
                         }
                     }
                 }
-
-                return dto;
             }
+
+            return list;
         }
+
+        public LoadSalesInvoiceDto LoadSalesInvoice(long invoiceNum)
+        {
+            LoadSalesInvoiceDto dto = null;
+            long InvoiceId = 0;
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                //------------------- HEADER -----------------------
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+            SELECT 
+    Id,
+    InvoiceNo,
+    InvoiceNum,
+    InvoiceDate,
+    Invoice.CustomerId,
+    customers.CustomerName, customers.mobile, customers.BillingState,
+    SubTotal,
+    TotalTax,
+    TotalAmount,
+    RoundOff
+FROM Invoice
+left join customers on invoice.customerid=customers.customerid
+WHERE InvoiceNum = @id;
+        ";
+
+                    cmd.Parameters.AddWithValue("@id", invoiceNum);
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        if (rd.Read())
+                        {
+                            InvoiceId = rd.GetInt64(0);
+                            dto = new LoadSalesInvoiceDto
+                            {
+                                InvoiceId = rd.GetInt64(0),
+                                InvoiceNo = rd.GetString(1),
+                                InvoiceNum = rd.GetInt64(2),
+                                InvoiceDate = rd.GetString(3),
+                                CustomerId = rd.GetInt64(4),
+                                CustomerName = rd.GetString(5),
+                                CustomerPhone = rd.IsDBNull(6) ? "" : rd.GetString(6),
+                                CustomerState = rd.IsDBNull(7) ? "" : rd.GetString(7),
+                                SubTotal = Convert.ToDecimal(rd.GetDouble(8)),
+                                TotalTax = Convert.ToDecimal(rd.GetDouble(9)),
+                                TotalAmount = Convert.ToDecimal(rd.GetDouble(10)),
+                                RoundOff = Convert.ToDecimal(rd.GetDouble(11)),
+                                Items = new List<LoadSalesInvoiceItemDto>()
+                            };
+                        }
+                    }
+
+                    if (dto == null)
+                        return null;
+                }
+                //--------------------- ITEMS ------------------------
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+            SELECT
+                ii.Id,
+                ii.ItemId,
+                ii.BatchNo,
+                ii.HsnCode,
+                it.Name AS ItemName,
+                ii.Qty,
+                ii.ReturnedQty,
+                ii.Rate,
+                ii.DiscountPercent,
+                ii.GstPercent,
+                ii.GstValue,
+                ii.CgstPercent,
+                ii.CgstValue,
+                ii.SgstPercent,
+                ii.SgstValue,
+                ii.IgstPercent,
+                ii.IgstValue,
+                ii.LineSubTotal,
+                ii.LineTotal                
+            FROM InvoiceItems ii
+            JOIN Item it ON it.Id = ii.ItemId
+            WHERE ii.InvoiceId = @id;
+        ";
+
+                    cmd.Parameters.AddWithValue("@id", InvoiceId);
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        while (rd.Read())
+                        {
+                            var soldQty = Convert.ToDecimal(rd.GetDouble(5));
+                            var returnedQty = Convert.ToDecimal(rd.GetDouble(6));
+                            var availableQty = Math.Max(0, soldQty - returnedQty);
+
+                            dto.Items.Add(new LoadSalesInvoiceItemDto
+                            {
+                                InvoiceItemId = rd.GetInt64(0),
+                                ItemId = rd.GetInt64(1),
+                                BatchNo = rd.IsDBNull(2) ? "" : rd.GetString(2),
+                                HsnCode = rd.IsDBNull(3) ? "" : rd.GetString(3),
+                                ItemName = rd.GetString(4),
+                                AvailableQty = availableQty,
+
+                                Rate = Convert.ToDecimal(rd.GetDouble(7)),
+                                DiscountPercent = Convert.ToDecimal(rd.GetDouble(8)),
+                                NetRate = Convert.ToDecimal(rd.GetDouble(7)) * (1 - Convert.ToDecimal(rd.GetDouble(8)) / 100),
+                                GstPercent = Convert.ToDecimal(rd.GetDouble(9)),
+                                GstValue = Convert.ToDecimal(rd.GetDouble(10)),
+                                CgstPercent = Convert.ToDecimal(rd.GetDouble(11)),
+                                CgstValue = Convert.ToDecimal(rd.GetDouble(12)),
+                                SgstPercent = Convert.ToDecimal(rd.GetDouble(13)),
+                                SgstValue = Convert.ToDecimal(rd.GetDouble(14)),
+                                IgstPercent = Convert.ToDecimal(rd.GetDouble(15)),
+                                IgstValue = Convert.ToDecimal(rd.GetDouble(16)),
+
+                                LineSubTotal = Convert.ToDecimal(rd.GetDouble(17)),
+                                LineTotal = Convert.ToDecimal(rd.GetDouble(18))
+                                
+                            });
+                        }
+                    }
+                }
+            }
+            return dto;
+        }
+
         public SalesReturnDetailDto LoadSalesReturnDetail(long returnId)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -5135,7 +5730,7 @@ ORDER BY pi.PurchaseItemId
                 // =============================
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT Name, Phone, State, Address FROM Customers WHERE Id=@cid";
+                    cmd.CommandText = "SELECT CustomerName, mobile, billingState, billingAddress FROM Customers WHERE Id=@cid";
                     cmd.Parameters.AddWithValue("@cid", dto.CustomerId);
 
                     using (var r = cmd.ExecuteReader())
@@ -5203,6 +5798,405 @@ ORDER BY pi.PurchaseItemId
                 return dto;
             }
         }
+
+        // Assumes using System.Data.SQLite;
+        // Insert journal header and return JournalId
+        private long InsertJournalEntry(SQLiteConnection conn, SQLiteTransaction tx, string date, string description, string voucherType, long voucherId)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+            INSERT INTO JournalEntries (Date, Description, VoucherType, VoucherId, CreatedAt)
+            VALUES (@Date, @Desc, @VoucherType, @VoucherId, DATETIME('now'));
+            SELECT last_insert_rowid();
+        ";
+                cmd.Parameters.AddWithValue("@Date", date ?? DateTime.UtcNow.ToString("yyyy-MM-dd"));
+                cmd.Parameters.AddWithValue("@Desc", description ?? "");
+                cmd.Parameters.AddWithValue("@VoucherType", voucherType ?? "");
+                cmd.Parameters.AddWithValue("@VoucherId", voucherId);
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
+        // Insert a journal line
+        private void InsertJournalLine(SQLiteConnection conn, SQLiteTransaction tx, long journalId, long accountId, decimal debit, decimal credit)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+            INSERT INTO JournalLines (JournalId, AccountId, Debit, Credit, CreatedAt)
+            VALUES (@JournalId, @AccountId, @Debit, @Credit, DATETIME('now'));
+        ";
+                cmd.Parameters.AddWithValue("@JournalId", journalId);
+                cmd.Parameters.AddWithValue("@AccountId", accountId);
+                cmd.Parameters.AddWithValue("@Debit", (double)debit);
+                cmd.Parameters.AddWithValue("@Credit", (double)credit);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        // Get or create a generic account by name (returns AccountId)
+        private long GetOrCreateAccountByName(SQLiteConnection conn, SQLiteTransaction tx, string accountName, string accountType = "Income", string normalSide = "Credit")
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = "SELECT AccountId FROM Accounts WHERE AccountName = @name LIMIT 1;";
+                cmd.Parameters.AddWithValue("@name", accountName);
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value) return Convert.ToInt64(o);
+
+                // create account
+                cmd.CommandText = @"
+            INSERT INTO Accounts (AccountName, AccountType, NormalSide, OpeningBalance, IsActive, CreatedAt)
+            VALUES (@name, @type, @side, 0, 1, DATETIME('now'));
+            SELECT last_insert_rowid();
+        ";
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("@name", accountName);
+                cmd.Parameters.AddWithValue("@type", accountType);
+                cmd.Parameters.AddWithValue("@side", normalSide);
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
+        // Get or create a party (customer/supplier) account and Parties mapping
+        private long GetOrCreatePartyAccount(SQLiteConnection conn, SQLiteTransaction tx, string partyType, long refId, string partyDisplayName = null)
+        {
+            // Try Parties table first
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = "SELECT AccountId FROM Parties WHERE PartyType=@pt AND RefId=@rid LIMIT 1;";
+                cmd.Parameters.AddWithValue("@pt", partyType);
+                cmd.Parameters.AddWithValue("@rid", refId);
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value) return Convert.ToInt64(o);
+
+                // Not found — create account named PartyType RefId (or use provided display name)
+                var accountName = partyDisplayName ?? $"{partyType} {refId}";
+                cmd.CommandText = @"
+            INSERT INTO Accounts (AccountName, AccountType, NormalSide, OpeningBalance, IsActive, CreatedAt)
+            VALUES (@an, 'Asset', 'Debit', 0, 1, DATETIME('now'));
+            SELECT last_insert_rowid();
+        ";
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("@an", accountName);
+                var accountId = Convert.ToInt64(cmd.ExecuteScalar());
+
+                // Insert mapping into Parties
+                cmd.CommandText = "INSERT INTO Parties (PartyType, RefId, AccountId) VALUES (@pt, @rid, @aid);";
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("@pt", partyType);
+                cmd.Parameters.AddWithValue("@rid", refId);
+                cmd.Parameters.AddWithValue("@aid", accountId);
+                cmd.ExecuteNonQuery();
+
+                return accountId;
+            }
+        }
+
+        public List<AccountDto> FetchAccounts()
+        {
+            var list = new List<AccountDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT AccountId, AccountName, AccountType, NormalSide, OpeningBalance, IsActive
+                FROM Accounts
+                ORDER BY AccountName;
+            ";
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        while (rd.Read())
+                        {
+                            list.Add(new AccountDto
+                            {
+                                AccountId = rd.GetInt64(0),
+                                AccountName = rd.GetString(1),
+                                AccountType = rd.GetString(2),
+                                NormalSide = rd.GetString(3),
+                                OpeningBalance = rd.GetDouble(4),
+                                IsActive = rd.GetInt32(5) == 1
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+        public long CreateAccount(AccountDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                INSERT INTO Accounts (AccountName, AccountType, NormalSide, OpeningBalance, IsActive)
+                VALUES (@name, @type, @side, @opening, 1);
+
+                SELECT last_insert_rowid();
+            ";
+
+                    cmd.Parameters.AddWithValue("@name", dto.AccountName);
+                    cmd.Parameters.AddWithValue("@type", dto.AccountType);
+                    cmd.Parameters.AddWithValue("@side", dto.NormalSide);
+                    cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
+
+                    return (long)cmd.ExecuteScalar();
+                }
+            }
+        }
+        public void UpdateAccount(AccountDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                UPDATE Accounts
+                SET AccountName = @name,
+                    AccountType = @type,
+                    NormalSide = @side,
+                    OpeningBalance = @opening
+                WHERE AccountId = @id;
+            ";
+
+                    cmd.Parameters.AddWithValue("@id", dto.AccountId);
+                    cmd.Parameters.AddWithValue("@name", dto.AccountName);
+                    cmd.Parameters.AddWithValue("@type", dto.AccountType);
+                    cmd.Parameters.AddWithValue("@side", dto.NormalSide);
+                    cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
+
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+        public void DeleteAccount(long id)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"UPDATE Accounts SET IsActive = 0 WHERE AccountId = @id;";
+                    cmd.Parameters.AddWithValue("@id", id);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+        public ProfitLossReportDto GetProfitAndLoss(string from, string to)
+        {
+            var report = new ProfitLossReportDto { From = from, To = to };
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    a.AccountId,
+                    a.AccountName,
+                    a.AccountType,
+                    IFNULL(SUM(jl.Debit), 0) AS Debit,
+                    IFNULL(SUM(jl.Credit), 0) AS Credit
+                FROM Accounts a
+                LEFT JOIN JournalLines jl ON jl.AccountId = a.AccountId
+                LEFT JOIN JournalEntries je ON je.JournalId = jl.JournalId
+                WHERE Date(je.Date) BETWEEN Date(@from) AND Date(@to)
+                GROUP BY a.AccountId, a.AccountName, a.AccountType;
+            ";
+
+                    cmd.Parameters.AddWithValue("@from", from);
+                    cmd.Parameters.AddWithValue("@to", to);
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        while (rd.Read())
+                        {
+                            string accName = rd.GetString(1);
+                            string type = rd.GetString(2);
+                            decimal debit = rd.GetDecimal(3);
+                            decimal credit = rd.GetDecimal(4);
+
+                            // Net effect (Credit - Debit)
+                            decimal net = credit - debit;
+
+                            if (type == "Income")
+                            {
+                                report.Income.Add(new ProfitLossRow
+                                {
+                                    AccountName = accName,
+                                    Debit = debit,
+                                    Credit = credit
+                                });
+
+                                // Income increases profit → add net CR
+                                report.TotalIncome += net;
+                            }
+                            else if (type == "Expense")
+                            {
+                                report.Expenses.Add(new ProfitLossRow
+                                {
+                                    AccountName = accName,
+                                    Debit = debit,
+                                    Credit = credit
+                                });
+
+                                // Expense subtracts from profit → add net DR
+                                report.TotalExpenses += (debit - credit);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // -----------------------------------------------
+            // ⭐ ADD FIFO COGS HERE (Cost of Goods Sold)
+            // -----------------------------------------------
+            var stockSvc = new StockValuationService();
+            var totals = stockSvc.ComputeTotalsFIFO(from, to);
+
+            decimal cogs = totals.PeriodCogsTotal;
+
+            // Add COGS as an Expense row
+            report.Expenses.Add(new ProfitLossRow
+            {
+                AccountName = "Cost of Goods Sold (FIFO)",
+                Debit = cogs,
+                Credit = 0
+            });
+
+            report.TotalExpenses += cogs;
+
+            // -----------------------------------------------
+            // ⭐ NET PROFIT = TOTAL INCOME – TOTAL EXPENSES
+            // -----------------------------------------------
+            decimal profit = report.TotalIncome - report.TotalExpenses;
+
+            if (profit >= 0)
+            {
+                report.NetProfit = profit;
+                report.NetLoss = 0;
+            }
+            else
+            {
+                report.NetLoss = Math.Abs(profit);
+                report.NetProfit = 0;
+            }
+
+            return report;
+        }
+
+        public BalanceSheetReportDto GetBalanceSheet(string asOf)
+        {
+            var report = new BalanceSheetReportDto { AsOf = asOf };
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    a.AccountId,
+                    a.AccountName,
+                    a.AccountType,
+                    IFNULL(SUM(jl.Debit), 0) -
+                    IFNULL(SUM(jl.Credit), 0) AS Balance
+                FROM Accounts a
+                LEFT JOIN JournalLines jl ON jl.AccountId = a.AccountId
+                LEFT JOIN JournalEntries je ON je.JournalId = jl.JournalId
+                WHERE Date(je.Date) <= Date(@asOf)
+                GROUP BY a.AccountId, a.AccountName, a.AccountType;
+            ";
+
+                    cmd.Parameters.AddWithValue("@asOf", asOf);
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        while (rd.Read())
+                        {
+                            string name = rd.GetString(1);
+                            string type = rd.GetString(2);
+                            decimal balance = rd.GetDecimal(3);
+
+                            if (type == "Asset")
+                            {
+                                report.Assets.Rows.Add(new ProfitLossRow
+                                {
+                                    AccountName = name,
+                                    Debit = balance >= 0 ? balance : 0,
+                                    Credit = balance < 0 ? Math.Abs(balance) : 0
+                                });
+                                report.Assets.Total += balance;
+                            }
+                            else if (type == "Liability")
+                            {
+                                report.Liabilities.Rows.Add(new ProfitLossRow
+                                {
+                                    AccountName = name,
+                                    Debit = balance < 0 ? Math.Abs(balance) : 0,
+                                    Credit = balance >= 0 ? balance : 0
+                                });
+                                report.Liabilities.Total += balance;
+                            }
+                            else if (type == "Equity")
+                            {
+                                report.Capital.Rows.Add(new ProfitLossRow
+                                {
+                                    AccountName = name,
+                                    Debit = balance < 0 ? Math.Abs(balance) : 0,
+                                    Credit = balance >= 0 ? balance : 0
+                                });
+                                report.Capital.Total += balance;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // -----------------------------------------------------
+            // ⭐ ADD FIFO CLOSING STOCK (as an Asset)
+            // -----------------------------------------------------
+            var stockSvc = new StockValuationService();
+
+            // Get item-wise valuation as of the Balance Sheet date
+            var fifoRows = stockSvc.CalculateStockValuationFIFO(asOf);
+
+            decimal closingStockValue = fifoRows.Sum(r => r.ClosingValue);
+
+            // Add "Closing Stock" row under Assets
+            report.Assets.Rows.Add(new ProfitLossRow
+            {
+                AccountName = "Closing Stock (FIFO)",
+                Debit = closingStockValue,
+                Credit = 0
+            });
+
+            // Increase Assets Total
+            report.Assets.Total += closingStockValue;
+
+            return report;
+        }
+
 
 
     }

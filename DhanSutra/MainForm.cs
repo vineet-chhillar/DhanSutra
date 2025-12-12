@@ -141,91 +141,91 @@ namespace DhanSutra
                         }
                         break;
 
-                    case "AddItemDetails":
-                        try
-                        {
+                    //case "AddItemDetails":
+                    //    try
+                    //    {
 
                                
-                            var details = JsonConvert.DeserializeObject<ItemDetails>(req.Payload.ToString());
+                    //        var details = JsonConvert.DeserializeObject<ItemDetails>(req.Payload.ToString());
 
-                            var errors = db.ValidateInventoryDetails(details);
+                    //        var errors = db.ValidateInventoryDetails(details);
 
                             
 
-                            ItemLedger itemledger=new ItemLedger();
-                            itemledger.ItemId = details.Item_Id;
-                            itemledger.BatchNo = details.BatchNo;   
-                            itemledger.Date = details.Date.ToString("yyyy-MM-dd HH:mm:ss");
-                            itemledger.TxnType = "Purchase";
-                            itemledger.RefNo = details.refno;
-                            itemledger.Qty = details.Quantity;
-                            itemledger.Rate = details.PurchasePrice;
-                            itemledger.DiscountPercent = details.DiscountPercent;
-                            itemledger.NetRate = details.NetPurchasePrice;
-                            itemledger.TotalAmount  = details.Amount;
-                            itemledger.Remarks = details.Description;
-                            itemledger.CreatedBy = details.CreatedBy;
-                            itemledger.CreatedAt = details.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
+                    //        ItemLedger itemledger=new ItemLedger();
+                    //        itemledger.ItemId = details.Item_Id;
+                    //        itemledger.BatchNo = details.BatchNo;   
+                    //        itemledger.Date = details.Date.ToString("yyyy-MM-dd HH:mm:ss");
+                    //        itemledger.TxnType = "Purchase";
+                    //        itemledger.RefNo = details.refno;
+                    //        itemledger.Qty = details.Quantity;
+                    //        itemledger.Rate = details.PurchasePrice;
+                    //        itemledger.DiscountPercent = details.DiscountPercent;
+                    //        itemledger.NetRate = details.NetPurchasePrice;
+                    //        itemledger.TotalAmount  = details.Amount;
+                    //        itemledger.Remarks = details.Description;
+                    //        itemledger.CreatedBy = details.CreatedBy;
+                    //        itemledger.CreatedAt = details.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
 
-                            string status = "Error";
-                            //string message = "Failed to save inventory details.";
+                    //        string status = "Error";
+                    //        //string message = "Failed to save inventory details.";
 
-                            using (var conn = new SQLiteConnection(_connectionString1))
-                            {
-                                conn.Open();
-                                Console.WriteLine("🧠 Using DB file: " + conn.FileName);
-                                using (var txn = conn.BeginTransaction())
-                                {
-                                    try
-                                    {
-                                        bool success1 = db.AddItemDetails(details, conn, txn);
-                                        bool success2 = db.AddItemLedger(itemledger, conn, txn);
-                                        bool success3 = db.UpdateItemBalance(itemledger, conn, txn);
+                    //        using (var conn = new SQLiteConnection(_connectionString1))
+                    //        {
+                    //            conn.Open();
+                    //            Console.WriteLine("🧠 Using DB file: " + conn.FileName);
+                    //            using (var txn = conn.BeginTransaction())
+                    //            {
+                    //                try
+                    //                {
+                    //                    bool success1 = db.AddItemDetails(details, conn, txn);
+                    //                    bool success2 = db.AddItemLedger(itemledger, conn, txn);
+                    //                    bool success3 = db.UpdateItemBalance(itemledger, conn, txn);
 
-                                        if (success1 && success2 && success3)
-                                        {
-                                            txn.Commit();
-                                            status = "Success";
-                                            message = "Inventory details saved successfully.";
-                                        }
-                                        else
-                                        {
-                                            txn.Rollback();
-                                            status = "Error";
-                                            message = "One or more operations failed. Transaction rolled back.";
-                                        }
-                                    }
-                                    catch (Exception innerEx)
-                                    {
-                                        txn.Rollback();
-                                        status = "Error";
-                                        message = "Database error: " + innerEx.Message;
-                                    }
-                                }
-                            }
+                    //                    if (success1 && success2 && success3)
+                    //                    {
+                    //                        txn.Commit();
+                    //                        status = "Success";
+                    //                        message = "Inventory details saved successfully.";
+                    //                    }
+                    //                    else
+                    //                    {
+                    //                        txn.Rollback();
+                    //                        status = "Error";
+                    //                        message = "One or more operations failed. Transaction rolled back.";
+                    //                    }
+                    //                }
+                    //                catch (Exception innerEx)
+                    //                {
+                    //                    txn.Rollback();
+                    //                    status = "Error";
+                    //                    message = "Database error: " + innerEx.Message;
+                    //                }
+                    //            }
+                    //        }
 
-                            // ✅ Send response to React
-                            var response = new
-                            {
-                                Type = "AddItemDetails",
-                                Status = status,
-                                Message = message
-                            };
+                    //        // ✅ Send response to React
+                    //        var response = new
+                    //        {
+                    //            Type = "AddItemDetails",
+                    //            Status = status,
+                    //            Message = message
+                    //        };
 
-                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
-                        }
-                        catch (Exception ex)
-                        {
-                            var error = new
-                            {
-                                Type = "AddItemDetails",
-                                Status = "Error",
-                                Message = ex.Message
-                            };
+                    //        webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
+                    //    }
+                    //    catch (Exception ex)
+                    //    {
+                    //        var error = new
+                    //        {
+                    //            Type = "AddItemDetails",
+                    //            Status = "Error",
+                    //            Message = ex.Message
+                    //        };
 
-                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(error));
-                        }
-                        break;
+                    //        webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(error));
+                    //    }
+                    //    break;
 
                     case "GetItems":
                         try
@@ -328,21 +328,42 @@ namespace DhanSutra
 
                     case "GetCategoryById":
                         {
-                            var payload = (JObject)req.Payload;
-                            int id = payload["id"].Value<int>();
-                            string name = db.GetCategoryById(id);
-
-                            // Send back the result to React
-                            var response = new
+                            try
                             {
-                                Action = "GetCategoryByIdResponse",
-                                Result = name
-                            };
+                                var payload = (JObject)req.Payload;
+                                int id = payload["Id"].Value<int>();
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                                var category = db.GetCategoryById(id);
 
+                                var response = new
+                                {
+                                    Type = "GetCategoryById",
+                                    Status = "Success",
+                                    Data = category
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                var error = new
+                                {
+                                    Type = "GetCategoryById",
+                                    Status = "Error",
+                                    Message = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(error)
+                                );
+                            }
+
+                            break;
                         }
-                        break;
+
+
 
                     case "GetUnitNameById":
                         {
@@ -420,56 +441,56 @@ namespace DhanSutra
                             break;
                         }
 
-                    case "GetItemDetails":
-                        try
-                        {
-                            // 🔍 Read the JSON payload as an object
-                            string payloadJson = req.Payload.ToString();
-                            Console.WriteLine($"📩 Raw Payload JSON: {payloadJson}");
+                    //case "GetItemDetails":
+                    //    try
+                    //    {
+                    //        // 🔍 Read the JSON payload as an object
+                    //        string payloadJson = req.Payload.ToString();
+                    //        Console.WriteLine($"📩 Raw Payload JSON: {payloadJson}");
 
-                            int itemId = 0;
+                    //        int itemId = 0;
 
-                            // Try to parse JSON object
-                            try
-                            {
-                                var payloadDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(payloadJson);
-                                if (payloadDict != null && payloadDict.ContainsKey("Item_Id"))
-                                {
-                                    itemId = Convert.ToInt32(payloadDict["Item_Id"]);
-                                }
-                            }
-                            catch
-                            {
-                                // Fallback: sometimes React might send just a number
-                                int.TryParse(payloadJson, out itemId);
-                            }
+                    //        // Try to parse JSON object
+                    //        try
+                    //        {
+                    //            var payloadDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(payloadJson);
+                    //            if (payloadDict != null && payloadDict.ContainsKey("Item_Id"))
+                    //            {
+                    //                itemId = Convert.ToInt32(payloadDict["Item_Id"]);
+                    //            }
+                    //        }
+                    //        catch
+                    //        {
+                    //            // Fallback: sometimes React might send just a number
+                    //            int.TryParse(payloadJson, out itemId);
+                    //        }
 
-                            Console.WriteLine($"📩 Extracted item_id = {itemId}");
+                    //        Console.WriteLine($"📩 Extracted item_id = {itemId}");
 
-                            // ✅ Now safely query the database
-                            var details = db.GetItemDetails(itemId);
-                            var response = new
-                            {
-                                Type = "GetItemDetails",
-                                Status = "Success",
-                                Message = "Fetched all items successfully",
-                                Data = details
-                            };
+                    //        // ✅ Now safely query the database
+                    //        var details = db.GetItemDetails(itemId);
+                    //        var response = new
+                    //        {
+                    //            Type = "GetItemDetails",
+                    //            Status = "Success",
+                    //            Message = "Fetched all items successfully",
+                    //            Data = details
+                    //        };
 
-                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
-                        }
-                        catch (Exception ex)
-                        {
-                            var error = new
-                            {
-                                Type = "GetItemDetails",
-                                Status = "Error",
-                                Message = ex.Message
-                            };
+                    //        webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
+                    //    }
+                    //    catch (Exception ex)
+                    //    {
+                    //        var error = new
+                    //        {
+                    //            Type = "GetItemDetails",
+                    //            Status = "Error",
+                    //            Message = ex.Message
+                    //        };
 
-                            webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(error));
-                        }
-                        break;
+                    //        webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(error));
+                    //    }
+                    //    break;
 
                     case "deleteItem":
                         {
@@ -522,6 +543,7 @@ namespace DhanSutra
                             string description = payload["description"]?.ToString();
                             int? unitId = payload["unitid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["unitid"]);
                             int? gstId = payload["gstid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["gstid"]);
+                            decimal reorderlevel = Convert.ToDecimal(payload["reorderlevel"]);
 
                             Item itemforvalidation = new Item();
                             itemforvalidation.Name = name;
@@ -549,7 +571,7 @@ namespace DhanSutra
                             else
                             {
 
-                                bool updated = db.UpdateItem(itemId, name, itemCode,hsnCode, categoryId, date, description, unitId, gstId);
+                                bool updated = db.UpdateItem(itemId, name, itemCode,hsnCode, categoryId, date, description, unitId, gstId,reorderlevel);
 
                                 var result = new
                                 {
@@ -575,148 +597,148 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(result));
                             break;
                         }
-                    case "searchInventory":
-                        {
-                            var payload = JObject.Parse(req.Payload.ToString());
-                            string queryText = payload["query"]?.ToString() ?? "";
+                    //case "searchInventory":
+                    //    {
+                    //        var payload = JObject.Parse(req.Payload.ToString());
+                    //        string queryText = payload["query"]?.ToString() ?? "";
 
-                            // Call your database service method
-                            var inventoryList = db.SearchInventory(queryText);
+                    //        // Call your database service method
+                    //        var inventoryList = db.SearchInventory(queryText);
 
-                            var result = new
-                            {
-                                action = "searchInventoryResponse",
-                                items = inventoryList,
-                                Status = "Success"
-                            };
+                    //        var result = new
+                    //        {
+                    //            action = "searchInventoryResponse",
+                    //            items = inventoryList,
+                    //            Status = "Success"
+                    //        };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(
-                                Newtonsoft.Json.JsonConvert.SerializeObject(result)
-                            );
-                            break;
-                        }
+                    //        webView.CoreWebView2.PostWebMessageAsJson(
+                    //            Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                    //        );
+                    //        break;
+                    //    }
 
                     
-                    case "updateInventory":
-                        {
-                            var payload = JObject.Parse(req.Payload.ToString());
+                    //case "updateInventory":
+                    //    {
+                    //        var payload = JObject.Parse(req.Payload.ToString());
 
-                            var itemId = payload["item_id"]?.ToString();
-                            var stritemId = payload["item_id"]?.ToString();
-                            var batchNo = payload["batchNo"]?.ToString();
-                            var refno = payload["refno"]?.ToString();
-                            //var hsnCode = payload["hsnCode"]?.ToString();
+                    //        var itemId = payload["item_id"]?.ToString();
+                    //        var stritemId = payload["item_id"]?.ToString();
+                    //        var batchNo = payload["batchNo"]?.ToString();
+                    //        var refno = payload["refno"]?.ToString();
+                    //        //var hsnCode = payload["hsnCode"]?.ToString();
 
-                            string NormalizeDate(string input)
-                            {
-                                if (string.IsNullOrWhiteSpace(input)) return null;
-                                if (DateTime.TryParse(input, out DateTime dt))
-                                    return dt.ToString("yyyy-MM-dd HH:mm:ss");
-                                return null;
-                            }
+                    //        string NormalizeDate(string input)
+                    //        {
+                    //            if (string.IsNullOrWhiteSpace(input)) return null;
+                    //            if (DateTime.TryParse(input, out DateTime dt))
+                    //                return dt.ToString("yyyy-MM-dd HH:mm:ss");
+                    //            return null;
+                    //        }
 
-                            var date = NormalizeDate(payload["date"]?.ToString());
+                    //        var date = NormalizeDate(payload["date"]?.ToString());
 
-                            var quantity = payload["quantity"]?.ToString();
-                            var purchasePrice = payload["purchasePrice"]?.ToString();
-                            var discountPercent = payload["discountPercent"]?.ToString();
-                            var netPurchasePrice = payload["netpurchasePrice"]?.ToString();
-                            var amount = payload["amount"]?.ToString();
-                            var salesPrice = payload["salesPrice"]?.ToString();
-                            var mrp = payload["mrp"]?.ToString();
-                            var goodsOrServices = payload["goodsOrServices"]?.ToString();
-                            var description = payload["description"]?.ToString();
-                            var mfgDate = NormalizeDate(payload["mfgdate"]?.ToString());
-                            var expDate = NormalizeDate(payload["expdate"]?.ToString());
-                            var modelno = payload["modelno"]?.ToString();
-                            var brand = payload["brand"]?.ToString();
-                            var size = payload["size"]?.ToString();
-                            var color = payload["color"]?.ToString();
-                            var weight = payload["weight"]?.ToString();
-                            var dimension = payload["dimension"]?.ToString();
-                            var invbatchno = payload["invbatchno"]?.ToString();
-                            var supplierid = ((int)payload["supplierId"]);
+                    //        var quantity = payload["quantity"]?.ToString();
+                    //        var purchasePrice = payload["purchasePrice"]?.ToString();
+                    //        var discountPercent = payload["discountPercent"]?.ToString();
+                    //        var netPurchasePrice = payload["netpurchasePrice"]?.ToString();
+                    //        var amount = payload["amount"]?.ToString();
+                    //        var salesPrice = payload["salesPrice"]?.ToString();
+                    //        var mrp = payload["mrp"]?.ToString();
+                    //        var goodsOrServices = payload["goodsOrServices"]?.ToString();
+                    //        var description = payload["description"]?.ToString();
+                    //        var mfgDate = NormalizeDate(payload["mfgdate"]?.ToString());
+                    //        var expDate = NormalizeDate(payload["expdate"]?.ToString());
+                    //        var modelno = payload["modelno"]?.ToString();
+                    //        var brand = payload["brand"]?.ToString();
+                    //        var size = payload["size"]?.ToString();
+                    //        var color = payload["color"]?.ToString();
+                    //        var weight = payload["weight"]?.ToString();
+                    //        var dimension = payload["dimension"]?.ToString();
+                    //        var invbatchno = payload["invbatchno"]?.ToString();
+                    //        var supplierid = ((int)payload["supplierId"]);
 
-                            bool success = false;
+                    //        bool success = false;
 
-                            using (var conn = new SQLiteConnection(_connectionString1))
-                            {
-                                conn.Open();
+                    //        using (var conn = new SQLiteConnection(_connectionString1))
+                    //        {
+                    //            conn.Open();
 
-                                using (var transaction = conn.BeginTransaction())
-                                {
-                                    try
-                                    {
-                                        success = db.UpdateInventoryRecord(
-                                            conn, transaction,
-                                            itemId, batchNo, refno,  date, quantity, purchasePrice,
-                                            discountPercent, netPurchasePrice, amount, salesPrice, mrp,
-                                            goodsOrServices, description, mfgDate, expDate, modelno,
-                                            brand, size, color, weight, dimension, invbatchno,supplierid);
+                    //            using (var transaction = conn.BeginTransaction())
+                    //            {
+                    //                try
+                    //                {
+                    //                    success = db.UpdateInventoryRecord(
+                    //                        conn, transaction,
+                    //                        itemId, batchNo, refno,  date, quantity, purchasePrice,
+                    //                        discountPercent, netPurchasePrice, amount, salesPrice, mrp,
+                    //                        goodsOrServices, description, mfgDate, expDate, modelno,
+                    //                        brand, size, color, weight, dimension, invbatchno,supplierid);
 
-                                        bool success_ledger = db.UpdateItemLedger(
-                                            conn, transaction,
-                                            itemId, batchNo, refno, date, quantity, purchasePrice,
-                                            discountPercent, netPurchasePrice, amount, description, invbatchno);
+                    //                    bool success_ledger = db.UpdateItemLedger(
+                    //                        conn, transaction,
+                    //                        itemId, batchNo, refno, date, quantity, purchasePrice,
+                    //                        discountPercent, netPurchasePrice, amount, description, invbatchno);
 
-                                        bool success_itembalance_batchno =
-                                            db.UpdateItemBalanceForBatchNo(conn, transaction, itemId, batchNo, invbatchno);
+                    //                    bool success_itembalance_batchno =
+                    //                        db.UpdateItemBalanceForBatchNo(conn, transaction, itemId, batchNo, invbatchno);
 
-                                        bool success_itembalance_forquantity =
-                                            db.UpdateItemBalance_ForChangeInQuantity(conn, transaction,
-                                                stritemId, batchNo, invbatchno, quantity);
+                    //                    bool success_itembalance_forquantity =
+                    //                        db.UpdateItemBalance_ForChangeInQuantity(conn, transaction,
+                    //                            stritemId, batchNo, invbatchno, quantity);
 
-                                        if (success && success_ledger && success_itembalance_batchno && success_itembalance_forquantity)
-                                        {
-                                            transaction.Commit();
-                                            success = true;
-                                        }
-                                        else
-                                        {
-                                            transaction.Rollback();
-                                            success = false;
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        transaction.Rollback();
-                                        Console.WriteLine("Error updating inventory & ledger: " + ex.Message);
-                                        success = false;
-                                    }
-                                }
-                            }
+                    //                    if (success && success_ledger && success_itembalance_batchno && success_itembalance_forquantity)
+                    //                    {
+                    //                        transaction.Commit();
+                    //                        success = true;
+                    //                    }
+                    //                    else
+                    //                    {
+                    //                        transaction.Rollback();
+                    //                        success = false;
+                    //                    }
+                    //                }
+                    //                catch (Exception ex)
+                    //                {
+                    //                    transaction.Rollback();
+                    //                    Console.WriteLine("Error updating inventory & ledger: " + ex.Message);
+                    //                    success = false;
+                    //                }
+                    //            }
+                    //        }
 
-                            var result = new
-                            {
-                                action = "updateInventoryResponse",
-                                success = success,
-                                message = success ? "Inventory updated successfully." : "Update failed."
-                            };
+                    //        var result = new
+                    //        {
+                    //            action = "updateInventoryResponse",
+                    //            success = success,
+                    //            message = success ? "Inventory updated successfully." : "Update failed."
+                    //        };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(
-                                Newtonsoft.Json.JsonConvert.SerializeObject(result)
-                            );
+                    //        webView.CoreWebView2.PostWebMessageAsJson(
+                    //            Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                    //        );
 
-                            break;
-                        }
+                    //        break;
+                    //    }
 
-                    case "getLastInventoryItem":
-                        {
-                            var lastItem = db.GetLastItemWithInventory();
+                    //case "getLastInventoryItem":
+                    //    {
+                    //        var lastItem = db.GetLastItemWithInventory();
 
-                            var result = new
-                            {
-                                action = "getLastInventoryItemResponse",
-                                success = lastItem != null,
-                                data = lastItem
-                            };
+                    //        var result = new
+                    //        {
+                    //            action = "getLastInventoryItemResponse",
+                    //            success = lastItem != null,
+                    //            data = lastItem
+                    //        };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(
-                                Newtonsoft.Json.JsonConvert.SerializeObject(result)
-                            );
+                    //        webView.CoreWebView2.PostWebMessageAsJson(
+                    //            Newtonsoft.Json.JsonConvert.SerializeObject(result)
+                    //        );
 
-                            break;
-                        }
+                    //        break;
+                    //    }
                     case "GetCompanyProfile":
                         {
                             var profile = db.GetCompanyProfile();
@@ -1223,33 +1245,33 @@ namespace DhanSutra
                             
                         }
 
-                    case "LoadInvoiceForReturn":
-                        {
-                            var payload = req.Payload as JObject;
-                            if (payload == null) break;
+                    //case "LoadInvoiceForReturn":
+                    //    {
+                    //        var payload = req.Payload as JObject;
+                    //        if (payload == null) break;
 
-                            int invoiceId = payload["InvoiceId"].ToObject<int>();
-                            var inv = db.LoadInvoiceForReturn(invoiceId);
+                    //        int invoiceId = payload["InvoiceId"].ToObject<int>();
+                    //        var inv = db.LoadInvoiceForReturn(invoiceId);
 
-                            var response = new
-                            {
-                                action = "LoadInvoiceForReturnResponse",
-                                type = "LoadInvoiceForReturnResponse",
-                                invoice = new
-                                {
-                                    inv.Id,
-                                    inv.InvoiceNo,
-                                    inv.CustomerId,
-                                    inv.CustomerName,
-                                    Items = inv.ReturnItems  // 🔥 IMPORTANT
-                                }
-                            };
+                    //        var response = new
+                    //        {
+                    //            action = "LoadInvoiceForReturnResponse",
+                    //            type = "LoadInvoiceForReturnResponse",
+                    //            invoice = new
+                    //            {
+                    //                inv.Id,
+                    //                inv.InvoiceNo,
+                    //                inv.CustomerId,
+                    //                inv.CustomerName,
+                    //                Items = inv.ReturnItems  // 🔥 IMPORTANT
+                    //            }
+                    //        };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(
-                                JsonConvert.SerializeObject(response)
-                            );
-                            break;
-                        }
+                    //        webView.CoreWebView2.PostWebMessageAsJson(
+                    //            JsonConvert.SerializeObject(response)
+                    //        );
+                    //        break;
+                    //    }
 
                     case "SaveSalesReturn":
                         {
@@ -1270,140 +1292,232 @@ namespace DhanSutra
                             break;
                           
                         }
-                    case "SearchSalesReturns":
-                        {
-                            var payload = req.Payload as JObject;
-                            if (payload == null) break;
+                    //case "SearchSalesReturns":
+                    //    {
+                    //        var payload = req.Payload as JObject;
+                    //        if (payload == null) break;
 
-                            var date = payload["Date"].ToObject<string>();
-                            var list = db.SearchSalesReturns(date);
-                            var response = new
-                            {
-                                action = "SearchSalesReturnsResponse",
-                                returns = list     // 🔥 must use "returns"
-                            };
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            break;
+                    //        var date = payload["Date"].ToObject<string>();
+                    //        var list = db.SearchSalesReturns(date);
+                    //        var response = new
+                    //        {
+                    //            action = "SearchSalesReturnsResponse",
+                    //            returns = list     // 🔥 must use "returns"
+                    //        };
+                    //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        break;
 
                            
-                        }
-                    case "LoadSalesReturnDetail":
-                        {
-                            var payload = req.Payload as JObject;
-                            if (payload == null) break;
-                            int id = payload["ReturnId"].ToObject<int>();
+                    //    }
+                    //case "LoadSalesReturnDetail":
+                    //    {
+                    //        var payload = req.Payload as JObject;
+                    //        if (payload == null) break;
+                    //        int id = payload["ReturnId"].ToObject<int>();
                                                         
-                            var data = db.LoadSalesReturnDetail(id);
-                            var response = new
-                            {
-                                action = "LoadSalesReturnDetailResponse",
-                                returnData = data    // 🔥 must use "returns"
-                            };
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            break;
+                    //        var data = db.LoadSalesReturnDetail(id);
+                    //        var response = new
+                    //        {
+                    //            action = "LoadSalesReturnDetailResponse",
+                    //            returnData = data    // 🔥 must use "returns"
+                    //        };
+                    //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        break;
                            
-                        }
-                    case "PrintSalesReturn":
+                    //    }
+                    case "LoadSalesInvoice":
                         {
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
-                            long returnId = payload["ReturnId"]?.ToObject<long>() ?? 0;
+                            long invoiceId = payload["InvoiceId"]?.ToObject<long>() ?? 0;
 
-                            // 1) Load sales return from DB
-                            var sr = db.GetSalesReturn(returnId);
-
-                            // 2) Load company profile
-                            var company = db.GetCompanyProfileSR();
-
-                            // 3) Map to Pdf DTO
-                            var pdfSR = new DhanSutra.Pdf.SalesReturnLoadDto
-                            {
-                                Id = sr.Id,
-                                ReturnNo = sr.ReturnNo,
-                                ReturnNum = sr.ReturnNum,
-                                ReturnDate = sr.ReturnDate,
-                                InvoiceNo = sr.InvoiceNo,
-                                CustomerId = sr.CustomerId,
-                                CustomerName = sr.CustomerName,
-                                CustomerPhone = sr.CustomerPhone,
-                                CustomerState = sr.CustomerState,
-                                CustomerAddress = sr.CustomerAddress,
-                                SubTotal = sr.SubTotal,
-                                TotalTax = sr.TotalTax,
-                                TotalAmount = sr.TotalAmount,
-                                RoundOff = sr.RoundOff,
-                                Notes = sr.Notes,
-                                Items = sr.Items?.ConvertAll(x => new DhanSutra.Pdf.SalesReturnItemForPrintDto
-                                {
-                                    ItemId = x.ItemId,
-                                    BatchNo = x.BatchNo,
-                                    Qty = x.Qty,
-                                    Rate = x.Rate,
-                                    DiscountPercent = x.DiscountPercent,
-                                    GstPercent = x.GstPercent,
-                                    GstValue = x.GstValue,
-                                    CgstPercent = x.CgstPercent,
-                                    CgstValue = x.CgstValue,
-                                    SgstPercent = x.SgstPercent,
-                                    SgstValue = x.SgstValue,
-                                    IgstPercent = x.IgstPercent,
-                                    IgstValue = x.IgstValue,
-                                    LineSubTotal = x.LineSubTotal,
-                                    LineTotal = x.LineTotal
-                                })
-                            };
-
-                            // 4) PDF Doc
-                            var doc = new SalesReturnDocument(pdfSR, company);
-
-
-                            var fileName = $"SalesReturn_{sr.ReturnNo}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
-                            var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Invoices", fileName);
-
-                            Directory.CreateDirectory(Path.GetDirectoryName(filePath));
-
-                            
-
-                            
-
-                            QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
-                            var bytes = doc.GeneratePdf();
-                            File.WriteAllBytes(filePath, bytes);
-
-                            // 6) Send path to frontend
+                            var data = db.LoadSalesInvoice(invoiceId);
                             var response = new
                             {
-                                action = "PrintSalesReturnResponse",
+                                action = "LoadSalesInvoiceResponse",
+                                data = data    // 🔥 must use "returns"
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                            
+                        }
+
+                    //case "PrintSalesReturn":
+                    //    {
+                    //        var payload = req.Payload as JObject;
+                    //        if (payload == null) break;
+
+                    //        long returnId = payload["ReturnId"]?.ToObject<long>() ?? 0;
+
+                    //        // 1) Load sales return from DB
+                    //        var sr = db.GetSalesReturn(returnId);
+
+                    //        // 2) Load company profile
+                    //        var company = db.GetCompanyProfileSR();
+
+                    //        // 3) Map to Pdf DTO
+                    //        var pdfSR = new DhanSutra.Pdf.SalesReturnLoadDto
+                    //        {
+                    //            Id = sr.Id,
+                    //            ReturnNo = sr.ReturnNo,
+                    //            ReturnNum = sr.ReturnNum,
+                    //            ReturnDate = sr.ReturnDate,
+                    //            InvoiceNo = sr.InvoiceNo,
+                    //            CustomerId = sr.CustomerId,
+                    //            CustomerName = sr.CustomerName,
+                    //            CustomerPhone = sr.CustomerPhone,
+                    //            CustomerState = sr.CustomerState,
+                    //            CustomerAddress = sr.CustomerAddress,
+                    //            SubTotal = sr.SubTotal,
+                    //            TotalTax = sr.TotalTax,
+                    //            TotalAmount = sr.TotalAmount,
+                    //            RoundOff = sr.RoundOff,
+                    //            Notes = sr.Notes,
+                    //            Items = sr.Items?.ConvertAll(x => new DhanSutra.Pdf.SalesReturnItemForPrintDto
+                    //            {
+                    //                ItemId = x.ItemId,
+                    //                BatchNo = x.BatchNo,
+                    //                Qty = x.Qty,
+                    //                Rate = x.Rate,
+                    //                DiscountPercent = x.DiscountPercent,
+                    //                GstPercent = x.GstPercent,
+                    //                GstValue = x.GstValue,
+                    //                CgstPercent = x.CgstPercent,
+                    //                CgstValue = x.CgstValue,
+                    //                SgstPercent = x.SgstPercent,
+                    //                SgstValue = x.SgstValue,
+                    //                IgstPercent = x.IgstPercent,
+                    //                IgstValue = x.IgstValue,
+                    //                LineSubTotal = x.LineSubTotal,
+                    //                LineTotal = x.LineTotal
+                    //            })
+                    //        };
+
+                    //        // 4) PDF Doc
+                    //        var doc = new SalesReturnDocument(pdfSR, company);
+
+
+                    //        var fileName = $"SalesReturn_{sr.ReturnNo}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+                    //        var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Invoices", fileName);
+
+                    //        Directory.CreateDirectory(Path.GetDirectoryName(filePath));
+
+                            
+
+                            
+
+                    //        QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+                    //        var bytes = doc.GeneratePdf();
+                    //        File.WriteAllBytes(filePath, bytes);
+
+                    //        // 6) Send path to frontend
+                    //        var response = new
+                    //        {
+                    //            action = "PrintSalesReturnResponse",
+                    //            success = true,
+                    //            pdfPath = filePath
+                    //        };
+
+                    //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        break;
+                    //    }
+
+
+
+                    //case "SearchInvoicesForReturn":
+                    //    {
+                    //        var payload = req.Payload as JObject;
+                    //        if (payload == null) break;
+                    //        var date = payload["Date"]?.ToObject<string>();
+
+
+                    //        var list = db.SearchInvoicesForReturn(date);
+                    //        var response = new
+                    //        {
+                    //            action = "SearchInvoicesForReturnResponse",
+                    //            type = "SearchInvoicesForReturnResponse",
+                    //            invoices = list
+                    //        };
+
+                    //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        break;
+
+                    //    }
+                    case "searchCustomers":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+                            var kw = payload["Keyword"]?.ToObject<string>() ?? "";
+                                                        
+                            var list = db.SearchCustomers(kw);
+                           var response = new
+                            {
+                                action = "searchCustomers",
                                 success = true,
-                                pdfPath = filePath
+                                data = list
                             };
-
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
 
-
-                    
-                    case "SearchInvoicesForReturn":
+                    case "loadCustomer":
                         {
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
-                            var date = payload["Date"]?.ToObject<string>();
-
-
-                            var list = db.SearchInvoicesForReturn(date);
+                            int id = payload["CustomerId"]?.ToObject<int>() ?? 0;
+                                                       
+                            var data = db.LoadCustomer(id);
                             var response = new
                             {
-                                action = "SearchInvoicesForReturnResponse",
-                                type = "SearchInvoicesForReturnResponse",
-                                invoices = list
+                                action = "loadCustomer",
+                                success = data != null,
+                                data
                             };
-
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
-
                         }
+
+                    case "saveCustomer":
+                        {
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+                            var dto = payload?.ToObject<CustomerDto>();
+
+
+                            
+                            var result = db.SaveCustomer(dto);
+
+                            var response = new
+                            {
+                                action = "saveCustomer",
+                                success = result,
+                                message = result ? "Customer saved successfully" : "Failed to save"
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+
+                    case "deleteCustomer":
+                        {
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+                            int id = payload["CustomerId"]?.ToObject<int>() ?? 0;
+
+                            var ok = db.DeleteCustomer(id);
+
+                            var response = new
+                            {
+                                action = "deleteCustomer",
+                                success = ok,
+                                message = ok ? "Deleted successfully" : "Cannot delete"
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+
                     case "searchSuppliers":
                         {
                             var payload = req.Payload as JObject;
@@ -1749,7 +1863,7 @@ namespace DhanSutra
                             string fy = GetFinancialYear();   // EX: "24-25"
                             string padded = nextNum.ToString("D5"); // 00001, 00002
 
-                            string invoiceNo = $"PINV-{fy}/{padded}";
+                            string invoiceNo = $"PINV-{fy}-{padded}";
 
                             var response = new
                             {
@@ -1769,7 +1883,7 @@ namespace DhanSutra
                             string fy = GetFinancialYear();   // EX: "24-25"
                             string padded = nextNum.ToString("D5"); // 00001, 00002
 
-                            string invoiceNo = $"SINV-{fy}/{padded}";
+                            string invoiceNo = $"SINV-{fy}-{padded}";
 
                             var response = new
                             {
@@ -2001,6 +2115,28 @@ namespace DhanSutra
 
                             break;
                         }
+                    case "GetSalesInvoiceNumbersByDate":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string date = payload["Date"]?.ToString() ?? "";
+
+                            // Call DB
+                            var list = db.GetSalesInvoiceNumbersByDate(date);
+                            var response = new
+                            {
+                                action = "GetSalesInvoiceNumbersByDateResponse",
+                                data = list
+                            };
+
+                            webView.CoreWebView2
+                                .PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+
+                            break;
+                            
+                        }
+
                     case "CanEditPurchaseInvoice":
                         {
                             var payload = req.Payload as JObject;
@@ -2241,6 +2377,214 @@ namespace DhanSutra
                                 };
                                 
                             }
+                            break;
+                        }
+                    case "getTrialBalance":
+                        {
+                            var data = db.GetTrialBalance();
+
+                            var response = new
+                            {
+                                action = "getTrialBalanceResult",
+                                success = true,
+                                rows = data
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    case "getLedgerReport":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long accountId = payload.Value<long>("AccountId");
+                            string from = payload.Value<string>("From") ?? DateTime.UtcNow.ToString("yyyy-MM-01");
+                            string to = payload.Value<string>("To") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+
+                            var report = db.GetLedgerReport(accountId, from, to);
+
+                            var response = new
+                            {
+                                action = "getLedgerReportResult",
+                                success = true,
+                                report = report
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    
+
+
+                    case "fetchCoA":
+                        {
+                            var rows = db.FetchAccounts();
+
+                            var response = new
+                            {
+                                action = "fetchCoAResult",
+                                success = true,
+                                rows = rows
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    case "createAccount":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            var dto = payload.ToObject<AccountDto>();
+                            long id = db.CreateAccount(dto);
+
+                            var response = new
+                            {
+                                action = "createAccountResult",
+                                success = true,
+                                id = id
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    case "getProfitLoss":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string from = payload.Value<string>("From");
+                            string to = payload.Value<string>("To");
+
+                            var pl = db.GetProfitAndLoss(from, to);
+
+                            var response = new
+                            {
+                                action = "getProfitLossResult",
+                                success = true,
+                                report = pl
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    case "GetStockSummary":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string asOf = payload.Value<string>("AsOf") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+
+                            var stockSvc = new StockValuationService();
+                            var summary = stockSvc.GetStockSummary(asOf);
+
+                            var response = new
+                            {
+                                action = "StockSummaryResult",
+                                success = true,
+                                data = summary
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+
+                    case "getBalanceSheet":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string asOf = payload.Value<string>("AsOf");
+
+                            var bs = db.GetBalanceSheet(asOf);
+
+                            var response = new
+                            {
+                                action = "getBalanceSheetResult",
+                                success = true,
+                                report = bs
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    case "getFIFOValuation":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string asOf = payload.Value<string>("AsOf") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+                            string from = payload.Value<string>("From"); // optional
+                            string to = payload.Value<string>("To") ?? asOf;
+
+                            var svc = new StockValuationService();
+                            var rows = svc.CalculateStockValuationFIFO(asOf, from, to);
+
+                            var response = new
+                            {
+                                action = "getFIFOValuationResult",
+                                success = true,
+                                data = rows
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+
+                    case "getFIFOTotals":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string from = payload.Value<string>("From");
+                            string to = payload.Value<string>("To") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+
+                            var svc = new StockValuationService();
+                            var totals = svc.ComputeTotalsFIFO(from, to);
+
+                            var response = new
+                            {
+                                action = "getFIFOTotalsResult",
+                                success = true,
+                                closingStock = totals.ClosingStockTotal,
+                                cogs = totals.PeriodCogsTotal
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+
+                    case "updateAccount":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            var dto = payload.ToObject<AccountDto>();
+                            db.UpdateAccount(dto);
+
+                            var response = new
+                            {
+                                action = "updateAccountResult",
+                                success = true
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    case "deleteAccount":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long id = payload.Value<long>("AccountId");
+                            db.DeleteAccount(id);
+
+                            var response = new
+                            {
+                                action = "deleteAccountResult",
+                                success = true
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
 

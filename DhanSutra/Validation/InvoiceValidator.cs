@@ -42,7 +42,7 @@ namespace DhanSutra.Validation
             // -----------------------------
             // 2. Customer State (Required)
             // -----------------------------
-            if (string.IsNullOrWhiteSpace(invoice.Customer.State))
+            if (string.IsNullOrWhiteSpace(invoice.Customer.BillingState))
             {
                 errors.Add(new ValidationError("customerState", "Customer state is required."));
             }
