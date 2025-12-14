@@ -23,6 +23,7 @@ using System.Threading.Tasks;
         public string SupplierState { get; set; }
 
         // Totals
+        public decimal SubTotalAmount { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal TotalTax { get; set; }
         public decimal RoundOff { get; set; }

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\SQLite.3.13.0\build\net45\SQLite.props" Condition="Exists('..\packages\SQLite.3.13.0\build\net45\SQLite.props')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
@@ -294,6 +294,7 @@
     <Compile Include="Models\SalesReturnDto.cs" />
     <Compile Include="Models\SalesReturnItemDetailDto.cs" />
     <Compile Include="Models\SaveSalesReturnResult.cs" />
+    <Compile Include="Models\SupplierDraftDto.cs" />
     <Compile Include="Models\TrialBalanceRowDto.cs" />
     <Compile Include="Pdf\CompanyProfilePdfDto.cs" />
     <Compile Include="Pdf\PurchaseInvoiceDocument.cs" />
@@ -323,7 +324,6 @@
       <DependentUpon>Resources.resx</DependentUpon>
       <DesignTime>True</DesignTime>
     </Compile>
-    <None Include=".vs\DhanSutra.csproj.dtbcache.json" />
     <None Include="billing1.db" />
     <None Include="bin\Debug\DhanSutra.exe.config" />
     <None Include="DhanSutraData\billing.db" />
@@ -347,6 +347,7 @@
     <Content Include="bin\Debug\DhanSutra.pdb" />
   </ItemGroup>
   <ItemGroup>
+    <Folder Include=".vs\" />
     <Folder Include="bin\Release\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

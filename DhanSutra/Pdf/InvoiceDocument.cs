@@ -289,14 +289,14 @@ namespace DhanSutra.Pdf
                         columns.RelativeColumn(1);   // Rate
                         columns.RelativeColumn(1);   // Disc %
                         columns.RelativeColumn(1);   // Subtotal
-                        columns.RelativeColumn(1);   // GST %
-                        columns.RelativeColumn(1);   // GST Amt
-                        columns.RelativeColumn(1);   // CGST %
-                        columns.RelativeColumn(1);   // CGST Amt
-                        columns.RelativeColumn(1);   // SGST %
-                        columns.RelativeColumn(1);   // SGST Amt
-                        columns.RelativeColumn(1);   // IGST %
-                        columns.RelativeColumn(1);   // IGST Amt
+                        //columns.RelativeColumn(1);   // GST %
+                        //columns.RelativeColumn(1);   // GST Amt
+                        //columns.RelativeColumn(1);   // CGST %
+                        //columns.RelativeColumn(1);   // CGST Amt
+                        //columns.RelativeColumn(1);   // SGST %
+                        //columns.RelativeColumn(1);   // SGST Amt
+                        //columns.RelativeColumn(1);   // IGST %
+                        //columns.RelativeColumn(1);   // IGST Amt
                         columns.RelativeColumn(1);   // Total
                     });
 
@@ -309,14 +309,14 @@ namespace DhanSutra.Pdf
                     table.Cell().Element(CellStyle).Text("Rate").SemiBold();
                     table.Cell().Element(CellStyle).Text("Disc %").SemiBold();
                     table.Cell().Element(CellStyle).Text("SubTotal").SemiBold();
-                    table.Cell().Element(CellStyle).Text("GST %").SemiBold();
-                    table.Cell().Element(CellStyle).Text("GST Amt").SemiBold();
-                    table.Cell().Element(CellStyle).Text("CGST %").SemiBold();
-                    table.Cell().Element(CellStyle).Text("CGST Amt").SemiBold();
-                    table.Cell().Element(CellStyle).Text("SGST %").SemiBold();
-                    table.Cell().Element(CellStyle).Text("SGST Amt").SemiBold();
-                    table.Cell().Element(CellStyle).Text("IGST %").SemiBold();
-                    table.Cell().Element(CellStyle).Text("IGST Amt").SemiBold();
+                    //table.Cell().Element(CellStyle).Text("GST %").SemiBold();
+                    //table.Cell().Element(CellStyle).Text("GST Amt").SemiBold();
+                    //table.Cell().Element(CellStyle).Text("CGST %").SemiBold();
+                    //table.Cell().Element(CellStyle).Text("CGST Amt").SemiBold();
+                    //table.Cell().Element(CellStyle).Text("SGST %").SemiBold();
+                    //table.Cell().Element(CellStyle).Text("SGST Amt").SemiBold();
+                    //table.Cell().Element(CellStyle).Text("IGST %").SemiBold();
+                    //table.Cell().Element(CellStyle).Text("IGST Amt").SemiBold();
                     table.Cell().Element(CellStyle).Text("Total").SemiBold();
 
                     // Rows
@@ -332,14 +332,14 @@ namespace DhanSutra.Pdf
                         table.Cell().Element(CellStyle).Text(it.Rate.ToString("N2"));
                         table.Cell().Element(CellStyle).Text(it.DiscountPercent.ToString("N2"));
                         table.Cell().Element(CellStyle).Text(it.LineSubTotal.ToString("N2"));
-                        table.Cell().Element(CellStyle).Text(it.GstPercent.ToString("N2"));
-                        table.Cell().Element(CellStyle).Text(it.GstValue.ToString("N2"));
-                        table.Cell().Element(CellStyle).Text(it.CgstPercent.ToString("N2"));
-                        table.Cell().Element(CellStyle).Text(it.CgstValue.ToString("N2"));
-                        table.Cell().Element(CellStyle).Text(it.SgstPercent.ToString("N2"));
-                        table.Cell().Element(CellStyle).Text(it.SgstValue.ToString("N2"));
-                        table.Cell().Element(CellStyle).Text(it.IgstPercent.ToString("N2"));
-                        table.Cell().Element(CellStyle).Text(it.IgstValue.ToString("N2"));
+                        //table.Cell().Element(CellStyle).Text(it.GstPercent.ToString("N2"));
+                        //table.Cell().Element(CellStyle).Text(it.GstValue.ToString("N2"));
+                        //table.Cell().Element(CellStyle).Text(it.CgstPercent.ToString("N2"));
+                        //table.Cell().Element(CellStyle).Text(it.CgstValue.ToString("N2"));
+                        //table.Cell().Element(CellStyle).Text(it.SgstPercent.ToString("N2"));
+                        //table.Cell().Element(CellStyle).Text(it.SgstValue.ToString("N2"));
+                        //table.Cell().Element(CellStyle).Text(it.IgstPercent.ToString("N2"));
+                        //table.Cell().Element(CellStyle).Text(it.IgstValue.ToString("N2"));
                         table.Cell().Element(CellStyle).Text(it.LineTotal.ToString("N2"));
                     }
                 });

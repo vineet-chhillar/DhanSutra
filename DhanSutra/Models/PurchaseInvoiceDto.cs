@@ -13,7 +13,8 @@ namespace DhanSutra.Models
         public long InvoiceNum { get; set; }
         public string InvoiceDate { get; set; } // "yyyy-MM-dd"
         public long SupplierId { get; set; }
-
+        public SupplierDraftDto SupplierDraft { get; set; }
+        public decimal SubTotalAmount { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal TotalTax { get; set; }
         public decimal RoundOff { get; set; }

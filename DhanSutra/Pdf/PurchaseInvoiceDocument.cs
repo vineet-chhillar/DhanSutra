@@ -180,7 +180,7 @@ namespace DhanSutra.Pdf
                 col.Item().Row(r =>
                 {
                     r.RelativeItem().Text("Subtotal:");
-                    r.AutoItem().Text(Invoice?.TotalAmount.ToString("0.00") ?? "0.00");
+                    r.AutoItem().Text(Invoice?.SubTotalAmount.ToString("0.00") ?? "0.00");
                 });
 
                 col.Item().Row(r =>

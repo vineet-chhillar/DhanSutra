@@ -66,7 +66,7 @@ namespace DhanSutra
 
                 return connection.Query<ItemForInvoice>("select i.Id, i.Name, i.ItemCode, d.batchno, i.hsncode, e.salesprice , u.unitname, g.gstpercent from purchaseitem d" +
                     " inner join item i on i.id=d.itemid LEFT JOIN UnitMaster u ON i.UnitId = u.Id LEFT JOIN GstMaster g ON i.GstId = g.Id " +
-                    "                   left join purchaseitemdetails e on e.purchaseitemid=d.purchaseid order by i.id;");
+                    "                   left join purchaseitemdetails e on e.purchaseitemid=d.purchaseitemid order by i.id;");
         }
         public IEnumerable<ItemForPurchaseInvoice> GetItemsForPurchaseInvoice()
         {
@@ -1364,6 +1364,109 @@ reorderlevel=@reorderlevel
                 //return false;
             }
         }
+        private long GetOrCreateCustomer(
+    SQLiteConnection conn,
+    CustomerDto c,
+    string createdBy,
+    string defaultState
+)
+        {
+            if (c == null)
+                throw new Exception("Customer details missing");
+
+            if (string.IsNullOrWhiteSpace(c.CustomerName))
+                throw new Exception("Customer name is required");
+
+            string nameKey = c.CustomerName.Trim().ToLower();
+            string mobile = (c.Mobile ?? "").Trim();
+            bool hasMobile = mobile.Length > 0;
+
+            // -------- DUPLICATE CHECK (ONLY IF MOBILE EXISTS) --------
+            if (hasMobile)
+            {
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT CustomerId
+                FROM Customers
+                WHERE LOWER(TRIM(CustomerName)) = @name
+                  AND TRIM(Mobile) = @mobile
+                LIMIT 1";
+
+                    cmd.Parameters.AddWithValue("@name", nameKey);
+                    cmd.Parameters.AddWithValue("@mobile", mobile);
+
+                    var existing = cmd.ExecuteScalar();
+                    if (existing != null && existing != DBNull.Value)
+                        return Convert.ToInt64(existing);
+                }
+            }
+
+            // -------- INSERT --------
+            try
+            {
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                INSERT INTO Customers
+                (CustomerName, Mobile, BillingState, CreatedBy, CreatedAt)
+                VALUES
+                (@name, @mobile, @state, @by, datetime('now'))";
+
+                    cmd.Parameters.AddWithValue("@name", c.CustomerName.Trim());
+                    cmd.Parameters.AddWithValue("@mobile", hasMobile ? mobile : null);
+                    cmd.Parameters.AddWithValue("@state", c.BillingState ?? defaultState);
+                    cmd.Parameters.AddWithValue("@by", createdBy ?? "system");
+
+                    cmd.ExecuteNonQuery();
+                    return conn.LastInsertRowId;
+                }
+            }
+            catch (SQLiteException ex) when (
+                ex.ResultCode == SQLiteErrorCode.Constraint && hasMobile
+            )
+            {
+                // -------- SAFETY RETRY --------
+                using (var retry = conn.CreateCommand())
+                {
+                    retry.CommandText = @"
+                SELECT CustomerId
+                FROM Customers
+                WHERE LOWER(TRIM(CustomerName)) = @name
+                  AND TRIM(Mobile) = @mobile
+                LIMIT 1";
+
+                    retry.Parameters.AddWithValue("@name", nameKey);
+                    retry.Parameters.AddWithValue("@mobile", mobile);
+
+                    var id = retry.ExecuteScalar();
+                    if (id != null && id != DBNull.Value)
+                        return Convert.ToInt64(id);
+                }
+            }
+
+            throw new Exception("Failed to create or retrieve customer");
+        }
+        private string GetCompanyState(SQLiteConnection conn, SQLiteTransaction tx)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+
+                cmd.CommandText = @"
+            SELECT State
+            FROM CompanyProfile
+            LIMIT 1";
+
+                var state = cmd.ExecuteScalar()?.ToString();
+
+                if (string.IsNullOrWhiteSpace(state))
+                    throw new Exception("Company state not configured");
+
+                return state.Trim();
+            }
+        }
+
         public (long invoiceId, string invoiceNo) CreateInvoice(CreateInvoiceDto dto)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -1374,15 +1477,33 @@ reorderlevel=@reorderlevel
                 {
                     try
                     {
-                       
 
-                        if (dto.Customer != null)
+
+                        long customerId;
+
+                        if (dto.Customer == null)
                         {
-                            var cust = dto.Customer;
-                           
+                            throw new Exception("Customer information is required");
                         }
 
-                        
+                        if (dto.Customer.CustomerId > 0)
+                        {
+                            // Existing customer selected from dropdown
+                            customerId = dto.Customer.CustomerId;
+                        }
+                        else
+                        {
+                            // New customer → create or reuse
+                            customerId = GetOrCreateCustomer(
+                                conn,
+                                dto.Customer,
+                                dto.CreatedBy,
+                                GetCompanyState(conn, tx)   // or pass company.State if already loaded
+                            );
+                        }
+
+
+
                         long invoiceId;
                         using (var cmd = conn.CreateCommand())
                         {
@@ -1413,7 +1534,7 @@ reorderlevel=@reorderlevel
                             cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate);
                             cmd.Parameters.AddWithValue("@CompanyProfileId", dto.CompanyId);
 
-                            cmd.Parameters.AddWithValue("@CustomerId", dto.Customer.CustomerId);
+                            cmd.Parameters.AddWithValue("@CustomerId", customerId);
                            
 
                             cmd.Parameters.AddWithValue("@SubTotal", dto.SubTotal);
@@ -1513,7 +1634,9 @@ reorderlevel=@reorderlevel
                             if (dto.Customer != null)
                             {
                                 // create/get customer party account
-                                custAccountId = GetOrCreatePartyAccount(conn, tx, "Customer", dto.Customer.CustomerId, dto.Customer.CustomerName);
+                                custAccountId = GetOrCreatePartyAccount(conn, tx, "Customer", customerId, null);
+
+                                
                             }
                             else
                             {
@@ -2552,8 +2675,8 @@ WHERE inv.InvoiceNo = @InvoiceNo;
             var errors = new List<string>();
 
             // Supplier required
-            if (inv.SupplierId <= 0)
-                errors.Add("Supplier is required.");
+            //if (inv.SupplierId <= 0)
+               // errors.Add("Supplier is required.");
 
             // Invoice number required
             if (string.IsNullOrWhiteSpace(inv.InvoiceNo))
@@ -3576,6 +3699,93 @@ State=@state
                 }
             }
         }
+        private long GetOrCreateSupplier(
+     SQLiteConnection conn,
+     SupplierDraftDto s,
+     string createdBy
+ )
+        {
+            if (s == null)
+                throw new Exception("Supplier details missing");
+
+            if (string.IsNullOrWhiteSpace(s.SupplierName))
+                throw new Exception("Supplier name is required");
+
+            // ---------- NORMALIZE ----------
+            string nameKey = s.SupplierName.Trim().ToLower();
+            string mobile = (s.Mobile ?? "").Trim();
+            bool hasMobile = mobile.Length > 0;
+
+            // ---------- DUPLICATE CHECK (ONLY IF MOBILE EXISTS) ----------
+            if (hasMobile)
+            {
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT SupplierId
+                FROM Suppliers
+                WHERE LOWER(TRIM(SupplierName)) = @name
+                  AND TRIM(Mobile) = @mobile
+                LIMIT 1";
+
+                    cmd.Parameters.AddWithValue("@name", nameKey);
+                    cmd.Parameters.AddWithValue("@mobile", mobile);
+
+                    var existingId = cmd.ExecuteScalar();
+                    if (existingId != null && existingId != DBNull.Value)
+                        return Convert.ToInt64(existingId);
+                }
+            }
+
+            // ---------- INSERT ----------
+            try
+            {
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                INSERT INTO Suppliers
+                (SupplierName, Mobile, GSTIN, CreatedBy, CreatedAt)
+                VALUES
+                (@nameOrig, @mobile, @gstin, @createdBy, datetime('now'))";
+
+                    cmd.Parameters.AddWithValue("@nameOrig", s.SupplierName.Trim());
+                    cmd.Parameters.AddWithValue("@mobile", hasMobile ? mobile : null);
+                    cmd.Parameters.AddWithValue("@gstin", s.GSTIN?.Trim());
+                    cmd.Parameters.AddWithValue("@createdBy", createdBy ?? "system");
+
+                    cmd.ExecuteNonQuery();
+                    return conn.LastInsertRowId;   // ✅ NEW supplier
+                }
+            }
+            catch (SQLiteException ex) when (
+                ex.ResultCode == SQLiteErrorCode.Constraint && hasMobile
+            )
+            {
+                // ---------- SAFETY FALLBACK ----------
+                using (var retry = conn.CreateCommand())
+                {
+                    retry.CommandText = @"
+                SELECT SupplierId
+                FROM Suppliers
+                WHERE LOWER(TRIM(SupplierName)) = @name
+                  AND TRIM(Mobile) = @mobile
+                LIMIT 1";
+
+                    retry.Parameters.AddWithValue("@name", nameKey);
+                    retry.Parameters.AddWithValue("@mobile", mobile);
+
+                    var id = retry.ExecuteScalar();
+                    if (id != null && id != DBNull.Value)
+                        return Convert.ToInt64(id);
+                }
+            }
+
+            // ---------- SHOULD NEVER REACH HERE ----------
+            throw new Exception("Failed to create or retrieve supplier");
+        }
+
+
+
         public (long purchaseId, string invoiceNo) SavePurchaseInvoice(PurchaseInvoiceDto dto)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -3585,6 +3795,23 @@ State=@state
                 {
                     try
                     {
+                        //insert supplier if new
+                        long supplierId;
+
+                        if (dto.SupplierId > 0)
+                        {
+                            supplierId = dto.SupplierId;
+                        }
+                        else
+                        {
+                            supplierId = GetOrCreateSupplier(
+                                conn,
+                                dto.SupplierDraft,
+                                dto.CreatedBy
+                            );
+                        }
+
+
                         // 1) Insert header
                         using (var cmd = conn.CreateCommand())
                         {
@@ -3606,7 +3833,7 @@ SELECT last_insert_rowid();
                         );
 
 
-                            cmd.Parameters.AddWithValue("@SupplierId", dto.SupplierId);
+                            cmd.Parameters.AddWithValue("@SupplierId", supplierId);
                             cmd.Parameters.AddWithValue("@TotalAmount", dto.TotalAmount);
                             cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
                             cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
@@ -3928,6 +4155,7 @@ WHERE PurchaseId = @PurchaseId";
                         dto.InvoiceNum = Convert.ToInt64(rd["InvoiceNum"]);
                         dto.InvoiceDate = rd["InvoiceDate"]?.ToString();
                         dto.SupplierId = Convert.ToInt64(rd["SupplierId"]);
+                        dto.SubTotalAmount = Convert.ToDecimal(rd["TotalAmount"]) - Convert.ToDecimal(rd["TotalTax"]);
                         dto.TotalAmount = Convert.ToDecimal(rd["TotalAmount"]);
                         dto.TotalTax = Convert.ToDecimal(rd["TotalTax"]);
                         dto.RoundOff = Convert.ToDecimal(rd["RoundOff"]);
@@ -4721,7 +4949,7 @@ ORDER BY pi.PurchaseItemId
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
-
+                string accountName = null;
                 // Account name
                 using (var cmd = conn.CreateCommand())
                 {
@@ -4729,6 +4957,62 @@ ORDER BY pi.PurchaseItemId
                     cmd.Parameters.AddWithValue("@aid", accountId);
                     var o = cmd.ExecuteScalar();
                     report.AccountName = o == null ? $"Account {accountId}" : o.ToString();
+
+
+                    accountName = o?.ToString();
+                    bool isCustomerAccount =
+    !string.IsNullOrWhiteSpace(accountName) &&
+    accountName.StartsWith("Supplier", StringComparison.OrdinalIgnoreCase);
+                    if (isCustomerAccount)
+                    {
+                        cmd.CommandText = @"
+SELECT accountname,suppliers.suppliername,
+  CAST(SUBSTR(accountname, INSTR(accountname, ' ') + 1) AS INTEGER) AS supplier_no
+FROM accounts  
+left join suppliers on suppliers.supplierid=supplier_no 
+where accountid=@aid;
+";
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())   // ✅ ONLY ONCE
+                            {
+                                report.AccountName = reader["accountname"]?.ToString();
+                                report.Cust_Supp_Name = reader["suppliername"]?.ToString();
+                                report.Cust_Supp_No = reader["supplier_no"] != DBNull.Value
+                                    ? Convert.ToInt32(reader["supplier_no"])
+                                    : 0;
+                            }
+                        }
+
+                        report.AccountName = $"Account of Supplier - {report.Cust_Supp_Name}";
+                    }
+                    bool isSupplierAccount =
+    !string.IsNullOrWhiteSpace(accountName) &&
+    accountName.StartsWith("Customer", StringComparison.OrdinalIgnoreCase);
+                    if (isSupplierAccount)
+                    {
+                        cmd.CommandText = @"
+SELECT accountname,customers.customername,
+  CAST(SUBSTR(accountname, INSTR(accountname, ' ') + 1) AS INTEGER) AS customer_no
+FROM accounts  
+left join customers on customers.customerid=customer_no 
+where accountid=@aid;
+";
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())   // ✅ ONLY ONCE
+                            {
+                                report.AccountName = reader["accountname"]?.ToString();
+                                report.Cust_Supp_Name = reader["customername"]?.ToString();
+                                report.Cust_Supp_No = reader["customer_no"] != DBNull.Value
+                                    ? Convert.ToInt32(reader["customer_no"])
+                                    : 0;
+                            }
+                        }
+
+                        report.AccountName =  $"Account of Customer - {report.Cust_Supp_Name}";
+                    }
+
                 }
 
                 // Opening balance (debit - credit before from date)
