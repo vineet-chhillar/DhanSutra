@@ -13,6 +13,7 @@ namespace DhanSutra.Models
         public string InvoiceNo { get; set; }
         public long InvoiceNum { get; set; }
         public string InvoiceDate { get; set; }
+        public string RefundMode { get; set; } // AUTO / CASH / BANK / ADJUST
 
         public decimal SubTotal { get; set; }
         public decimal TotalTax { get; set; }

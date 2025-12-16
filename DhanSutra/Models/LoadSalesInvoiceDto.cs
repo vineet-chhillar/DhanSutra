@@ -17,7 +17,8 @@ namespace DhanSutra.Models
         public string CustomerName { get; set; }
         public string CustomerPhone { get; set; }
         public string CustomerState { get; set; }
-
+        public string RefundMode { get; set; }
+        
         public decimal SubTotal { get; set; }
         public decimal TotalTax { get; set; }
         public decimal RoundOff { get; set; }

@@ -42,7 +42,7 @@ namespace DhanSutra.Pdf
         public int InvoiceNum { get; set; }
         public string InvoiceDate { get; set; }
         public int CompanyProfileId { get; set; }
-
+        public string PaymentMode { get; set; }  // CASH / BANK / CREDIT
         public int CustomerId { get; set; }
         public string CustomerName { get; set; }
         public string CustomerPhone { get; set; }
@@ -179,6 +179,9 @@ namespace DhanSutra.Pdf
 
                             table.Cell().Element(x => x.Text($"Invoice Date:"));
                             table.Cell().Element(x => x.Text(FormatDate(_invoice.InvoiceDate)));
+
+                            table.Cell().Element(x => x.Text($"Payment Mode:"));
+                            table.Cell().Element(x => x.Text(FormatDate(_invoice.PaymentMode)));
 
                             table.Cell().Element(x => x.Text($"Place of Supply:"));
                             table.Cell().Element(x => x.Text(_company.State));

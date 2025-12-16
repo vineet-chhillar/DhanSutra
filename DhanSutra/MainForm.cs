@@ -1066,6 +1066,42 @@ namespace DhanSutra
 
                             break;
                         }
+                    case "getPurchaseNetRate":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "getPurchaseNetRateResult",
+                                        success = false,
+                                        message = "Invalid payload"
+                                    })
+                                );
+                                break;
+                            }
+
+                            long itemId = payload.Value<long>("ItemId");
+                            string batchNo = payload.Value<string>("BatchNo");
+                            int lineindex = payload["LineIndex"]?.ToObject<int>() ?? 0;
+                            decimal? netRate = db.GetPurchaseNetRate(itemId, batchNo);
+
+                            var response = new
+                            {
+                                action = "getPurchaseNetRateResult",
+                                success = true,
+                                lineIndex = lineindex,
+                                netRate = netRate   // null if not found
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+
+                            break;
+                        }
+
                     case "GetItemBalanceBatchWise":
                         {
                             try
@@ -1125,6 +1161,7 @@ namespace DhanSutra
                                 InvoiceNum = invoice.InvoiceNum,
                                 InvoiceDate = invoice.InvoiceDate,
                                 CompanyProfileId = invoice.CompanyProfileId,
+                                PaymentMode=invoice.PaymentMode,
                                 CustomerId = invoice.CustomerId,
                                 CustomerName = invoice.CustomerName,
                                 CustomerPhone = invoice.CustomerPhone,

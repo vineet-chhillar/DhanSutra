@@ -12,6 +12,7 @@ namespace DhanSutra.Models
         public long InvoiceNum { get; set; }
         public string InvoiceDate { get; set; }
         public int CompanyId { get; set; }
+        public string PaymentMode { get; set; }  // CASH / BANK / CREDIT
 
         public CustomerDto Customer { get; set; }
 
