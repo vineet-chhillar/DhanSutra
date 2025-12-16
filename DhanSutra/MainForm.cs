@@ -2497,8 +2497,28 @@ namespace DhanSutra
 
                             string asOf = payload.Value<string>("AsOf");
 
-                            var bs = db.GetBalanceSheet(asOf);
+                            // -----------------------------------------
+                            // STEP 1: Calculate Profit & Loss up to AsOf
+                            // -----------------------------------------
+                            // NOTE: fromDate should be your financial year start
+                            string financialYearStart = "2025-04-01"; // adjust as needed
 
+                            var pl = db.GetProfitAndLoss(financialYearStart, asOf);
+
+                            // Net profit as signed value
+                            decimal netProfit =
+                                pl.NetProfit > 0
+                                    ? pl.NetProfit
+                                    : -pl.NetLoss;
+
+                            // -----------------------------------------
+                            // STEP 2: Generate Balance Sheet USING P&L RESULT
+                            // -----------------------------------------
+                            var bs = db.GetBalanceSheet(asOf, netProfit);
+
+                            // -----------------------------------------
+                            // STEP 3: Send response
+                            // -----------------------------------------
                             var response = new
                             {
                                 action = "getBalanceSheetResult",
@@ -2506,9 +2526,13 @@ namespace DhanSutra
                                 report = bs
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+
                             break;
                         }
+
                     case "getFIFOValuation":
                         {
                             var payload = req.Payload as JObject;

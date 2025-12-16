@@ -6336,6 +6336,10 @@ WHERE InvoiceNum = @id;
                             }
                             else if (type == "Expense")
                             {
+                                // SKIP purchase-related accounts
+                                if (accName == "Purchase" || accName == "Purchase Return")
+                                    continue;
+
                                 report.Expenses.Add(new ProfitLossRow
                                 {
                                     AccountName = accName,
@@ -6354,20 +6358,46 @@ WHERE InvoiceNum = @id;
             // -----------------------------------------------
             // ⭐ ADD FIFO COGS HERE (Cost of Goods Sold)
             // -----------------------------------------------
+            // -----------------------------------------------
+            // ⭐ ADD FIFO COGS HERE (Cost of Goods Sold)
+            // -----------------------------------------------
             var stockSvc = new StockValuationService();
             var totals = stockSvc.ComputeTotalsFIFO(from, to);
 
-            decimal cogs = totals.PeriodCogsTotal;
+            decimal issuedCogs = totals.PeriodCogsTotal;
+            decimal closingStock = totals.ClosingStockTotal;
 
-            // Add COGS as an Expense row
+            // Show issued COGS
             report.Expenses.Add(new ProfitLossRow
             {
                 AccountName = "Cost of Goods Sold (FIFO)",
-                Debit = cogs,
+                Debit = issuedCogs,
                 Credit = 0
             });
+            report.TotalExpenses += issuedCogs;
 
-            report.TotalExpenses += cogs;
+            // Show closing stock as reduction of expense
+            //report.Expenses.Add(new ProfitLossRow
+            //{
+            //    AccountName = "Less: Closing Stock",
+            //    Debit = 0,
+            //    Credit = closingStock
+            //});
+            //report.TotalExpenses -= closingStock;
+
+
+            //if (cogs > 0)
+            //{
+            //    report.Expenses.Add(new ProfitLossRow
+            //    {
+            //        AccountName = "Cost of Goods Sold (FIFO)",
+            //        Debit = cogs,
+            //        Credit = 0
+            //    });
+
+            //    report.TotalExpenses += cogs;
+            //}
+
 
             // -----------------------------------------------
             // ⭐ NET PROFIT = TOTAL INCOME – TOTAL EXPENSES
@@ -6388,7 +6418,7 @@ WHERE InvoiceNum = @id;
             return report;
         }
 
-        public BalanceSheetReportDto GetBalanceSheet(string asOf)
+        public BalanceSheetReportDto GetBalanceSheet(string asOf, decimal netProfit)
         {
             var report = new BalanceSheetReportDto { AsOf = asOf };
 
@@ -6396,21 +6426,42 @@ WHERE InvoiceNum = @id;
             {
                 conn.Open();
 
+                // -------------------------------------------------
+                // STEP 1: FIFO Closing Stock (valuation only)
+                // -------------------------------------------------
+                var stockSvc = new StockValuationService();
+                var fifoRows = stockSvc.CalculateStockValuationFIFO(asOf);
+                decimal closingStockValue = fifoRows.Sum(r => r.ClosingValue);
+
+                // -------------------------------------------------
+                // STEP 2: Accumulators
+                // -------------------------------------------------
+                decimal assetDebitTotal = 0;
+                decimal assetCreditTotal = 0;
+
+                decimal liabilityDebitTotal = 0;
+                decimal liabilityCreditTotal = 0;
+
+                decimal capitalDebitTotal = 0;
+                decimal capitalCreditTotal = 0;
+
+                // -------------------------------------------------
+                // STEP 3: Read Ledger Balances
+                // -------------------------------------------------
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-                SELECT 
-                    a.AccountId,
-                    a.AccountName,
-                    a.AccountType,
-                    IFNULL(SUM(jl.Debit), 0) -
-                    IFNULL(SUM(jl.Credit), 0) AS Balance
-                FROM Accounts a
-                LEFT JOIN JournalLines jl ON jl.AccountId = a.AccountId
-                LEFT JOIN JournalEntries je ON je.JournalId = jl.JournalId
-                WHERE Date(je.Date) <= Date(@asOf)
-                GROUP BY a.AccountId, a.AccountName, a.AccountType;
-            ";
+            SELECT 
+                a.AccountName,
+                a.AccountType,
+                IFNULL(SUM(jl.Debit), 0) AS TotalDebit,
+                IFNULL(SUM(jl.Credit), 0) AS TotalCredit
+            FROM Accounts a
+            LEFT JOIN JournalLines jl ON jl.AccountId = a.AccountId
+            LEFT JOIN JournalEntries je ON je.JournalId = jl.JournalId
+            WHERE Date(je.Date) <= Date(@asOf)
+            GROUP BY a.AccountName, a.AccountType;
+        ";
 
                     cmd.Parameters.AddWithValue("@asOf", asOf);
 
@@ -6418,68 +6469,124 @@ WHERE InvoiceNum = @id;
                     {
                         while (rd.Read())
                         {
-                            string name = rd.GetString(1);
-                            string type = rd.GetString(2);
-                            decimal balance = rd.GetDecimal(3);
+                            string name = rd.GetString(0);
+                            string type = rd.GetString(1);
+                            decimal debit = rd.GetDecimal(2);
+                            decimal credit = rd.GetDecimal(3);
 
+                            // ---------------- ASSETS ----------------
                             if (type == "Asset")
                             {
-                                report.Assets.Rows.Add(new ProfitLossRow
+                                decimal bal = debit - credit;
+
+                                if (bal != 0)
                                 {
-                                    AccountName = name,
-                                    Debit = balance >= 0 ? balance : 0,
-                                    Credit = balance < 0 ? Math.Abs(balance) : 0
-                                });
-                                report.Assets.Total += balance;
+                                    report.Assets.Rows.Add(new ProfitLossRow
+                                    {
+                                        AccountName = name,
+                                        Debit = bal > 0 ? bal : 0,
+                                        Credit = bal < 0 ? Math.Abs(bal) : 0
+                                    });
+                                }
+
+                                if (bal > 0) assetDebitTotal += bal;
+                                else if (bal < 0) assetCreditTotal += Math.Abs(bal);
                             }
+
+                            // ---------------- LIABILITIES ----------------
                             else if (type == "Liability")
                             {
-                                report.Liabilities.Rows.Add(new ProfitLossRow
+                                decimal bal = credit - debit;
+
+                                if (bal != 0)
                                 {
-                                    AccountName = name,
-                                    Debit = balance < 0 ? Math.Abs(balance) : 0,
-                                    Credit = balance >= 0 ? balance : 0
-                                });
-                                report.Liabilities.Total += balance;
+                                    report.Liabilities.Rows.Add(new ProfitLossRow
+                                    {
+                                        AccountName = name,
+                                        Debit = bal < 0 ? Math.Abs(bal) : 0,
+                                        Credit = bal > 0 ? bal : 0
+                                    });
+                                }
+
+                                if (bal > 0) liabilityCreditTotal += bal;
+                                else if (bal < 0) liabilityDebitTotal += Math.Abs(bal);
                             }
+
+                            // ---------------- CAPITAL (ledger equity only) ----------------
                             else if (type == "Equity")
                             {
-                                report.Capital.Rows.Add(new ProfitLossRow
+                                decimal bal = credit - debit;
+
+                                if (bal != 0)
                                 {
-                                    AccountName = name,
-                                    Debit = balance < 0 ? Math.Abs(balance) : 0,
-                                    Credit = balance >= 0 ? balance : 0
-                                });
-                                report.Capital.Total += balance;
+                                    report.Capital.Rows.Add(new ProfitLossRow
+                                    {
+                                        AccountName = name,
+                                        Debit = bal < 0 ? Math.Abs(bal) : 0,
+                                        Credit = bal > 0 ? bal : 0
+                                    });
+                                }
+
+                                if (bal > 0) capitalCreditTotal += bal;
+                                else if (bal < 0) capitalDebitTotal += Math.Abs(bal);
                             }
                         }
                     }
                 }
+
+                // -------------------------------------------------
+                // STEP 4: Retained Earnings / Loss (FROM P&L ONLY)
+                // -------------------------------------------------
+                if (netProfit > 0)
+                {
+                    report.Capital.Rows.Add(new ProfitLossRow
+                    {
+                        AccountName = "Retained Earnings",
+                        Debit = 0,
+                        Credit = netProfit
+                    });
+
+                    capitalCreditTotal += netProfit;
+                }
+                else if (netProfit < 0)
+                {
+                    report.Capital.Rows.Add(new ProfitLossRow
+                    {
+                        AccountName = "Accumulated Loss",
+                        Debit = Math.Abs(netProfit),
+                        Credit = 0
+                    });
+
+                    capitalDebitTotal += Math.Abs(netProfit);
+                }
+
+                // -------------------------------------------------
+                // STEP 5: Closing Stock → Asset
+                // -------------------------------------------------
+                if (closingStockValue > 0)
+                {
+                    report.Assets.Rows.Add(new ProfitLossRow
+                    {
+                        AccountName = "Closing Stock (FIFO)",
+                        Debit = closingStockValue,
+                        Credit = 0
+                    });
+
+                    assetDebitTotal += closingStockValue;
+                }
+
+                // -------------------------------------------------
+                // STEP 6: Final Totals
+                // -------------------------------------------------
+                report.Assets.Total = assetDebitTotal; // debit-side total only
+                report.Liabilities.Total = liabilityCreditTotal - liabilityDebitTotal;
+                report.Capital.Total = capitalCreditTotal - capitalDebitTotal;
+
+                return report;
             }
-
-            // -----------------------------------------------------
-            // ⭐ ADD FIFO CLOSING STOCK (as an Asset)
-            // -----------------------------------------------------
-            var stockSvc = new StockValuationService();
-
-            // Get item-wise valuation as of the Balance Sheet date
-            var fifoRows = stockSvc.CalculateStockValuationFIFO(asOf);
-
-            decimal closingStockValue = fifoRows.Sum(r => r.ClosingValue);
-
-            // Add "Closing Stock" row under Assets
-            report.Assets.Rows.Add(new ProfitLossRow
-            {
-                AccountName = "Closing Stock (FIFO)",
-                Debit = closingStockValue,
-                Credit = 0
-            });
-
-            // Increase Assets Total
-            report.Assets.Total += closingStockValue;
-
-            return report;
         }
+
+
 
 
 
