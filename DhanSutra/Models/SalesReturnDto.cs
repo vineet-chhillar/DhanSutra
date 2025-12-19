@@ -22,7 +22,10 @@ namespace DhanSutra.Models
         public string Notes { get; set; }
 
         public string CreatedBy { get; set; }
-
+        public decimal PaidAmount { get; set; }
+        public decimal BalanceAmount { get; set; }
+        public string OriginalPaymentMode { get; set; }
+        public string PaidVia { get; set; }
         public List<SalesInvoiceItemDto> Items { get; set; }
     }
 }

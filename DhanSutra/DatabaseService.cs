@@ -15,6 +15,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -1516,14 +1517,6 @@ reorderlevel=@reorderlevel
                            
                         }
                         
-                        
-
-
-
-
-
-
-
                         long invoiceId;
                         using (var cmd = conn.CreateCommand())
                         {
@@ -1535,14 +1528,14 @@ reorderlevel=@reorderlevel
                             InvoiceDate, CompanyProfileId,PaymentMode,
                             CustomerId, 
                             SubTotal, TotalTax, TotalAmount, RoundOff,
-                            CreatedBy
+                            CreatedBy,PaidVia
                         )
                         VALUES (
                             @InvoiceNo, @InvoiceNum,
                             @InvoiceDate, @CompanyProfileId,@PaymentMode,
                             @CustomerId, 
                             @SubTotal, @TotalTax, @TotalAmount, @RoundOff,
-                            @CreatedBy
+                            @CreatedBy,@PaidVia
                         );
 
                         SELECT last_insert_rowid();
@@ -1566,7 +1559,8 @@ reorderlevel=@reorderlevel
                             cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
 
                             cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy);
-                            
+                            cmd.Parameters.AddWithValue("@PaidVia", dto.PaidVia);
+
                             invoiceId = (long)cmd.ExecuteScalar();
                         }
 
@@ -1648,6 +1642,9 @@ reorderlevel=@reorderlevel
                             ledgerEntry.Remarks = "Invoice Sale";
                             ledgerEntry.CreatedBy = dto.CreatedBy;
 
+
+                           
+
                             AddItemLedger(ledgerEntry, conn, tx);                            
                             DecreaseItemBalance(ledgerEntry, conn, tx);
                             DecreaseItemBalanceBatchWise(ledgerEntry, conn, tx);
@@ -1711,8 +1708,33 @@ reorderlevel=@reorderlevel
                                 invoiceId
                             );
 
+
+                            if (dto.PaymentMode != "CREDIT")
+                            {
+                                dto.PaidAmount = dto.TotalAmount;
+                            }
+
                             // ✅ 1) Debit Cash / Bank / Customer
-                            InsertJournalLine(conn, tx, jid, debitAccountId, total, 0);
+                            if (dto.PaidAmount > 0)
+                            {
+                                var CashOrBankAcc = GetOrCreateAccountByName(
+                                conn, tx, dto.PaidVia, "Income", "Credit");
+                                InsertJournalLine(conn, tx, jid, CashOrBankAcc, dto.PaidAmount, 0);
+                            }
+
+
+                            // ✅ Debit CUSTOMER only for CREDIT sales
+                            if (((dto.TotalAmount)-(dto.PaidAmount)) > 0)
+                            {
+                                if (dto.PaymentMode != "CREDIT")
+                                    throw new Exception("Balance amount is not allowed for non-credit sales.");
+
+                                if (dto.Customer == null || !customerId.HasValue || customerId.Value <= 0)
+                                    throw new Exception("Customer is mandatory for credit sales.");
+
+                                InsertJournalLine(conn, tx, jid, debitAccountId, ((dto.TotalAmount) - (dto.PaidAmount)), 0);
+                            }
+
 
                             // ✅ 2) Credit Sales A/c
                             if (subTotal != 0)
@@ -1734,6 +1756,17 @@ reorderlevel=@reorderlevel
 
                         }
 
+                        decimal totalAmount = dto.TotalAmount;
+                        decimal paidAmount = Math.Max(0, Math.Min(dto.PaidAmount, dto.TotalAmount));
+                        decimal balanceAmount = totalAmount - paidAmount;
+
+                        InsertSalesPaymentSummary(
+                            invoiceId,
+                            totalAmount,
+                            paidAmount,
+                            conn,
+                            tx
+                        );
 
 
                         tx.Commit();
@@ -3844,6 +3877,16 @@ State=@state
 
         public (long purchaseId, string invoiceNo) SavePurchaseInvoice(PurchaseInvoiceDto dto)
         {
+
+            if (dto.PaymentMode != "CREDIT")
+            {
+                dto.PaidAmount = dto.TotalAmount;
+            }
+
+            dto.PaidAmount = Math.Max(0, Math.Min(dto.PaidAmount, dto.TotalAmount));
+            dto.BalanceAmount = dto.TotalAmount - dto.PaidAmount;
+
+
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
@@ -3875,8 +3918,8 @@ State=@state
 
                             cmd.Transaction = tran;
                             cmd.CommandText = @"
-INSERT INTO PurchaseHeader (InvoiceNo,InvoiceNum, InvoiceDate, SupplierId, TotalAmount, TotalTax, RoundOff, Notes, CreatedBy, CreatedAt)
-VALUES (@InvoiceNo,@InvoiceNum, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax, @RoundOff, @Notes, @CreatedBy, DATETIME('now'));
+INSERT INTO PurchaseHeader (InvoiceNo,InvoiceNum, InvoiceDate, SupplierId, TotalAmount, TotalTax,SubTotal, RoundOff, Notes, CreatedBy, CreatedAt,PaymentMode,PaidAmount,BalanceAmount,PaidVia)
+VALUES (@InvoiceNo,@InvoiceNum, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax,@SubTotal, @RoundOff, @Notes, @CreatedBy, DATETIME('now'),@PaymentMode,@PaidAmount,@BalanceAmount,@PaidVia);
 SELECT last_insert_rowid();
 ";
                             cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo);
@@ -3892,9 +3935,16 @@ SELECT last_insert_rowid();
                             cmd.Parameters.AddWithValue("@SupplierId", supplierId);
                             cmd.Parameters.AddWithValue("@TotalAmount", dto.TotalAmount);
                             cmd.Parameters.AddWithValue("@TotalTax", dto.TotalTax);
+                            cmd.Parameters.AddWithValue("@SubTotal", dto.SubTotal);
                             cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
                             cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
                             cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy ?? "");
+
+                            cmd.Parameters.AddWithValue("@PaymentMode", dto.PaymentMode);
+                            cmd.Parameters.AddWithValue("@PaidAmount", dto.PaidAmount);
+                            cmd.Parameters.AddWithValue("@BalanceAmount", dto.BalanceAmount);
+                            cmd.Parameters.AddWithValue("@PaidVia", dto.PaidVia ?? dto.PaymentMode);
+
 
                             long purchaseId = Convert.ToInt64(cmd.ExecuteScalar());
 
@@ -3958,7 +4008,7 @@ SELECT last_insert_rowid();
                                     long purchaseItemId = Convert.ToInt64(cmdIns.ExecuteScalar());
 
                                     // 3) Insert PurchaseItemDetails if optional metadata provided
-                                    if (it.SalesPrice.HasValue || it.Mrp.HasValue || !string.IsNullOrEmpty(it.Description))
+                                    if (it.SalesPrice.HasValue || it.Mrp.HasValue || !string.IsNullOrEmpty(it.Description) || !string.IsNullOrEmpty(it.ModelNo) || !string.IsNullOrEmpty(it.Brand) || !string.IsNullOrEmpty(it.Size) || !string.IsNullOrEmpty(it.Color) || it.Weight.HasValue || !string.IsNullOrEmpty(it.Dimension) || !string.IsNullOrEmpty(it.MfgDate) || !string.IsNullOrEmpty(it.ExpDate))
                                     {
                                         using (var cmdDet = conn.CreateCommand())
                                         {
@@ -4005,7 +4055,7 @@ VALUES
                                 UpdateItemBalance(itemledger, conn, tran);
 
                                 // ---------- ACCOUNTING: create journal entry for this purchase ----------
-                                var supplierAccId = GetOrCreatePartyAccount(conn, tran, "Supplier", dto.SupplierId, null);
+                                var supplierAccId = GetOrCreatePartyAccount(conn, tran, "Supplier", supplierId, null);
                                 var purchaseAccId = GetOrCreateAccountByName(conn, tran, "Purchase", "Expense", "Debit");
                                 var inputGstAccId = GetOrCreateAccountByName(conn, tran, "Input GST", "Asset", "Debit");
                                 var roundingAccId = GetOrCreateAccountByName(conn, tran, "Rounding Gain/Loss", "Expense", "Debit");
@@ -4024,10 +4074,17 @@ VALUES
                                 if (tax != 0) InsertJournalLine(conn, tran, jid, inputGstAccId, tax, 0);
 
                                 // Credit Supplier A/c (total)
-                                InsertJournalLine(conn, tran, jid, supplierAccId, 0, total);
-
-                                // Roundoff handling
-                                if (roundOff != 0)
+                                if (dto.PaidAmount > 0)
+                                {
+                                    var BankOrCashAccId = GetOrCreateAccountByName(conn, tran, dto.PaidVia, "Asset", "Debit");
+                                    InsertJournalLine(conn, tran, jid, BankOrCashAccId , 0, dto.PaidAmount);
+                                }
+                                if (dto.BalanceAmount > 0)
+                                {
+                                    InsertJournalLine(conn, tran, jid, supplierAccId, 0, dto.BalanceAmount);
+                                }
+                                    // Roundoff handling
+                                    if (roundOff != 0)
                                 {
                                     if (roundOff > 0)
                                         InsertJournalLine(conn, tran, jid, roundingAccId, roundOff, 0); // positive -> debit rounding expense
@@ -4211,7 +4268,7 @@ WHERE PurchaseId = @PurchaseId";
                         dto.InvoiceNum = Convert.ToInt64(rd["InvoiceNum"]);
                         dto.InvoiceDate = rd["InvoiceDate"]?.ToString();
                         dto.SupplierId = Convert.ToInt64(rd["SupplierId"]);
-                        dto.SubTotalAmount = Convert.ToDecimal(rd["TotalAmount"]) - Convert.ToDecimal(rd["TotalTax"]);
+                        dto.SubTotal = Convert.ToDecimal(rd["TotalAmount"]) - Convert.ToDecimal(rd["TotalTax"]);
                         dto.TotalAmount = Convert.ToDecimal(rd["TotalAmount"]);
                         dto.TotalTax = Convert.ToDecimal(rd["TotalTax"]);
                         dto.RoundOff = Convert.ToDecimal(rd["RoundOff"]);
@@ -4486,7 +4543,7 @@ ORDER BY pi.PurchaseItemId
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"SELECT PurchaseId, InvoiceNo,InvoiceNum, InvoiceDate, SupplierId,
-                           TotalAmount, TotalTax, RoundOff, Notes
+                           TotalAmount, TotalTax, RoundOff, Notes,paidamount, balanceamount, paymentmode, paidvia
                     FROM PurchaseHeader WHERE PurchaseId=@id";
 
                     cmd.Parameters.AddWithValue("@id", purchaseId);
@@ -4504,6 +4561,11 @@ ORDER BY pi.PurchaseItemId
                         dto.TotalTax = r.GetDecimal(6);
                         dto.RoundOff = r.GetDecimal(7);
                         dto.Notes = r.IsDBNull(8) ? "" : r.GetString(8);
+
+                        dto.PaidAmount =  r.GetDecimal(9);
+                        dto.BalanceAmount =  r.GetDecimal(10);
+                        dto.PaymentMode = r.IsDBNull(11) ? "" : r.GetString(11);
+                        dto.PaidVia = r.IsDBNull(12) ? "" : r.GetString(12);
                     }
                 }
 
@@ -4518,7 +4580,14 @@ ORDER BY pi.PurchaseItemId
                     pi.BatchNo,
                     pi.BatchNum,
                     item.HsnCode,
-                    pi.Qty AS PurchasedQty,
+
+                    
+(pi.Qty - IFNULL((
+                        SELECT SUM(Qty) 
+                        FROM PurchaseReturnItem 
+                        WHERE PurchaseItemId = pi.PurchaseItemId
+                    ), 0)) AS PurchasedQty,
+
                     pi.Rate,
                     pi.DiscountPercent,
                     pi.NetRate,
@@ -4743,6 +4812,22 @@ ORDER BY pi.PurchaseItemId
                                 }
                             }
                         }
+                        // ---------- PAYMENT NORMALIZATION ----------
+                        if (dto.PaymentMode != "CREDIT")
+                        {
+                            dto.PaidAmount = dto.TotalAmount;
+                        }
+
+                        dto.PaidAmount = Math.Max(0, Math.Min(dto.PaidAmount, dto.TotalAmount));
+                        dto.BalanceAmount = dto.TotalAmount - dto.PaidAmount;
+
+                        if (dto.PaymentMode == "CREDIT" && dto.PaidAmount > 0 && string.IsNullOrEmpty(dto.PaidVia))
+                            throw new Exception("PaidVia is required for partial credit purchase.");
+
+
+
+
+
 
                         // STEP 3: Insert NEW PurchaseHeader
                         long newPurchaseId;
@@ -4750,11 +4835,18 @@ ORDER BY pi.PurchaseItemId
                         {
                             cmd.Transaction = tx;
                             cmd.CommandText = @"
-                    INSERT INTO PurchaseHeader
-                    (InvoiceNo, InvoiceDate, SupplierId, TotalAmount, TotalTax, RoundOff, Notes, CreatedBy, CreatedAt,InvoiceNum, Status)
-                    VALUES
-                    (@InvoiceNo, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax, @RoundOff, @Notes, @User, @Now,@InvoiceNum, 1);
-                    SELECT last_insert_rowid();";
+INSERT INTO PurchaseHeader
+(InvoiceNo, InvoiceDate, SupplierId,
+ TotalAmount, TotalTax, RoundOff, SubTotal,
+ PaymentMode, PaidAmount, BalanceAmount, PaidVia,
+ Notes, CreatedBy, CreatedAt, InvoiceNum, Status)
+VALUES
+(@InvoiceNo, @InvoiceDate, @SupplierId,
+ @TotalAmount, @TotalTax, @RoundOff, @SubTotal,
+ @PaymentMode, @PaidAmount, @BalanceAmount,@PaidVia,
+ @Notes, @User, @Now, @InvoiceNum, 1);
+SELECT last_insert_rowid();";
+
 
                             cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo);
                             cmd.Parameters.AddWithValue("@InvoiceDate", dto.InvoiceDate);
@@ -4765,6 +4857,11 @@ ORDER BY pi.PurchaseItemId
                             cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
                             cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
                             cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                            cmd.Parameters.AddWithValue("@PaymentMode", dto.PaymentMode);
+                            cmd.Parameters.AddWithValue("@PaidAmount", dto.PaidAmount);
+                            cmd.Parameters.AddWithValue("@BalanceAmount", dto.BalanceAmount);
+                            cmd.Parameters.AddWithValue("@PaidVia", dto.PaidVia);
+                            cmd.Parameters.AddWithValue("@SubTotal", dto.TotalAmount - dto.TotalTax);
                             cmd.Parameters.AddWithValue("@InvoiceNum", dto.InvoiceNum);
                             newPurchaseId = (long)cmd.ExecuteScalar();
                         }
@@ -4894,9 +4991,9 @@ ORDER BY pi.PurchaseItemId
                         // =========================================================
 
                         // Get accounts
-                        var supplierAccId = GetOrCreatePartyAccount(conn, tx, "Supplier", dto.SupplierId);
                         var purchaseAccId = GetOrCreateAccountByName(conn, tx, "Purchases", "Expense", "Debit");
                         var inputGstAccId = GetOrCreateAccountByName(conn, tx, "Input GST", "Asset", "Debit");
+                        var apAccId = GetOrCreateAccountsPayable(conn, tx);
                         var roundingAccId = GetOrCreateAccountByName(conn, tx, "Rounding Gain/Loss", "Expense", "Debit");
 
                         decimal subTotal = ((dto.TotalAmount)-(dto.TotalTax));
@@ -4921,16 +5018,30 @@ ORDER BY pi.PurchaseItemId
                         if (tax != 0)
                             InsertJournalLine(conn, tx, newJournalId, inputGstAccId, tax, 0);
 
-                        // Credit Supplier (Total)
-                        InsertJournalLine(conn, tx, newJournalId, supplierAccId, 0, total);
+                        // Credit Cash / Bank (PAID PART)
+                        if (dto.PaidAmount > 0)
+                        {
+                            long cashBankAccId =
+                                dto.PaidVia == "BANK"
+                                    ? GetOrCreateAccountByName(conn, tx, "Bank", "Asset", "Debit")
+                                    : GetOrCreateAccountByName(conn, tx, "Cash", "Asset", "Debit");
+
+                            InsertJournalLine(conn, tx, newJournalId, cashBankAccId, 0, dto.PaidAmount);
+                        }
+
+                        // Credit Accounts Payable (BALANCE PART)
+                        if (dto.BalanceAmount > 0)
+                        {
+                            InsertJournalLine(conn, tx, newJournalId, apAccId, 0, dto.BalanceAmount);
+                        }
 
                         // Roundoff
-                        if (roundOff != 0)
+                        if (dto.RoundOff != 0)
                         {
-                            if (roundOff > 0)
-                                InsertJournalLine(conn, tx, newJournalId, roundingAccId, roundOff, 0);
+                            if (dto.RoundOff > 0)
+                                InsertJournalLine(conn, tx, newJournalId, roundingAccId, dto.RoundOff, 0);
                             else
-                                InsertJournalLine(conn, tx, newJournalId, roundingAccId, 0, Math.Abs(roundOff));
+                                InsertJournalLine(conn, tx, newJournalId, roundingAccId, 0, Math.Abs(dto.RoundOff));
                         }
                         tx.Commit();
                         return (true, "Updated Successfully", newPurchaseId);
@@ -5471,11 +5582,11 @@ ORDER BY a.AccountType, a.AccountName;
                     INSERT INTO PurchaseReturnHeader
                     (PurchaseId, SupplierId, ReturnNo, ReturnNum, ReturnDate,
                      TotalAmount, TotalTax, RoundOff, SubTotal,
-                     Notes, CreatedBy)
+                     Notes, CreatedBy,RefundMode,PaidVia)
                     VALUES
                     (@PurchaseId, @SupplierId, @ReturnNo, @ReturnNum, @ReturnDate,
                      @TotalAmount, @TotalTax, @RoundOff, @SubTotal,
-                     @Notes, @CreatedBy);
+                     @Notes, @CreatedBy,@RefundMode,@PaidVia);
 
                     SELECT last_insert_rowid();
                 ";
@@ -5492,6 +5603,8 @@ ORDER BY a.AccountType, a.AccountName;
                         cmd.Parameters.AddWithValue("@SubTotal", dto.SubTotal);
                         cmd.Parameters.AddWithValue("@Notes", (object)dto.Notes ?? DBNull.Value);
                         cmd.Parameters.AddWithValue("@CreatedBy", (object)dto.CreatedBy ?? "system");
+                        cmd.Parameters.AddWithValue("@RefundMode", dto.RefundMode);
+                        cmd.Parameters.AddWithValue("@PaidVia", dto.PaidVia);
 
                         newReturnId = (long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)(long)cmd.ExecuteScalar();
                     }
@@ -5585,27 +5698,62 @@ ORDER BY a.AccountType, a.AccountName;
 
                             // ---------- ACCOUNTING: create journal entry for this purchase return ----------
                             var supplierAccId = GetOrCreatePartyAccount(conn, tx, "Supplier", dto.SupplierId, null);
-                            var purchaseReturnAccId = GetOrCreateAccountByName(conn, tx, "Purchase Return", "Expense", "Credit"); // purchase return normally credit to purchase returns
+                            var purchaseReturnAccId = GetOrCreateAccountByName(conn, tx, "Purchase Return", "Expense", "Debit"); // purchase return normally credit to purchase returns
                             var inputGstAccId = GetOrCreateAccountByName(conn, tx, "Input GST", "Asset", "Debit");
                             var roundingAccId = GetOrCreateAccountByName(conn, tx, "Rounding Gain/Loss", "Expense", "Debit");
+
+                            
+                            long debitAccountId;
+
+                            switch (dto.RefundMode)
+                            {
+                                case "CASH":
+                                    debitAccountId =
+                                        GetOrCreateAccountByName(conn, tx, "Cash", "Asset", "Debit");
+                                    break;
+
+                                case "BANK":
+                                    debitAccountId =
+                                        GetOrCreateAccountByName(conn, tx, "Bank", "Asset", "Debit");
+                                    break;
+
+                                case "ADJUST":
+                                default:
+                                    debitAccountId = supplierAccId;
+                                    break;
+                            }
 
                             decimal subTotal = dto.SubTotal;
                             decimal tax = dto.TotalTax;
                             decimal total = dto.TotalAmount;
                             decimal roundOff = dto.RoundOff;
 
-                            var jid = InsertJournalEntry(conn, tx, DateTime.Now.ToString("yyyy-MM-dd"), $"Purchase Return #{newReturnId}", "PurchaseReturn", newReturnId);
+
+
+                            var jid = InsertJournalEntry(
+    conn,
+    tx,
+    DateTime.Now.ToString("yyyy-MM-dd"),
+    $"Purchase Return #{newReturnId}",
+    "PurchaseReturn",
+    newReturnId
+);
+
 
                             // Debit Supplier A/c (reduce payable)
-                            InsertJournalLine(conn, tx, jid, supplierAccId, total, 0);
+                            // Debit Supplier OR Cash OR Bank
+                            InsertJournalLine(conn, tx, jid, debitAccountId, total, 0);
+
 
                             // Credit Purchase Return (reverse purchases)
-                            if (subTotal != 0) InsertJournalLine(conn, tx, jid, purchaseReturnAccId, 0, subTotal);
+                            if (subTotal != 0)
+                                InsertJournalLine(conn, tx, jid, purchaseReturnAccId, 0, subTotal);
 
-                            // Credit Input GST (reverse input GST)
-                            if (tax != 0) InsertJournalLine(conn, tx, jid, inputGstAccId, 0, tax);
+                            // Credit Input GST (reverse ITC)
+                            if (tax != 0)
+                                InsertJournalLine(conn, tx, jid, inputGstAccId, 0, tax);
 
-                            // Roundoff handling
+
                             if (roundOff != 0)
                             {
                                 if (roundOff > 0)
@@ -5613,6 +5761,7 @@ ORDER BY a.AccountType, a.AccountName;
                                 else
                                     InsertJournalLine(conn, tx, jid, roundingAccId, Math.Abs(roundOff), 0);
                             }
+
 
                         }
                     }
@@ -5624,6 +5773,10 @@ ORDER BY a.AccountType, a.AccountName;
         }
         public SaveSalesReturnResult SaveSalesReturn(SalesReturnDto dto)
         {
+
+            if (dto.OriginalPaymentMode == "CREDIT" && dto.CustomerId <= 0)
+                throw new Exception("Customer is mandatory for credit sales.");
+
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
@@ -5691,11 +5844,11 @@ ORDER BY a.AccountType, a.AccountName;
                 INSERT INTO SalesReturnHeader
                 (InvoiceId, CustomerId, ReturnNo, ReturnNum, ReturnDate,
                  TotalAmount, TotalTax, RoundOff, SubTotal,
-                 Notes, CreatedBy,RefundMode)
+                 Notes, CreatedBy,RefundMode,PaidVia)
                 VALUES
                 (@InvoiceId, @CustomerId, @ReturnNo, @ReturnNum, @ReturnDate,
                  @TotalAmount, @TotalTax, @RoundOff, @SubTotal,
-                 @Notes, @CreatedBy,@RefundMode);
+                 @Notes, @CreatedBy,@RefundMode,@PaidVia);
 
                 SELECT last_insert_rowid();
                 ";
@@ -5712,6 +5865,7 @@ ORDER BY a.AccountType, a.AccountName;
                         cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
                         cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy ?? "system");
                         cmd.Parameters.AddWithValue("@RefundMode", dto.RefundMode);
+                        cmd.Parameters.AddWithValue("@RefundMode", dto.PaidVia);
                         newReturnId = Convert.ToInt64(cmd.ExecuteScalar());
                     }
 
@@ -5809,6 +5963,8 @@ ORDER BY a.AccountType, a.AccountName;
                             UpdateItemBalance(ledger, conn, tx);
                         }
                     }
+                    
+
                     string originalPaymentMode;
 
                     using (var cmd = conn.CreateCommand())
@@ -5831,6 +5987,9 @@ ORDER BY a.AccountType, a.AccountName;
                         dto.RefundMode == "AUTO"
                             ? originalPaymentMode
                             : dto.RefundMode;
+
+
+
 
                     // STEP 4: Update returned qty in InvoiceItems
                     using (var cmd = conn.CreateCommand())
@@ -5887,6 +6046,37 @@ ORDER BY a.AccountType, a.AccountName;
                     decimal total = dto.TotalAmount;
                     decimal roundOff = dto.RoundOff;
 
+
+                    ////////////////////////////////////////////////////////////////////////////////////////////////
+                    decimal returnTotal = dto.TotalAmount;
+
+                    // Reduce outstanding first
+                    decimal adjustAmount = Math.Min(returnTotal, dto.BalanceAmount);
+
+                    // Excess → refund
+                    decimal refundAmount = returnTotal - adjustAmount;
+
+                    if (adjustAmount > 0 && dto.CustomerId <= 0)
+                        throw new Exception("Customer mandatory to adjust outstanding.");
+
+                    if (refundAmount > 0 && finalRefundMode == "ADJUST")
+                        throw new Exception("Refund exceeds outstanding. Cannot adjust.");
+
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+        UPDATE SalesPaymentSummary
+        SET BalanceAmount = BalanceAmount - @adj
+        WHERE InvoiceId = @iid";
+
+                        cmd.Parameters.AddWithValue("@adj", adjustAmount);
+                        cmd.Parameters.AddWithValue("@iid", dto.InvoiceId);
+
+                        cmd.ExecuteNonQuery();
+                    }
+                    ///////////////////////////////////////////////////////////////////////////////////
                     var jid = InsertJournalEntry(conn, tx, DateTime.Now.ToString("yyyy-MM-dd"), $"Sales Return #{newReturnId}", "SalesReturn", newReturnId);
 
                     // Debit Sales Returns (reverse of sales)
@@ -5896,7 +6086,7 @@ ORDER BY a.AccountType, a.AccountName;
                     if (tax != 0) InsertJournalLine(conn, tx, jid, outputGstAccId, tax, 0);
 
                     // Credit Customer A/c (reduce receivable)
-                    InsertJournalLine(conn, tx, jid, creditAccId, 0, total);
+                    InsertJournalLine(conn, tx, jid, creditAccId, 0, adjustAmount);
 
                     // Roundoff handling
                     if (roundOff != 0)
@@ -5981,7 +6171,7 @@ ORDER BY InvoiceNum DESC;
                 {
                     cmd.CommandText = @"
             SELECT 
-    Id,
+    Invoice.Id,
     InvoiceNo,
     InvoiceNum,
     InvoiceDate,
@@ -5991,9 +6181,13 @@ ORDER BY InvoiceNum DESC;
     SubTotal,
     TotalTax,
     TotalAmount,
-    RoundOff
+    RoundOff,
+    salespaymentsummary.paidamount,
+    salespaymentsummary.balanceamount,
+Paidvia
 FROM Invoice
 left join customers on invoice.customerid=customers.customerid
+left join salespaymentsummary on salespaymentsummary.invoiceid=Invoice.Id
 WHERE InvoiceNum = @id;
         ";
 
@@ -6010,15 +6204,21 @@ WHERE InvoiceNum = @id;
                                 InvoiceNo = rd.GetString(1),
                                 InvoiceNum = rd.GetInt64(2),
                                 InvoiceDate = rd.GetString(3),
-                                CustomerId = rd.GetInt64(4),
-                                CustomerName = rd.GetString(5),
+
+                                CustomerId = rd.IsDBNull(4) ? 0 : rd.GetInt64(4),
+                                CustomerName = rd.IsDBNull(5) ? "" : rd.GetString(5),
                                 CustomerPhone = rd.IsDBNull(6) ? "" : rd.GetString(6),
                                 CustomerState = rd.IsDBNull(7) ? "" : rd.GetString(7),
+
+
                                 RefundMode = rd.IsDBNull(8) ? "" : rd.GetString(8),
                                 SubTotal = Convert.ToDecimal(rd.GetDouble(9)),
                                 TotalTax = Convert.ToDecimal(rd.GetDouble(10)),
                                 TotalAmount = Convert.ToDecimal(rd.GetDouble(11)),
                                 RoundOff = Convert.ToDecimal(rd.GetDouble(12)),
+                                PaidAmount = Convert.ToDecimal(rd.GetDouble(13)),
+                                BalanceAmount = Convert.ToDecimal(rd.GetDouble(14)),
+                                PaidVia = rd.GetString(15),
                                 Items = new List<LoadSalesInvoiceItemDto>()
                             };
                         }
@@ -6304,6 +6504,39 @@ WHERE InvoiceNum = @id;
                 return Convert.ToInt64(cmd.ExecuteScalar());
             }
         }
+        private long GetOrCreateAccountsPayable(SQLiteConnection conn, SQLiteTransaction tx)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+            SELECT AccountId
+            FROM Accounts
+            WHERE AccountName = 'Accounts Payable'
+            LIMIT 1;
+        ";
+
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value)
+                    return Convert.ToInt64(o);
+            }
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+            INSERT INTO Accounts
+            (AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, IsActive, CreatedAt)
+            VALUES
+            ('Accounts Payable', 'Liability', NULL, 'Credit', 0, 1, DATETIME('now'));
+
+            SELECT last_insert_rowid();
+        ";
+
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
 
         // Get or create a party (customer/supplier) account and Parties mapping
         private long GetOrCreatePartyAccount(
@@ -6342,6 +6575,14 @@ WHERE InvoiceNum = @id;
                 accountType = "Asset";
                 normalSide = "Debit";
             }
+
+            if (partyType.Equals("Supplier", StringComparison.OrdinalIgnoreCase))
+            {
+                parentAccountId = GetOrCreateAccountsPayable(conn, tx);
+                accountType = "Asset";
+                normalSide = "Debit";
+            }
+
             // (Later we can add Supplier here)
             // else if (partyType.Equals("Supplier", StringComparison.OrdinalIgnoreCase)) { ... }
 
@@ -6526,6 +6767,35 @@ WHERE InvoiceNum = @id;
                 }
             }
         }
+
+        public void InsertSalesPaymentSummary(
+    long invoiceId,
+    decimal totalAmount,
+    decimal paidAmount,
+    SQLiteConnection conn,
+    SQLiteTransaction tx)
+        {
+            paidAmount = Math.Max(0, Math.Min(paidAmount, totalAmount));
+            var balance = totalAmount - paidAmount;
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+            INSERT INTO SalesPaymentSummary
+            (InvoiceId, PaidAmount, BalanceAmount)
+            VALUES
+            (@InvoiceId, @PaidAmount, @BalanceAmount)";
+
+                cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
+                cmd.Parameters.AddWithValue("@PaidAmount", paidAmount);
+                cmd.Parameters.AddWithValue("@BalanceAmount", balance);
+
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+
         public ProfitLossReportDto GetProfitAndLoss(string from, string to)
         {
             var report = new ProfitLossReportDto { From = from, To = to };

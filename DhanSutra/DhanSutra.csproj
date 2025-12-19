@@ -290,6 +290,7 @@
     <Compile Include="Models\PurchaseReturnItemDto.cs" />
     <Compile Include="Models\SalesInvoiceDto.cs" />
     <Compile Include="Models\SalesInvoiceItemDto.cs" />
+    <Compile Include="Models\SalesPaymentSummaryDto.cs" />
     <Compile Include="Models\SalesReturnDetailDto.cs" />
     <Compile Include="Models\SalesReturnDto.cs" />
     <Compile Include="Models\SalesReturnItemDetailDto.cs" />

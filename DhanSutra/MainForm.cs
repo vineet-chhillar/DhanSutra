@@ -2294,7 +2294,7 @@ namespace DhanSutra
                                 SupplierAddress = supplier?.Address,
                                 SupplierPhone = supplier?.Mobile,
                                 SupplierState = supplier?.State,
-                                SubTotalAmount=invoice.SubTotalAmount,
+                                SubTotalAmount=invoice.SubTotal,
                                 TotalAmount = invoice.TotalAmount,
                                 TotalTax = invoice.TotalTax,
                                 RoundOff = invoice.RoundOff,

@@ -14,6 +14,7 @@ namespace DhanSutra.Models
         public int CompanyId { get; set; }
         public string PaymentMode { get; set; }  // CASH / BANK / CREDIT
 
+        public decimal PaidAmount { get; set; }
         public CustomerDto Customer { get; set; }
 
         public decimal SubTotal { get; set; }
@@ -22,7 +23,7 @@ namespace DhanSutra.Models
         public decimal RoundOff { get; set; }
 
         public string CreatedBy { get; set; }
-
+        public string PaidVia { get; set; }
         public List<InvoiceItemDto> Items { get; set; }
     }
 

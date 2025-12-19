@@ -52,6 +52,8 @@ namespace DhanSutra.Models
         public decimal RoundOff { get; set; }
         public decimal SubTotal { get; set; }
 
+        public string RefundMode { get; set; }
+        public string PaidVia { get; set; }
         public string Notes { get; set; }
         public string CreatedBy { get; set; }
 
