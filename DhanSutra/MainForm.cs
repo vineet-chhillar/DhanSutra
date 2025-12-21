@@ -1379,6 +1379,47 @@ namespace DhanSutra
                             break;
                             
                         }
+                    case "CanEditSalesInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long invoiceId = payload.Value<long>("InvoiceId");
+
+                            bool editable = db.CanEditSalesInvoice(invoiceId);
+
+                            var response = new
+                            {
+                                action = "CanEditSalesInvoiceResponse",
+                                Editable = editable,
+                                InvoiceId = invoiceId   // 🔥 IMPORTANT
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+                        }
+
+
+                    case "SavePurchasePayment":
+                        {
+                            var dto = JsonConvert.DeserializeObject<PurchasePaymentDto>(
+                                req.Payload.ToString()
+                            );
+
+                            db.SavePurchasePayment(dto);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "SavePurchasePaymentResponse",
+                                    success = true
+                                })
+                            );
+                            break;
+                        }
+
 
                     //case "PrintSalesReturn":
                     //    {
@@ -1440,9 +1481,9 @@ namespace DhanSutra
 
                     //        Directory.CreateDirectory(Path.GetDirectoryName(filePath));
 
-                            
 
-                            
+
+
 
                     //        QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
                     //        var bytes = doc.GeneratePdf();
@@ -2382,6 +2423,82 @@ namespace DhanSutra
 
                             break;
                         }
+                    case "SaveSalesPayment":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null)
+                                    throw new Exception("Invalid payload");
+
+                                var dto = payload.ToObject<SalesPaymentDto>();
+
+                                var result = db.SaveSalesPayment(dto);
+
+                                var response = new
+                                {
+                                    action = "SaveSalesPaymentResponse",
+                                    success = result.Success,
+                                    message = result.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveSalesPaymentResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+                            break;
+                        }
+
+                    case "GetInvoiceForEdit":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null)
+                                    throw new Exception("Invalid payload");
+
+                                long invoiceId = payload.Value<long>("InvoiceId");
+
+                                var invoice = db.GetInvoiceForEdit(invoiceId);
+
+                                var response = new
+                                {
+                                    action = "GetInvoiceForEditResponse",
+                                    success = true,
+                                    data = invoice
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "GetInvoiceForEditResponse",
+                                    success = false,
+                                    message = ex.Message
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+
+                            break;
+                        }
 
                     case "SavePurchaseReturn":
                         {
@@ -2649,6 +2766,26 @@ namespace DhanSutra
                             break;
                         }
 
+                    case "GetInvoiceNumbersByDate":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string date = payload.Value<string>("date");
+
+                            var list = db.GetSalesInvoiceNumbersByDate(date);
+
+                            var response = new
+                            {
+                                action = "invoiceNumbersByDateResult",
+                                data = list
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+                        }
 
                         //case "GetNextPurchaseInvoiceNum":
                         //    {

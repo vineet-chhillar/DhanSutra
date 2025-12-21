@@ -287,9 +287,13 @@
     <Compile Include="Models\ProfitLossRow.cs" />
     <Compile Include="Models\PurchaseInvoiceDto.cs" />
     <Compile Include="Models\PurchaseInvoiceNumberDto.cs" />
+    <Compile Include="Models\PurchasePaymentDto.cs" />
     <Compile Include="Models\PurchaseReturnItemDto.cs" />
     <Compile Include="Models\SalesInvoiceDto.cs" />
+    <Compile Include="Models\SalesInvoiceEditDto.cs" />
+    <Compile Include="Models\SalesInvoiceEditItemDto.cs" />
     <Compile Include="Models\SalesInvoiceItemDto.cs" />
+    <Compile Include="Models\SalesPaymentDto.cs" />
     <Compile Include="Models\SalesPaymentSummaryDto.cs" />
     <Compile Include="Models\SalesReturnDetailDto.cs" />
     <Compile Include="Models\SalesReturnDto.cs" />

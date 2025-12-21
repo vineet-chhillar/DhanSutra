@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
@@ -1482,15 +1483,7 @@ reorderlevel=@reorderlevel
 
                         long? customerId = null;
 
-                        //if (dto.PaymentMode == "CREDIT")
-                        //{
-                        //    if (dto.Customer == null || dto.Customer.CustomerId <= 0)
-                        //        throw new Exception("Customer is mandatory for credit sales.");
-
-                        //    customerId = dto.Customer.CustomerId;
-                        //}
-                        // CASH / BANK → customerId remains NULL
-
+                        
 
 
                         if (dto.PaymentMode == "CREDIT")
@@ -1528,14 +1521,14 @@ reorderlevel=@reorderlevel
                             InvoiceDate, CompanyProfileId,PaymentMode,
                             CustomerId, 
                             SubTotal, TotalTax, TotalAmount, RoundOff,
-                            CreatedBy,PaidVia
+                            CreatedBy,PaidVia,Notes
                         )
                         VALUES (
                             @InvoiceNo, @InvoiceNum,
                             @InvoiceDate, @CompanyProfileId,@PaymentMode,
                             @CustomerId, 
                             @SubTotal, @TotalTax, @TotalAmount, @RoundOff,
-                            @CreatedBy,@PaidVia
+                            @CreatedBy,@PaidVia,@Notes
                         );
 
                         SELECT last_insert_rowid();
@@ -1560,6 +1553,7 @@ reorderlevel=@reorderlevel
 
                             cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy);
                             cmd.Parameters.AddWithValue("@PaidVia", dto.PaidVia);
+                            cmd.Parameters.AddWithValue("@Notes", dto.Notes);
 
                             invoiceId = (long)cmd.ExecuteScalar();
                         }
@@ -3919,7 +3913,7 @@ State=@state
                             cmd.Transaction = tran;
                             cmd.CommandText = @"
 INSERT INTO PurchaseHeader (InvoiceNo,InvoiceNum, InvoiceDate, SupplierId, TotalAmount, TotalTax,SubTotal, RoundOff, Notes, CreatedBy, CreatedAt,PaymentMode,PaidAmount,BalanceAmount,PaidVia)
-VALUES (@InvoiceNo,@InvoiceNum, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax,@SubTotal, @RoundOff, @Notes, @CreatedBy, DATETIME('now'),@PaymentMode,@PaidAmount,@BalanceAmount,@PaidVia);
+VALUES (@InvoiceNo,@InvoiceNum, @InvoiceDate, @SupplierId, @TotalAmount, @TotalTax,@SubTotal, @RoundOff, @Notes, @CreatedBy, @CreatedAt,@PaymentMode,@PaidAmount,@BalanceAmount,@PaidVia);
 SELECT last_insert_rowid();
 ";
                             cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo);
@@ -3944,9 +3938,37 @@ SELECT last_insert_rowid();
                             cmd.Parameters.AddWithValue("@PaidAmount", dto.PaidAmount);
                             cmd.Parameters.AddWithValue("@BalanceAmount", dto.BalanceAmount);
                             cmd.Parameters.AddWithValue("@PaidVia", dto.PaidVia ?? dto.PaymentMode);
-
+                            cmd.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                            
 
                             long purchaseId = Convert.ToInt64(cmd.ExecuteScalar());
+
+
+                            if (dto.PaymentMode=="CREDIT")
+                            { 
+                            using (var cmdpp = conn.CreateCommand())
+                            {
+                                    cmdpp.Transaction = tran;
+                                    cmdpp.CommandText = @"
+                    INSERT INTO PurchasePayments
+                    (PurchaseId, PaymentDate, Amount, PaymentMode, Notes, CreatedBy)
+                    VALUES
+                    (@pid, @dt, @amt, @mode, @notes, @by)
+                ";
+
+                                    cmdpp.Parameters.AddWithValue("@pid", purchaseId);
+                                    cmdpp.Parameters.AddWithValue("@dt", string.IsNullOrWhiteSpace(dto.InvoiceDate)
+                                ? DateTime.UtcNow.ToString("yyyy-MM-dd")
+                                : dto.InvoiceDate);
+                                    cmdpp.Parameters.AddWithValue("@amt", dto.PaidAmount);
+                                    cmdpp.Parameters.AddWithValue("@mode", dto.PaidVia);
+
+                                    cmdpp.Parameters.AddWithValue("@notes", dto.Notes ?? "");
+                                    cmdpp.Parameters.AddWithValue("@by", dto.CreatedBy ?? "system");
+
+                                    cmdpp.ExecuteNonQuery();
+                            }
+                            }
 
                             // 2) For each item, insert PurchaseItem + PurchaseItemDetails
                             foreach (var it in dto.Items)
@@ -4050,7 +4072,7 @@ VALUES
                                 itemledger.TotalAmount = it.LineTotal;
                                 itemledger.Remarks = it.Description;
                                 itemledger.CreatedBy = dto.CreatedBy;
-                                itemledger.CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                                itemledger.CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
                                 AddItemLedger(itemledger, conn, tran);
                                 UpdateItemBalance(itemledger, conn, tran);
 
@@ -4065,7 +4087,7 @@ VALUES
                                 decimal total = dto.TotalAmount;
                                 decimal roundOff = dto.RoundOff;
 
-                                var jid = InsertJournalEntry(conn, tran, dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd"), $"Purchase Invoice #{purchaseId} ({dto.InvoiceNo})", "PurchaseInvoice", purchaseId);
+                                var jid = InsertJournalEntry(conn, tran, dto.InvoiceDate ?? DateTime.Now.ToString("yyyy-MM-dd"), $"Purchase Invoice #{purchaseId} ({dto.InvoiceNo})", "PurchaseInvoice", purchaseId);
 
                                 // Debit Purchase (taxable amount)
                                 if (subTotal != 0) InsertJournalLine(conn, tran, jid, purchaseAccId, subTotal, 0);
@@ -4530,6 +4552,174 @@ ORDER BY pi.PurchaseItemId
                 return true;
             }
         }
+        public void SavePurchasePayment(PurchasePaymentDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var tx = conn.BeginTransaction())
+                {
+                    // ------------------------------------------------
+                    // STEP 1: Fetch current balance
+                    // ------------------------------------------------
+                    decimal currentBalance = 0;
+                    decimal currentPaid = 0;
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+                    SELECT BalanceAmount, PaidAmount
+                    FROM PurchaseHeader
+                    WHERE PurchaseId = @pid
+                ";
+                        cmd.Parameters.AddWithValue("@pid", dto.PurchaseId);
+
+                        using (var r = cmd.ExecuteReader())
+                        {
+                            if (!r.Read())
+                                throw new Exception("Purchase invoice not found.");
+
+                            currentBalance = r.GetDecimal(0);
+                            currentPaid = r.GetDecimal(1);
+                        }
+                    }
+
+                    // ------------------------------------------------
+                    // STEP 2: Validation
+                    // ------------------------------------------------
+                    if (dto.Amount <= 0)
+                        throw new Exception("Payment amount must be greater than zero.");
+
+                    if (dto.Amount > currentBalance)
+                        throw new Exception("Payment exceeds outstanding balance.");
+
+                    // ------------------------------------------------
+                    // STEP 3: Insert payment record
+                    // ------------------------------------------------
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+                    INSERT INTO PurchasePayments
+                    (PurchaseId, PaymentDate, Amount, PaymentMode, Notes, CreatedBy)
+                    VALUES
+                    (@pid, @dt, @amt, @mode, @notes, @by)
+                ";
+
+                        cmd.Parameters.AddWithValue("@pid", dto.PurchaseId);
+                        cmd.Parameters.AddWithValue("@dt", dto.PaymentDate);
+                        cmd.Parameters.AddWithValue("@amt", dto.Amount);
+                        cmd.Parameters.AddWithValue("@mode", dto.PaymentMode);
+                        
+                        cmd.Parameters.AddWithValue("@notes", dto.Notes ?? "");
+                        cmd.Parameters.AddWithValue("@by", dto.CreatedBy ?? "system");
+
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    // ------------------------------------------------
+                    // STEP 4: Update Purchase invoice totals
+                    // ------------------------------------------------
+                    decimal newPaid = currentPaid + dto.Amount;
+                    decimal newBalance = currentBalance - dto.Amount;
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+                    UPDATE PurchaseHeader
+                    SET PaidAmount = @paid,
+                        BalanceAmount = @bal
+                    WHERE PurchaseId = @pid
+                ";
+
+                        cmd.Parameters.AddWithValue("@paid", newPaid);
+                        cmd.Parameters.AddWithValue("@bal", newBalance);
+                        cmd.Parameters.AddWithValue("@pid", dto.PurchaseId);
+
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    // ------------------------------------------------
+                    // STEP 5: Ledger Entry (Supplier → Cash/Bank)
+                    // ------------------------------------------------
+                    CreateLedgerEntryForPurchasePayment(conn, tx, dto);
+
+                    tx.Commit();
+                }
+            }
+        }
+        private void CreateLedgerEntryForPurchasePayment(
+    SQLiteConnection conn,
+    SQLiteTransaction tx,
+    PurchasePaymentDto dto)
+        {
+            long journalEntryId;
+
+            if (dto.SupplierAccountId <= 0)
+                throw new Exception("Invalid supplier account.");
+
+            
+
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+        INSERT INTO JournalEntries
+        (Date, Description,VoucherType, VoucherId,CreatedAt)
+        VALUES
+        (@dt, @desc, @nar, @vno, @at);
+        SELECT last_insert_rowid();
+    ";
+
+                cmd.Parameters.AddWithValue("@dt", dto.PaymentDate);
+                cmd.Parameters.AddWithValue("@desc",string.IsNullOrWhiteSpace(dto.Notes) ? "Purchase Payment" : dto.Notes);
+                cmd.Parameters.AddWithValue("@nar", "Purchase payment");
+                cmd.Parameters.AddWithValue("@vno", dto.PurchaseId);                
+                cmd.Parameters.AddWithValue("@at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+
+                journalEntryId = (long)cmd.ExecuteScalar();
+            }
+
+            var supplierAccId = GetOrCreatePartyAccount(conn, tx, "Supplier", dto.SupplierAccountId, null);
+            var BankOrCashAccId = GetOrCreateAccountByName(conn, tx, dto.PaymentMode, "Asset", "Debit");
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+        INSERT INTO JournalLines
+        (JournalId, AccountId, Debit, Credit)
+        VALUES
+        (@jeid, @acc, @dr, 0);
+    ";
+
+                cmd.Parameters.AddWithValue("@jeid", journalEntryId);
+                cmd.Parameters.AddWithValue("@acc", supplierAccId); // IMPORTANT
+                cmd.Parameters.AddWithValue("@dr", dto.Amount);
+
+                cmd.ExecuteNonQuery();
+            }
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+        INSERT INTO JournalLines
+        (JournalId, AccountId, Debit, Credit)
+        VALUES
+        (@jeid, @acc, 0, @cr);
+    ";
+
+                cmd.Parameters.AddWithValue("@jeid", journalEntryId);
+                cmd.Parameters.AddWithValue("@acc", BankOrCashAccId); // CASH / BANK / UPI
+                cmd.Parameters.AddWithValue("@cr", dto.Amount);
+
+                cmd.ExecuteNonQuery();
+            }
+
+        }
 
         public PurchaseInvoiceDto LoadPurchaseInvoice(long purchaseId)
         {
@@ -4686,7 +4876,651 @@ ORDER BY pi.PurchaseItemId
                 return dto;
             }
         }
+        public (bool Success, string Message) SaveSalesPayment(SalesPaymentDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // -----------------------------
+                        // STEP 1: Load invoice + validate
+                        // -----------------------------
+                        decimal totalAmount = 0;
+                        decimal alreadyPaid = 0;
 
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT TotalAmount,
+       IFNULL((
+         SELECT SUM(Amount)
+         FROM SalesPayments
+         WHERE InvoiceId = @id
+       ), 0)
+FROM Invoice
+WHERE Id = @id AND Status = 1;
+";
+                            cmd.Parameters.AddWithValue("@id", dto.InvoiceId);
+
+                            using (var rd = cmd.ExecuteReader())
+                            {
+                                if (!rd.Read())
+                                    throw new Exception("Invoice not found or not editable.");
+
+                                totalAmount = rd.GetDecimal(0);
+                                alreadyPaid = rd.GetDecimal(1);
+                            }
+                        }
+
+                        decimal balance = totalAmount - alreadyPaid;
+
+                        if (dto.Amount <= 0)
+                            throw new Exception("Invalid payment amount.");
+
+                        if (dto.Amount > balance)
+                            throw new Exception("Payment exceeds outstanding balance.");
+
+                        // -----------------------------
+                        // STEP 2: Insert payment record
+                        // -----------------------------
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO SalesPayments
+(InvoiceId, PaymentDate, Amount, PaymentMode, Notes, CreatedBy, CreatedAt)
+VALUES
+(@InvId, @Dt, @Amt, @Mode, @Notes, @User, @Now);
+";
+                            cmd.Parameters.AddWithValue("@InvId", dto.InvoiceId);
+                            cmd.Parameters.AddWithValue("@Dt", dto.PaymentDate);
+                            cmd.Parameters.AddWithValue("@Amt", dto.Amount);
+                            cmd.Parameters.AddWithValue("@Mode", dto.PaymentMode);
+                            cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
+                            cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+                            cmd.Parameters.AddWithValue("@Now",
+                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss",
+                                CultureInfo.InvariantCulture));
+
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // -----------------------------
+                        // STEP 3: Accounting Entry
+                        // -----------------------------
+
+                        // Accounts
+                        long arAccId = GetOrCreateAccountsReceivable(conn, tx);
+
+                        long cashBankAccId =
+                            dto.PaymentMode == "BANK"
+                                ? GetOrCreateAccountByName(conn, tx, "Bank", "Asset", "Debit")
+                                : GetOrCreateAccountByName(conn, tx, "Cash", "Asset", "Debit");
+
+                        // Journal Header
+                        long journalId = InsertJournalEntry(
+                            conn, tx,
+                            dto.PaymentDate,
+                            $"Sales Payment for Invoice #{dto.InvoiceId}",
+                            "SalesPayment",
+                            dto.InvoiceId
+                        );
+
+                        // Debit Cash / Bank
+                        InsertJournalLine(conn, tx, journalId, cashBankAccId, dto.Amount, 0);
+
+                        // Credit Accounts Receivable
+                        InsertJournalLine(conn, tx, journalId, arAccId, 0, dto.Amount);
+
+                        // -----------------------------
+                        // STEP 4: Update invoice PaidAmount
+                        // -----------------------------
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+UPDATE Invoice
+SET PaidAmount = IFNULL(PaidAmount, 0) + @Amt
+WHERE Id = @Id;
+";
+                            cmd.Parameters.AddWithValue("@Amt", dto.Amount);
+                            cmd.Parameters.AddWithValue("@Id", dto.InvoiceId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        tx.Commit();
+                        return (true, "Payment saved successfully.");
+                    }
+                    catch (Exception ex)
+                    {
+                        tx.Rollback();
+                        return (false, ex.Message);
+                    }
+                }
+            }
+        }
+        public List<InvoiceSummaryDto> GetSalesInvoiceNumbersByDate(string date)
+        {
+            var list = new List<InvoiceSummaryDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT 
+                    i.Id,
+                    i.InvoiceNo
+                FROM Invoice i
+                WHERE date(i.InvoiceDate) = date(@dt)
+                  AND i.Status = 1
+                ORDER BY i.InvoiceNum DESC;
+            ";
+
+                    cmd.Parameters.AddWithValue("@dt", date);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new InvoiceSummaryDto
+                            {
+                                Id = r.GetInt64(0),
+                                InvoiceNo = r.GetString(1)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
+        public bool CanEditSalesInvoice(long invoiceId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT COUNT(*)
+                FROM InvoiceItems
+                WHERE InvoiceId = @id
+                  AND ReturnedQty > 0
+            ";
+                    cmd.Parameters.AddWithValue("@id", invoiceId);
+
+                    long count = (long)cmd.ExecuteScalar();
+                    return count == 0; // editable only if no returns
+                }
+            }
+        }
+
+        public SalesInvoiceEditDto GetInvoiceForEdit(long invoiceId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                SalesInvoiceEditDto dto = null;
+
+                // =====================================================
+                // STEP 1: LOAD INVOICE HEADER (ONLY ACTIVE)
+                // =====================================================
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+                    i.Id,
+                    i.InvoiceNo,
+                    i.InvoiceNum,
+                    i.InvoiceDate,
+                    i.CompanyProfileId,
+                    i.CustomerId,
+                    c.CustomerName,
+                    c.BillingState,
+                    i.PaymentMode,
+                    i.PaidVia,
+                    i.SubTotal,
+                    i.TotalTax,
+                    i.TotalAmount,
+                    i.RoundOff
+                FROM Invoice i
+                LEFT JOIN Customers c ON c.CustomerId = i.CustomerId
+                WHERE i.Id = @id AND i.Status = 1;
+            ";
+                    cmd.Parameters.AddWithValue("@id", invoiceId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read())
+                            throw new Exception("Invoice not found or already edited.");
+
+                        dto = new SalesInvoiceEditDto
+                        {
+                            InvoiceId = r.GetInt64(0),
+                            InvoiceNo = r.GetString(1),
+                            InvoiceNum = r.GetInt64(2),
+                            InvoiceDate = r.GetString(3),
+                            CompanyProfileId = r.GetInt64(4),
+                            CustomerId = r.IsDBNull(5) ? (long?)null : r.GetInt64(5),
+                            CustomerName = r.IsDBNull(6) ? "" : r.GetString(6),
+                            BillingState = r.IsDBNull(7) ? "" : r.GetString(7),
+
+                            PaymentMode = r.GetString(8),
+                            PaidVia = r.IsDBNull(9) ? "" : r.GetString(9),
+
+                            SubTotal = r.GetDecimal(10),
+                            TotalTax = r.GetDecimal(11),
+                            TotalAmount = r.GetDecimal(12),
+                            RoundOff = r.GetDecimal(13)
+                        };
+                    }
+                }
+
+                // =====================================================
+                // STEP 2: LOAD INVOICE ITEMS
+                // =====================================================
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+                    ii.Id,
+                    ii.ItemId,
+                    it.Name,
+                    ii.BatchNo,
+                    ii.HsnCode,
+                    ii.Qty,
+                    ii.ReturnedQty,
+                    ii.Rate,
+                    ii.DiscountPercent,
+                    ii.GstPercent,
+                    ii.GstValue,
+                    ii.CgstPercent,
+                    ii.CgstValue,
+                    ii.SgstPercent,
+                    ii.SgstValue,
+                    ii.IgstPercent,
+                    ii.IgstValue,
+                    ii.LineSubTotal,
+                    ii.LineTotal
+                FROM InvoiceItems ii
+                JOIN Items it ON it.Id = ii.ItemId
+                WHERE ii.InvoiceId = @id;
+            ";
+                    cmd.Parameters.AddWithValue("@id", invoiceId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            var qty = r.GetDecimal(5);
+
+                            dto.Items.Add(new SalesInvoiceEditItemDto
+                            {
+                                InvoiceItemId = r.GetInt64(0),
+                                ItemId = r.GetInt64(1),
+                                ItemName = r.GetString(2),
+
+                                BatchNo = r.IsDBNull(3) ? "" : r.GetString(3),
+                                HsnCode = r.IsDBNull(4) ? "" : r.GetString(4),
+
+                                Qty = qty,
+                                ReturnedQty = r.GetDecimal(6),
+
+                                Rate = r.GetDecimal(7),
+                                DiscountPercent = r.GetDecimal(8),
+                                NetRate = qty > 0 ? r.GetDecimal(18) / qty : 0,
+
+                                GstPercent = r.GetDecimal(9),
+                                GstValue = r.GetDecimal(10),
+
+                                CgstPercent = r.GetDecimal(11),
+                                CgstValue = r.GetDecimal(12),
+                                SgstPercent = r.GetDecimal(13),
+                                SgstValue = r.GetDecimal(14),
+                                IgstPercent = r.GetDecimal(15),
+                                IgstValue = r.GetDecimal(16),
+
+                                LineSubTotal = r.GetDecimal(17),
+                                LineTotal = r.GetDecimal(18)
+                            });
+                        }
+                    }
+                }
+
+                return dto;
+            }
+        }
+
+        public (bool Success, string Message, long NewInvoiceId) UpdateSalesInvoice(SalesInvoiceDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        long oldInvoiceId = dto.InvoiceId;
+
+                        // =========================================================
+                        // STEP 0: REVERSE OLD ACCOUNTING ENTRY (SAME AS PURCHASE)
+                        // =========================================================
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+                        SELECT JournalId
+                        FROM JournalEntries
+                        WHERE VoucherType='SalesInvoice' AND VoucherId=@id;
+                    ";
+                            cmd.Parameters.AddWithValue("@id", oldInvoiceId);
+
+                            var oldJournalIdObj = cmd.ExecuteScalar();
+                            if (oldJournalIdObj != null && oldJournalIdObj != DBNull.Value)
+                            {
+                                long oldJournalId = Convert.ToInt64(oldJournalIdObj);
+
+                                using (var cmdLine = conn.CreateCommand())
+                                {
+                                    cmdLine.Transaction = tx;
+                                    cmdLine.CommandText = @"
+                                SELECT AccountId, Debit, Credit
+                                FROM JournalLines
+                                WHERE JournalId=@jid;
+                            ";
+                                    cmdLine.Parameters.AddWithValue("@jid", oldJournalId);
+
+                                    using (var rd = cmdLine.ExecuteReader())
+                                    {
+                                        long reverseJid = InsertJournalEntry(
+                                            conn, tx,
+                                            DateTime.Now.ToString("yyyy-MM-dd"),
+                                            $"Reversal of SalesInvoice #{oldInvoiceId}",
+                                            "Reversal",
+                                            oldInvoiceId
+                                        );
+
+                                        while (rd.Read())
+                                        {
+                                            long acc = rd.GetInt64(0);
+                                            decimal debit = rd.GetDecimal(1);
+                                            decimal credit = rd.GetDecimal(2);
+
+                                            // reverse = swap
+                                            InsertJournalLine(conn, tx, reverseJid, acc, credit, debit);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================
+                        // STEP 1: MARK OLD INVOICE AS REVERTED
+                        // =========================================================
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = "UPDATE Invoice SET Status = 0 WHERE Id = @id";
+                            cmd.Parameters.AddWithValue("@id", oldInvoiceId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // =========================================================
+                        // STEP 2: REVERSE ITEM LEDGER (STOCK COMES BACK)
+                        // =========================================================
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+                        SELECT ItemId, BatchNo, Qty, Rate, DiscountPercent, NetRate, LineSubTotal
+                        FROM InvoiceItems
+                        WHERE InvoiceId=@id;
+                    ";
+                            cmd.Parameters.AddWithValue("@id", oldInvoiceId);
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                while (r.Read())
+                                {
+                                    long itemId = r.GetInt64(0);
+                                    string batchNo = r.IsDBNull(1) ? "" : r.GetString(1);
+                                    decimal qty = r.GetDecimal(2);
+                                    decimal rate = r.GetDecimal(3);
+                                    decimal disc = r.GetDecimal(4);
+                                    decimal netRate = r.GetDecimal(5);
+                                    decimal subTotal = r.GetDecimal(6);
+
+                                    using (var cmdRev = conn.CreateCommand())
+                                    {
+                                        cmdRev.Transaction = tx;
+                                        cmdRev.CommandText = @"
+                                    INSERT INTO ItemLedger
+                                    (ItemId, BatchNo, Date, TxnType, RefNo,
+                                     Qty, Rate, DiscountPercent, NetRate,
+                                     TotalAmount, Remarks, CreatedBy)
+                                    VALUES
+                                    (@ItemId, @BatchNo, @Dt, 'Sales Return (Edit)', @Ref,
+                                     @Qty, @Rate, @Disc, @NetRate,
+                                     @Total, @Rem, @User);
+                                ";
+
+                                        cmdRev.Parameters.AddWithValue("@ItemId", itemId);
+                                        cmdRev.Parameters.AddWithValue("@BatchNo", batchNo);
+                                        cmdRev.Parameters.AddWithValue("@Dt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                        cmdRev.Parameters.AddWithValue("@Ref", $"SI-{oldInvoiceId}");
+
+                                        // 🔥 reverse sales → stock comes back
+                                        cmdRev.Parameters.AddWithValue("@Qty", -qty);
+                                        cmdRev.Parameters.AddWithValue("@Rate", rate);
+                                        cmdRev.Parameters.AddWithValue("@Disc", disc);
+                                        cmdRev.Parameters.AddWithValue("@NetRate", netRate);
+                                        cmdRev.Parameters.AddWithValue("@Total", -subTotal);
+
+                                        cmdRev.Parameters.AddWithValue("@Rem", "Reverse stock due to sales invoice edit");
+                                        cmdRev.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+
+                                        cmdRev.ExecuteNonQuery();
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================
+                        // STEP 3: PAYMENT NORMALIZATION (SAME AS PURCHASE)
+                        // =========================================================
+                        if (dto.PaymentMode != "CREDIT")
+                            dto.PaidAmount = dto.TotalAmount;
+
+                        dto.PaidAmount = Math.Max(0, Math.Min(dto.PaidAmount, dto.TotalAmount));
+                        dto.BalanceAmount = dto.TotalAmount - dto.PaidAmount;
+
+                        if (dto.PaymentMode == "CREDIT" && dto.PaidAmount > 0 && string.IsNullOrEmpty(dto.PaidVia))
+                            throw new Exception("PaidVia is required for partial credit sale.");
+
+                        // =========================================================
+                        // STEP 4: INSERT NEW INVOICE
+                        // =========================================================
+                        long newInvoiceId;
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+                        INSERT INTO Invoice
+                        (InvoiceNo, InvoiceNum, InvoiceDate,
+                         CompanyProfileId, CustomerId,
+                         SubTotal, TotalTax, TotalAmount, RoundOff,
+                         PaymentMode, PaidVia, CreatedBy, CreatedAt, Status)
+                        VALUES
+                        (@No, @Num, @Date,
+                         @Company, @Customer,
+                         @Sub, @Tax, @Total, @Round,
+                         @Mode, @Via, @User, @Now, 1);
+                        SELECT last_insert_rowid();
+                    ";
+
+                            cmd.Parameters.AddWithValue("@No", dto.InvoiceNo);
+                            cmd.Parameters.AddWithValue("@Num", dto.InvoiceNum);
+                            cmd.Parameters.AddWithValue("@Date", dto.InvoiceDate);
+                            cmd.Parameters.AddWithValue("@Company", dto.CompanyProfileId);
+                            cmd.Parameters.AddWithValue("@Customer", dto.CustomerId);
+                            cmd.Parameters.AddWithValue("@Sub", dto.SubTotal);
+                            cmd.Parameters.AddWithValue("@Tax", dto.TotalTax);
+                            cmd.Parameters.AddWithValue("@Total", dto.TotalAmount);
+                            cmd.Parameters.AddWithValue("@Round", dto.RoundOff);
+                            cmd.Parameters.AddWithValue("@Mode", dto.PaymentMode);
+                            cmd.Parameters.AddWithValue("@Via", dto.PaidVia);
+                            cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+                            cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+                            newInvoiceId = (long)cmd.ExecuteScalar();
+                        }
+
+                        // =========================================================
+                        // STEP 5: INSERT ITEMS + SALES LEDGER
+                        // =========================================================
+                        foreach (var it in dto.Items)
+                        {
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+                                cmd.CommandText = @"
+                            INSERT INTO InvoiceItems
+                            (InvoiceId, ItemId, BatchNo, HsnCode,
+                             Qty, Rate, DiscountPercent,
+                             GstPercent, GstValue,
+                             CgstPercent, CgstValue,
+                             SgstPercent, SgstValue,
+                             IgstPercent, IgstValue,
+                             LineSubTotal, LineTotal)
+                            VALUES
+                            (@Inv, @Item, @Batch, @Hsn,
+                             @Qty, @Rate, @Disc,
+                             @GstP, @GstV,
+                             @CgstP, @CgstV,
+                             @SgstP, @SgstV,
+                             @IgstP, @IgstV,
+                             @Sub, @Total);
+                        ";
+
+                                cmd.Parameters.AddWithValue("@Inv", newInvoiceId);
+                                cmd.Parameters.AddWithValue("@Item", it.ItemId);
+                                cmd.Parameters.AddWithValue("@Batch", it.BatchNo);
+                                cmd.Parameters.AddWithValue("@Hsn", it.HsnCode ?? "");
+                                cmd.Parameters.AddWithValue("@Qty", it.Qty);
+                                cmd.Parameters.AddWithValue("@Rate", it.Rate);
+                                cmd.Parameters.AddWithValue("@Disc", it.DiscountPercent);
+
+                                cmd.Parameters.AddWithValue("@GstP", it.GstPercent);
+                                cmd.Parameters.AddWithValue("@GstV", it.GstValue);
+                                cmd.Parameters.AddWithValue("@CgstP", it.CgstPercent);
+                                cmd.Parameters.AddWithValue("@CgstV", it.CgstValue);
+                                cmd.Parameters.AddWithValue("@SgstP", it.SgstPercent);
+                                cmd.Parameters.AddWithValue("@SgstV", it.SgstValue);
+                                cmd.Parameters.AddWithValue("@IgstP", it.IgstPercent);
+                                cmd.Parameters.AddWithValue("@IgstV", it.IgstValue);
+
+                                cmd.Parameters.AddWithValue("@Sub", it.LineSubTotal);
+                                cmd.Parameters.AddWithValue("@Total", it.LineTotal);
+
+                                cmd.ExecuteNonQuery();
+                            }
+
+                            // SALES LEDGER (stock goes out)
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+                                cmd.CommandText = @"
+                            INSERT INTO ItemLedger
+                            (ItemId, BatchNo, Date, TxnType, RefNo,
+                             Qty, Rate, DiscountPercent, NetRate,
+                             TotalAmount, Remarks, CreatedBy)
+                            VALUES
+                            (@Item, @Batch, @Dt, 'SALES', @Ref,
+                             @Qty, @Rate, @Disc, @NetRate,
+                             @Total, @Rem, @User);
+                        ";
+
+                                cmd.Parameters.AddWithValue("@Item", it.ItemId);
+                                cmd.Parameters.AddWithValue("@Batch", it.BatchNo);
+                                cmd.Parameters.AddWithValue("@Dt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                cmd.Parameters.AddWithValue("@Ref", newInvoiceId);
+
+                                cmd.Parameters.AddWithValue("@Qty", it.Qty);
+                                cmd.Parameters.AddWithValue("@Rate", it.Rate);
+                                cmd.Parameters.AddWithValue("@Disc", it.DiscountPercent);
+                                cmd.Parameters.AddWithValue("@NetRate", it.NetRate);
+                                cmd.Parameters.AddWithValue("@Total", it.LineSubTotal);
+
+                                cmd.Parameters.AddWithValue("@Rem", dto.Notes ?? "");
+                                cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
+
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+
+                        // =========================================================
+                        // STEP 6: INSERT NEW SALES ACCOUNTING ENTRY
+                        // =========================================================
+                        var salesAccId = GetOrCreateAccountByName(conn, tx, "Sales", "Income", "Credit");
+                        var outputGstAccId = GetOrCreateAccountByName(conn, tx, "Output GST", "Liability", "Credit");
+                        var arAccId = GetOrCreateAccountsReceivable(conn, tx);
+                        var roundingAccId = GetOrCreateAccountByName(conn, tx, "Rounding Gain/Loss", "Income", "Credit");
+
+                        var jid = InsertJournalEntry(
+                            conn, tx,
+                            dto.InvoiceDate,
+                            $"Updated Sales Invoice #{newInvoiceId}",
+                            "SalesInvoice",
+                            newInvoiceId
+                        );
+
+                        if (dto.SubTotal != 0)
+                            InsertJournalLine(conn, tx, jid, salesAccId, 0, dto.SubTotal);
+
+                        if (dto.TotalTax != 0)
+                            InsertJournalLine(conn, tx, jid, outputGstAccId, 0, dto.TotalTax);
+
+                        if (dto.PaidAmount > 0)
+                        {
+                            long cashBankAcc =
+                                dto.PaidVia == "BANK"
+                                    ? GetOrCreateAccountByName(conn, tx, "Bank", "Asset", "Debit")
+                                    : GetOrCreateAccountByName(conn, tx, "Cash", "Asset", "Debit");
+
+                            InsertJournalLine(conn, tx, jid, cashBankAcc, dto.PaidAmount, 0);
+                        }
+
+                        if (dto.BalanceAmount > 0)
+                            InsertJournalLine(conn, tx, jid, arAccId, dto.BalanceAmount, 0);
+
+                        if (dto.RoundOff != 0)
+                        {
+                            if (dto.RoundOff > 0)
+                                InsertJournalLine(conn, tx, jid, roundingAccId, 0, dto.RoundOff);
+                            else
+                                InsertJournalLine(conn, tx, jid, roundingAccId, Math.Abs(dto.RoundOff), 0);
+                        }
+
+                        tx.Commit();
+                        return (true, "Sales Invoice Updated Successfully", newInvoiceId);
+                    }
+                    catch (Exception ex)
+                    {
+                        tx.Rollback();
+                        return (false, ex.Message, 0);
+                    }
+                }
+            }
+        }
 
         public (bool Success, string Message, long NewPurchaseId) UpdatePurchaseInvoice(PurchaseInvoiceDto dto)
         {
@@ -4844,7 +5678,7 @@ VALUES
 (@InvoiceNo, @InvoiceDate, @SupplierId,
  @TotalAmount, @TotalTax, @RoundOff, @SubTotal,
  @PaymentMode, @PaidAmount, @BalanceAmount,@PaidVia,
- @Notes, @User, @Now, @InvoiceNum, 1);
+ @Notes, @User, @CreatedAt, @InvoiceNum, 1);
 SELECT last_insert_rowid();";
 
 
@@ -4863,6 +5697,8 @@ SELECT last_insert_rowid();";
                             cmd.Parameters.AddWithValue("@PaidVia", dto.PaidVia);
                             cmd.Parameters.AddWithValue("@SubTotal", dto.TotalAmount - dto.TotalTax);
                             cmd.Parameters.AddWithValue("@InvoiceNum", dto.InvoiceNum);
+                            cmd.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                            
                             newPurchaseId = (long)cmd.ExecuteScalar();
                         }
 
@@ -4983,7 +5819,7 @@ SELECT last_insert_rowid();";
                                 TotalAmount = it.LineTotal,
                                 Remarks = it.Description ?? "",
                                 CreatedBy = dto.CreatedBy,
-                                CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                                CreatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
                             }, conn, tx);
                         }
                         // =========================================================
@@ -5054,6 +5890,7 @@ SELECT last_insert_rowid();";
                 }
             }
         }
+        
         public List<TrialBalanceRowDto> GetTrialBalance()
         {
             var rows = new List<TrialBalanceRowDto>();
@@ -5385,7 +6222,7 @@ ORDER BY a.AccountType, a.AccountName;
                             cmd.Parameters.AddWithValue("@RoundOff", dto.RoundOff);
                             cmd.Parameters.AddWithValue("@Notes", dto.Notes ?? "");
                             cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
-                            cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                            cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
 
                             newPurchaseId = (long)cmd.ExecuteScalar();
                         }
@@ -5458,7 +6295,7 @@ ORDER BY a.AccountType, a.AccountName;
                                 cmd.Parameters.AddWithValue("@Dim", it.Dimension ?? "");
 
                                 cmd.Parameters.AddWithValue("@User", dto.CreatedBy ?? "system");
-                                cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                cmd.Parameters.AddWithValue("@Now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
 
                                 cmd.ExecuteNonQuery();
                             }
@@ -6108,57 +6945,57 @@ ORDER BY a.AccountType, a.AccountName;
                 }
             }
         }
-        public List<InvoiceSummaryDto> GetSalesInvoiceNumbersByDate(string date)
-        {
-            var list = new List<InvoiceSummaryDto>();
+//        public List<InvoiceSummaryDto> GetSalesInvoiceNumbersByDate(string date)
+//        {
+//            var list = new List<InvoiceSummaryDto>();
 
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
+//            using (var conn = new SQLiteConnection(_connectionString))
+//            {
+//                conn.Open();
 
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-                SELECT
-    InvoiceNo,
-    InvoiceNum,
-    customers.CustomerName,
-    TotalAmount
-FROM Invoice 
-left join customers on customers.customerid=invoice.customerid
-WHERE date(InvoiceDate) = date(@dt)
-ORDER BY InvoiceNum DESC;
-            ";
+//                using (var cmd = conn.CreateCommand())
+//                {
+//                    cmd.CommandText = @"
+//                SELECT
+//    InvoiceNo,
+//    InvoiceNum,
+//    customers.CustomerName,
+//    TotalAmount
+//FROM Invoice 
+//left join customers on customers.customerid=invoice.customerid
+//WHERE date(InvoiceDate) = date(@dt)
+//ORDER BY InvoiceNum DESC;
+//            ";
 
-                    cmd.Parameters.AddWithValue("@dt", date);
+//                    cmd.Parameters.AddWithValue("@dt", date);
 
-                    using (var reader = cmd.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            list.Add(new InvoiceSummaryDto
-                            {
-                                InvoiceNo = reader.GetString(0),
-                                InvoiceNum = reader.GetInt64(1),
+//                    using (var reader = cmd.ExecuteReader())
+//                    {
+//                        while (reader.Read())
+//                        {
+//                            list.Add(new InvoiceSummaryDto
+//                            {
+//                                InvoiceNo = reader.GetString(0),
+//                                InvoiceNum = reader.GetInt64(1),
 
-                                CustomerName = reader.IsDBNull(2)
-                                    ? "(Cash / Bank)"
-                                    : reader.GetString(2),
+//                                CustomerName = reader.IsDBNull(2)
+//                                    ? "(Cash / Bank)"
+//                                    : reader.GetString(2),
 
-                                TotalAmount = reader.IsDBNull(3)
-                                    ? 0m
-                                    : Convert.ToDecimal(reader.GetValue(3))
-                            });
-                        }
+//                                TotalAmount = reader.IsDBNull(3)
+//                                    ? 0m
+//                                    : Convert.ToDecimal(reader.GetValue(3))
+//                            });
+//                        }
 
-                    }
-                }
-            }
+//                    }
+//                }
+//            }
 
-            return list;
-        }
+//            return list;
+//        }
 
-        public LoadSalesInvoiceDto LoadSalesInvoice(long invoiceNum)
+        public LoadSalesInvoiceDto LoadSalesInvoice(long invoiceId)
         {
             LoadSalesInvoiceDto dto = null;
             long InvoiceId = 0;
@@ -6188,10 +7025,10 @@ Paidvia
 FROM Invoice
 left join customers on invoice.customerid=customers.customerid
 left join salespaymentsummary on salespaymentsummary.invoiceid=Invoice.Id
-WHERE InvoiceNum = @id;
+WHERE InvoiceId = @id;
         ";
 
-                    cmd.Parameters.AddWithValue("@id", invoiceNum);
+                    cmd.Parameters.AddWithValue("@id", invoiceId);
 
                     using (var rd = cmd.ExecuteReader())
                     {
@@ -6454,7 +7291,7 @@ WHERE InvoiceNum = @id;
             VALUES (@Date, @Desc, @VoucherType, @VoucherId, DATETIME('now'));
             SELECT last_insert_rowid();
         ";
-                cmd.Parameters.AddWithValue("@Date", date ?? DateTime.UtcNow.ToString("yyyy-MM-dd"));
+                cmd.Parameters.AddWithValue("@Date", date ?? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
                 cmd.Parameters.AddWithValue("@Desc", description ?? "");
                 cmd.Parameters.AddWithValue("@VoucherType", voucherType ?? "");
                 cmd.Parameters.AddWithValue("@VoucherId", voucherId);
@@ -6470,12 +7307,14 @@ WHERE InvoiceNum = @id;
                 cmd.Transaction = tx;
                 cmd.CommandText = @"
             INSERT INTO JournalLines (JournalId, AccountId, Debit, Credit, CreatedAt)
-            VALUES (@JournalId, @AccountId, @Debit, @Credit, DATETIME('now'));
+            VALUES (@JournalId, @AccountId, @Debit, @Credit, @CreatedAt);
         ";
                 cmd.Parameters.AddWithValue("@JournalId", journalId);
                 cmd.Parameters.AddWithValue("@AccountId", accountId);
                 cmd.Parameters.AddWithValue("@Debit", (double)debit);
                 cmd.Parameters.AddWithValue("@Credit", (double)credit);
+                cmd.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+               
                 cmd.ExecuteNonQuery();
             }
         }
@@ -6494,13 +7333,15 @@ WHERE InvoiceNum = @id;
                 // create account
                 cmd.CommandText = @"
             INSERT INTO Accounts (AccountName, AccountType, NormalSide, OpeningBalance, IsActive, CreatedAt)
-            VALUES (@name, @type, @side, 0, 1, DATETIME('now'));
+            VALUES (@name, @type, @side, 0, 1, @CreatedAt);
             SELECT last_insert_rowid();
         ";
                 cmd.Parameters.Clear();
                 cmd.Parameters.AddWithValue("@name", accountName);
                 cmd.Parameters.AddWithValue("@type", accountType);
                 cmd.Parameters.AddWithValue("@side", normalSide);
+                cmd.Parameters.AddWithValue("@CreatedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                
                 return Convert.ToInt64(cmd.ExecuteScalar());
             }
         }
