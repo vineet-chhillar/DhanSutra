@@ -1475,6 +1475,15 @@ reorderlevel=@reorderlevel
             {
                 conn.Open();
 
+                if (dto.Customer == null)
+                    throw new Exception("Customer is mandatory for all invoices.");
+                if (dto.Customer.CustomerId == 0 &&
+    string.IsNullOrWhiteSpace(dto.Customer.CustomerName))
+                {
+                    throw new Exception("Customer details missing.");
+                }
+
+
                 using (var tx = conn.BeginTransaction())
                 {
                     try
@@ -1542,7 +1551,7 @@ reorderlevel=@reorderlevel
                             cmd.Parameters.AddWithValue("@PaymentMode", dto.PaymentMode);
 
                             //cmd.Parameters.AddWithValue("@CustomerId", customerId);
-                            cmd.Parameters.AddWithValue("@CustomerId",(object)customerId ?? DBNull.Value
+                            cmd.Parameters.AddWithValue("@CustomerId",(object)dto.Customer.CustomerId ?? DBNull.Value
  );
 
 
@@ -1665,7 +1674,7 @@ reorderlevel=@reorderlevel
                                     if (dto.Customer != null)
                                     {
                                         // Credit sale → Customer Receivable
-                                        debitAccountId = GetOrCreatePartyAccount(conn, tx, "Customer", customerId.Value, null);
+                                        debitAccountId = GetOrCreatePartyAccount(conn, tx, "Customer", dto.Customer.CustomerId, null);
                                     }
                                     else
                                     {
@@ -1774,6 +1783,7 @@ reorderlevel=@reorderlevel
                 }
             }
         }
+        
 
 
         public Models.InvoiceLoadDto GetInvoice(long invoiceId)
@@ -6945,55 +6955,96 @@ ORDER BY a.AccountType, a.AccountName;
                 }
             }
         }
-//        public List<InvoiceSummaryDto> GetSalesInvoiceNumbersByDate(string date)
-//        {
-//            var list = new List<InvoiceSummaryDto>();
+        //        public List<InvoiceSummaryDto> GetSalesInvoiceNumbersByDate(string date)
+        //        {
+        //            var list = new List<InvoiceSummaryDto>();
 
-//            using (var conn = new SQLiteConnection(_connectionString))
-//            {
-//                conn.Open();
+        //            using (var conn = new SQLiteConnection(_connectionString))
+        //            {
+        //                conn.Open();
 
-//                using (var cmd = conn.CreateCommand())
-//                {
-//                    cmd.CommandText = @"
-//                SELECT
-//    InvoiceNo,
-//    InvoiceNum,
-//    customers.CustomerName,
-//    TotalAmount
-//FROM Invoice 
-//left join customers on customers.customerid=invoice.customerid
-//WHERE date(InvoiceDate) = date(@dt)
-//ORDER BY InvoiceNum DESC;
-//            ";
+        //                using (var cmd = conn.CreateCommand())
+        //                {
+        //                    cmd.CommandText = @"
+        //                SELECT
+        //    InvoiceNo,
+        //    InvoiceNum,
+        //    customers.CustomerName,
+        //    TotalAmount
+        //FROM Invoice 
+        //left join customers on customers.customerid=invoice.customerid
+        //WHERE date(InvoiceDate) = date(@dt)
+        //ORDER BY InvoiceNum DESC;
+        //            ";
 
-//                    cmd.Parameters.AddWithValue("@dt", date);
+        //                    cmd.Parameters.AddWithValue("@dt", date);
 
-//                    using (var reader = cmd.ExecuteReader())
-//                    {
-//                        while (reader.Read())
-//                        {
-//                            list.Add(new InvoiceSummaryDto
-//                            {
-//                                InvoiceNo = reader.GetString(0),
-//                                InvoiceNum = reader.GetInt64(1),
+        //                    using (var reader = cmd.ExecuteReader())
+        //                    {
+        //                        while (reader.Read())
+        //                        {
+        //                            list.Add(new InvoiceSummaryDto
+        //                            {
+        //                                InvoiceNo = reader.GetString(0),
+        //                                InvoiceNum = reader.GetInt64(1),
 
-//                                CustomerName = reader.IsDBNull(2)
-//                                    ? "(Cash / Bank)"
-//                                    : reader.GetString(2),
+        //                                CustomerName = reader.IsDBNull(2)
+        //                                    ? "(Cash / Bank)"
+        //                                    : reader.GetString(2),
 
-//                                TotalAmount = reader.IsDBNull(3)
-//                                    ? 0m
-//                                    : Convert.ToDecimal(reader.GetValue(3))
-//                            });
-//                        }
+        //                                TotalAmount = reader.IsDBNull(3)
+        //                                    ? 0m
+        //                                    : Convert.ToDecimal(reader.GetValue(3))
+        //                            });
+        //                        }
 
-//                    }
-//                }
-//            }
+        //                    }
+        //                }
+        //            }
 
-//            return list;
-//        }
+        //            return list;
+        //        }
+        public CustomerDto GetCustomerById(long customerId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+                    CustomerId,
+                    CustomerName,
+                    GSTIN,
+                    BillingState,
+                    BillingAddress,
+                    Mobile
+                FROM Customers
+                WHERE CustomerId = @id
+                LIMIT 1;
+            ";
+
+                    cmd.Parameters.AddWithValue("@id", customerId);
+
+                    using (var rd = cmd.ExecuteReader())
+                    {
+                        if (!rd.Read())
+                            return null;
+
+                        return new CustomerDto
+                        {
+                            CustomerId = rd.GetInt32(0),
+                            CustomerName = rd.GetString(1),
+                            GSTIN = rd.IsDBNull(2) ? null : rd.GetString(2),
+                            BillingState = rd.IsDBNull(3) ? null : rd.GetString(3),
+                            BillingAddress = rd.IsDBNull(4) ? null : rd.GetString(4),
+                            Mobile = rd.IsDBNull(5) ? null : rd.GetString(5)
+                        };
+                    }
+                }
+            }
+        }
 
         public LoadSalesInvoiceDto LoadSalesInvoice(long invoiceId)
         {
@@ -7048,7 +7099,7 @@ WHERE InvoiceId = @id;
                                 CustomerState = rd.IsDBNull(7) ? "" : rd.GetString(7),
 
 
-                                RefundMode = rd.IsDBNull(8) ? "" : rd.GetString(8),
+                                PaymentMode = rd.IsDBNull(8) ? "" : rd.GetString(8),
                                 SubTotal = Convert.ToDecimal(rd.GetDouble(9)),
                                 TotalTax = Convert.ToDecimal(rd.GetDouble(10)),
                                 TotalAmount = Convert.ToDecimal(rd.GetDouble(11)),

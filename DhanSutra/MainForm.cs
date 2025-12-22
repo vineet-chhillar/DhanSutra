@@ -1257,8 +1257,8 @@ namespace DhanSutra
                             var customers = db.GetCustomers();
                             var response = new
                             {
-                                action = "GetCustomersResponse",
-                                customers = customers
+                                action = "GetCustomersResult",
+                                data = customers
                             };
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
@@ -2765,6 +2765,25 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
+                    case "GetCustomerById":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long customerId = payload.Value<long>("CustomerId");
+
+                            var customer = db.GetCustomerById(customerId);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "GetCustomerByIdResult",
+                                    data = customer
+                                })
+                            );
+                            break;
+                        }
+
 
                     case "GetInvoiceNumbersByDate":
                         {
