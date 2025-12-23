@@ -1344,14 +1344,14 @@ namespace DhanSutra
                     //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                     //        break;
 
-                           
+
                     //    }
                     //case "LoadSalesReturnDetail":
                     //    {
                     //        var payload = req.Payload as JObject;
                     //        if (payload == null) break;
                     //        int id = payload["ReturnId"].ToObject<int>();
-                                                        
+
                     //        var data = db.LoadSalesReturnDetail(id);
                     //        var response = new
                     //        {
@@ -1360,8 +1360,56 @@ namespace DhanSutra
                     //        };
                     //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                     //        break;
-                           
+
                     //    }
+                    case "UpdateSalesInvoice":
+                        {
+                            try
+                            {
+                                var payload = req.Payload as JObject;
+                                if (payload == null)
+                                    throw new Exception("Invalid payload for UpdateSalesInvoice.");
+
+                                // 🔹 Deserialize DTO
+                                var dto = payload.ToObject<SalesInvoiceDto>();
+
+                                if (dto == null || dto.InvoiceId <= 0)
+                                    throw new Exception("Invalid InvoiceId.");
+
+                                // 🔹 Call service
+                                var result = db.UpdateSalesInvoice(dto);
+
+                                // 🔹 Send response back to frontend
+                                var response = new
+                                {
+                                    action = "UpdateSalesInvoiceResponse",
+                                    success = result.Success,
+                                    message = result.Message,
+                                    newInvoiceId = result.NewInvoiceId
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                var response = new
+                                {
+                                    action = "UpdateSalesInvoiceResponse",
+                                    success = false,
+                                    message = ex.Message,
+                                    newInvoiceId = 0
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(response)
+                                );
+                            }
+
+                            break;
+                        }
+
                     case "LoadSalesInvoice":
                         {
                             var payload = req.Payload as JObject;
@@ -2433,13 +2481,13 @@ namespace DhanSutra
 
                                 var dto = payload.ToObject<SalesPaymentDto>();
 
-                                var result = db.SaveSalesPayment(dto);
+                                db.SaveSalesPayment(dto);
 
                                 var response = new
                                 {
                                     action = "SaveSalesPaymentResponse",
-                                    success = result.Success,
-                                    message = result.Message
+                                    success = true
+                                    
                                 };
 
                                 webView.CoreWebView2.PostWebMessageAsJson(

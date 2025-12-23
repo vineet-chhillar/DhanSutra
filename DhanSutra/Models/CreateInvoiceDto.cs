@@ -15,6 +15,7 @@ namespace DhanSutra.Models
         public string PaymentMode { get; set; }  // CASH / BANK / CREDIT
 
         public decimal PaidAmount { get; set; }
+        public decimal BalanceAmount { get; set; }
         public CustomerDto Customer { get; set; }
         public string Notes { get; set; }
         public decimal SubTotal { get; set; }

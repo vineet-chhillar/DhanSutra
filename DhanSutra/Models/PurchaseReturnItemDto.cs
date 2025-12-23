@@ -54,6 +54,8 @@ namespace DhanSutra.Models
 
         public string RefundMode { get; set; }
         public string PaidVia { get; set; }
+        public decimal PaidAmount { get; set; }
+        public decimal BalanceAmount { get; set; }
         public string Notes { get; set; }
         public string CreatedBy { get; set; }
 

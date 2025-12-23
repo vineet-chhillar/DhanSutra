@@ -14,6 +14,8 @@ namespace DhanSutra.Models
         public string PaymentMode { get; set; }   // CASH / BANK / UPI
         public string Notes { get; set; }
         public string CreatedBy { get; set; }
+
+        public long CustomerAccountId { get; set; }   // Supplier ledger
     }
 
 }
