@@ -1341,7 +1341,7 @@ namespace DhanSutra
                     //            action = "SearchSalesReturnsResponse",
                     //            returns = list     // 🔥 must use "returns"
                     //        };
-                    //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
                     //        break;
 
 
@@ -1358,7 +1358,7 @@ namespace DhanSutra
                     //            action = "LoadSalesReturnDetailResponse",
                     //            returnData = data    // 🔥 must use "returns"
                     //        };
-                    //        webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                    //        webView.CoreWebView2.PostWebMessageAsString(JsonConvert.SerializeObject(response));
                     //        break;
 
                     //    }
@@ -1452,21 +1452,37 @@ namespace DhanSutra
 
                     case "SavePurchasePayment":
                         {
-                            var dto = JsonConvert.DeserializeObject<PurchasePaymentDto>(
-                                req.Payload.ToString()
-                            );
+                            //var dto = req.Payload.ToObject<PurchasePaymentDto>();
+                            var dto = ((JObject)req.Payload).ToObject<PurchasePaymentDto>();
+                            try
+                            {
+                                var result = db.SavePurchasePayment(dto);
 
-                            db.SavePurchasePayment(dto);
-
-                            webView.CoreWebView2.PostWebMessageAsJson(
-                                JsonConvert.SerializeObject(new
-                                {
-                                    action = "SavePurchasePaymentResponse",
-                                    success = true
-                                })
-                            );
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SavePurchasePaymentResponse",
+                                        success = true,
+                                        amount = result.Amount,
+                                        newPaidAmount = result.NewPaidAmount,
+                                        newBalanceAmount = result.NewBalanceAmount
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SavePurchasePaymentResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
                             break;
                         }
+
 
 
                     //case "PrintSalesReturn":
@@ -2481,13 +2497,15 @@ namespace DhanSutra
 
                                 var dto = payload.ToObject<SalesPaymentDto>();
 
-                                db.SaveSalesPayment(dto);
+                                
+                                decimal updatedPaid = db.SaveSalesPayment(dto);
 
                                 var response = new
                                 {
                                     action = "SaveSalesPaymentResponse",
-                                    success = true
-                                    
+                                    success = true,
+                                     newPaidAmount = updatedPaid   // ← IMPORTANT
+
                                 };
 
                                 webView.CoreWebView2.PostWebMessageAsJson(

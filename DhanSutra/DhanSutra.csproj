@@ -298,6 +298,7 @@
     <Compile Include="Models\SalesReturnDetailDto.cs" />
     <Compile Include="Models\SalesReturnDto.cs" />
     <Compile Include="Models\SalesReturnItemDetailDto.cs" />
+    <Compile Include="Models\SavePurchasepaymentResult.cs" />
     <Compile Include="Models\SaveSalesReturnResult.cs" />
     <Compile Include="Models\SupplierDraftDto.cs" />
     <Compile Include="Models\TrialBalanceRowDto.cs" />
