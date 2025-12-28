@@ -22,6 +22,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.ListView;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TreeView;
 
 namespace DhanSutra
 {
@@ -1189,8 +1190,15 @@ reorderlevel=@reorderlevel
                             BranchName = reader["BranchName"]?.ToString(),
 
                             InvoicePrefix = reader["InvoicePrefix"]?.ToString(),
-                            InvoiceStartNo = Convert.ToInt32(reader["InvoiceStartNo"]),
-                            CurrentInvoiceNo = Convert.ToInt32(reader["CurrentInvoiceNo"]),
+                            InvoiceStartNo = reader["InvoiceStartNo"] == DBNull.Value
+                    ? (int?)null
+                    : Convert.ToInt32(reader["InvoiceStartNo"]),
+
+                            CurrentInvoiceNo = reader["CurrentInvoiceNo"] == DBNull.Value
+                    ? (int?)null
+                    : Convert.ToInt32(reader["CurrentInvoiceNo"]),
+
+
 
                             Logo = reader["Logo"] as byte[],
 
@@ -1254,6 +1262,500 @@ reorderlevel=@reorderlevel
 
             return profile;
         }
+        private bool HasAnyStockMovement(SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = txn;
+                cmd.CommandText = @"
+            SELECT 1
+            FROM ItemLedger
+            LIMIT 1;
+        ";
+
+                var o = cmd.ExecuteScalar();
+                return o != null && o != DBNull.Value;
+            }
+        }
+    //    public object GetOpeningStock()
+    //    {
+    //        using (var conn = new SQLiteConnection(_connectionString))
+    //        {
+    //            conn.Open();
+
+    //            using (var cmd = new SQLiteCommand(@"
+    //    SELECT OpeningStockId, AsOnDate, Notes, TotalQty, TotalValue
+    //    FROM OpeningStock LIMIT 1
+    //", conn))
+    //            {
+    //                using (var r = cmd.ExecuteReader())
+    //                {
+    //                    if (!r.Read()) return null;
+
+    //                    long id = r.GetInt64(0);
+
+    //                    var items = new List<object>();
+    //                    using (var cmd2 = new SQLiteCommand(@"
+    //    SELECT i.ItemName, o.BatchNo, o.Qty, o.Rate, o.Value
+    //    FROM OpeningStockItems o
+    //    JOIN Items i ON i.ItemId = o.ItemId
+    //    WHERE o.OpeningStockId = @id
+    //", conn))
+    //                    {
+    //                        cmd2.Parameters.AddWithValue("@id", id);
+    //                        using (var r2 = cmd2.ExecuteReader())
+    //                        {
+    //                            while (r2.Read())
+    //                            {
+    //                                items.Add(new
+    //                                {
+    //                                    ItemName = r2.GetString(0),
+    //                                    BatchNo = r2.IsDBNull(1) ? "" : r2.GetString(1),
+    //                                    Qty = r2.GetDecimal(2),
+    //                                    Rate = r2.GetDecimal(3),
+    //                                    Value = r2.GetDecimal(4)
+    //                                });
+    //                            }
+
+    //                            return new
+    //                            {
+    //                                AsOnDate = r.GetString(1),
+    //                                Notes = r.GetString(2),
+    //                                TotalQty = r.GetDecimal(3),
+    //                                TotalValue = r.GetDecimal(4),
+    //                                Items = items
+    //                            };
+    //                        }
+    //                    }
+    //                }
+    //            }
+    //        }
+    //    }
+
+       
+        public void SaveOpeningStock(JObject payload)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var txn = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 🔒 1. HARD LOCK
+                        if (OpeningStockExists(conn, txn))
+                            throw new Exception("Opening stock has already been entered.");
+
+                        if (HasAnyStockMovement(conn, txn))
+                            throw new Exception("Opening stock must be entered before any stock transactions.");
+
+                        string asOnDate = payload.Value<string>("AsOnDate");
+                        string notes = payload.Value<string>("Notes") ?? "";
+
+                        var items = payload["Items"] as JArray;
+                        if (items == null || items.Count == 0)
+                            throw new Exception("No opening stock items provided.");
+
+                        decimal totalQty = 0;
+                        decimal totalValue = 0;
+
+                        long openingStockId = InsertOpeningStockHeader(
+                            conn, txn, asOnDate, notes
+                        );
+
+                        foreach (var it in items)
+                        {
+                            int itemId = it.Value<int>("ItemId");
+                            string batch = it.Value<string>("BatchNo");
+                            decimal qty = it.Value<decimal>("Qty");
+                            decimal rate = it.Value<decimal>("Rate");
+
+                            if (qty <= 0)
+                                throw new Exception("Quantity must be greater than zero.");
+
+                            decimal value = qty * rate;
+
+                            InsertOpeningStockItem( conn, txn,openingStockId, itemId, batch, qty, rate,value);
+                            InsertItemLedgerOpening(conn,txn, itemId, batch, qty,rate, asOnDate, openingStockId, payload.Value<string>("CreatedBy") ?? "SYSTEM");
+                            totalQty += qty;
+                            totalValue += value;
+                            //update or insert itembalance for each item
+                            UpdateItemBalance(new ItemLedger
+                            {
+                                ItemId = itemId,
+                                BatchNo = batch,
+                                Qty = qty
+                            }, conn, txn);
+
+                        }
+
+
+
+                        CreateOpeningStockJournal(conn,txn,asOnDate,totalValue,openingStockId);
+
+
+                        UpdateOpeningStockTotals(
+                            conn, txn,
+                            openingStockId,
+                            totalQty,
+                            totalValue
+                        );
+
+                        txn.Commit();
+                    }
+                    catch
+                    {
+                        txn.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
+        private void UpdateOpeningStockTotals(
+    SQLiteConnection conn,
+    SQLiteTransaction txn,
+    long openingStockId,
+    decimal totalQty,
+    decimal totalValue
+)
+        {
+            using (var cmd = new SQLiteCommand(@"
+        UPDATE OpeningStock
+        SET
+            TotalQty = @qty,
+            TotalValue = @val
+        WHERE OpeningStockId = @id;
+    ", conn, txn))
+            {
+
+                cmd.Parameters.AddWithValue("@qty", totalQty);
+                cmd.Parameters.AddWithValue("@val", totalValue);
+                cmd.Parameters.AddWithValue("@id", openingStockId);
+
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        private bool HasAnyItemMovement(SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            using (var cmd = new SQLiteCommand(
+                "SELECT 1 FROM ItemLedger LIMIT 1",
+                conn, txn
+            ))
+                return cmd.ExecuteScalar() != null;
+        }
+
+        public (OpeningStockHeaderDto Header, List<OpeningStockItemDto> Items) GetOpeningStock()
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // ------------------------------------------------
+                // STEP 1: Check if any opening stock exists
+                // ------------------------------------------------
+                string headerSql = @"
+        SELECT 
+            Date,
+            SUM(Qty) AS TotalQty,
+            SUM(TotalAmount) AS TotalValue,
+            MAX(Remarks) AS Notes
+        FROM ItemLedger
+        WHERE TxnType = 'OPENING'
+    ";
+
+                OpeningStockHeaderDto header = null;
+
+                using (var cmd = new SQLiteCommand(headerSql, conn))
+                using (var r = cmd.ExecuteReader())
+                {
+                    if (r.Read() && r["TotalQty"] != DBNull.Value)
+                    {
+                        header = new OpeningStockHeaderDto
+                        {
+                            AsOnDate = r["Date"]?.ToString(),
+                            Notes = r["Notes"]?.ToString(),
+                            TotalQty = Convert.ToDecimal(r["TotalQty"]),
+                            TotalValue = Convert.ToDecimal(r["TotalValue"])
+                        };
+                    }
+                }
+
+                if (header == null)
+                    return (null, new List<OpeningStockItemDto>());
+
+                // ------------------------------------------------
+                // STEP 2: Load item-wise opening stock
+                // ------------------------------------------------
+                string itemSql = @"
+        SELECT 
+            il.ItemId,
+            i.Name AS ItemName,
+            il.BatchNo,
+            il.Qty,
+            il.Rate,
+            il.TotalAmount
+        FROM ItemLedger il
+        INNER JOIN Item i ON i.Id = il.ItemId
+        WHERE il.TxnType = 'OPENING'
+        ORDER BY i.Name
+    ";
+
+                var items = new List<OpeningStockItemDto>();
+
+                using (var cmd = new SQLiteCommand(itemSql, conn))
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        items.Add(new OpeningStockItemDto
+                        {
+                            ItemId = Convert.ToInt64(r["ItemId"]),
+                            ItemName = r["ItemName"].ToString(),
+                            BatchNo = r["BatchNo"]?.ToString(),
+                            Qty = Convert.ToDecimal(r["Qty"]),
+                            Rate = Convert.ToDecimal(r["Rate"]),
+                            Value = Convert.ToDecimal(r["TotalAmount"])
+                        });
+                    }
+                }
+
+                return (header, items);
+            }
+        }
+
+        private bool OpeningStockExists(SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            using (var cmd = new SQLiteCommand("SELECT 1 FROM OpeningStock LIMIT 1",conn, txn))
+            return cmd.ExecuteScalar() != null;
+        }
+        private long InsertOpeningStockHeader(
+    SQLiteConnection conn,
+    SQLiteTransaction txn,
+    string asOnDate,
+    string notes)
+        {
+            using (var cmd = new SQLiteCommand(@"
+        INSERT INTO OpeningStock
+        (AsOnDate, Notes, CreatedAt)
+        VALUES (@dt, @notes, datetime('now'));
+        SELECT last_insert_rowid();
+    ", conn, txn))
+            {
+                cmd.Parameters.AddWithValue("@dt", asOnDate);
+                cmd.Parameters.AddWithValue("@notes", notes);
+
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+        private void InsertOpeningStockItem(
+    SQLiteConnection conn,
+    SQLiteTransaction txn,
+    long openingStockId,
+    int itemId,
+    string batch,
+    decimal qty,
+    decimal rate,
+    decimal value)
+        {
+            using (var cmd = new SQLiteCommand(@"
+        INSERT INTO OpeningStockItems
+        (OpeningStockId, ItemId, BatchNo, Qty, Rate, Value)
+        VALUES (@oid, @item, @batch, @qty, @rate, @val);
+    ", conn, txn))
+            {
+                cmd.Parameters.AddWithValue("@oid", openingStockId);
+                cmd.Parameters.AddWithValue("@item", itemId);
+                cmd.Parameters.AddWithValue("@batch", batch);
+                cmd.Parameters.AddWithValue("@qty", qty);
+                cmd.Parameters.AddWithValue("@rate", rate);
+                cmd.Parameters.AddWithValue("@val", value);
+
+                cmd.ExecuteNonQuery();
+            }
+        }
+        private void InsertItemLedgerOpening(
+    SQLiteConnection conn,
+    SQLiteTransaction txn,
+    int itemId,
+    string batchNo,
+    decimal qty,
+    decimal rate,
+    string asOnDate,
+    long openingStockId,
+    string createdBy
+)
+        {
+            using (var cmd = new SQLiteCommand(@"
+        INSERT INTO ItemLedger
+        (
+            ItemId,
+            BatchNo,
+            Date,
+            TxnType,
+            RefNo,
+            Qty,
+            Rate,
+            DiscountPercent,
+            NetRate,
+            TotalAmount,
+            Remarks,
+            CreatedBy
+        )
+        VALUES
+        (
+            @itemId,
+            @batch,
+            @date,
+            'OPENING',
+            @refNo,
+            @qty,
+            @rate,
+            0,
+            @rate,
+            @total,
+            'Opening Stock',
+            @createdBy
+        );
+    ", conn, txn))
+            {
+                cmd.Parameters.AddWithValue("@itemId", itemId);
+                cmd.Parameters.AddWithValue("@batch", (object)batchNo ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@date", asOnDate);
+                cmd.Parameters.AddWithValue("@refNo", $"OPENING-{openingStockId}");
+                cmd.Parameters.AddWithValue("@qty", qty);                // ✅ POSITIVE
+                cmd.Parameters.AddWithValue("@rate", rate);
+                cmd.Parameters.AddWithValue("@total", qty * rate);
+                cmd.Parameters.AddWithValue("@createdBy", createdBy);
+
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        private void CreateOpeningStockJournal(SQLiteConnection conn,SQLiteTransaction txn,string asOnDate,decimal amount,long openingStockId)
+        {
+            long stockAcc = GetStockAccountId(conn, txn);
+            long openingBalAcc = GetOpeningBalanceAccountId(conn, txn);
+
+            long jeId = InsertJournalEntry(conn,txn,asOnDate,"Opening Stock Entry","OPENING_STOCK", stockAcc);
+
+            InsertJournalLine(conn, txn, jeId, stockAcc, amount, 0);
+            InsertJournalLine(conn, txn, jeId, openingBalAcc, 0, amount);
+        }
+        public (decimal Qty, decimal Rate) GetCurrentStockAndRate(
+    SQLiteConnection conn,
+    SQLiteTransaction txn,
+    long itemId
+)
+        {
+            // -------------------------
+            // CURRENT STOCK
+            // -------------------------
+            decimal qty = 0;
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = txn;
+                cmd.CommandText = @"
+            select currentqty from itembalance where itemid=@itemId and id=(select max(id) from itembalance where itemid=@itemId);
+        ";
+                cmd.Parameters.AddWithValue("@itemId", itemId);
+                qty = Convert.ToDecimal(cmd.ExecuteScalar());
+            }
+
+            // -------------------------
+            // FIFO RATE (LAST AVAILABLE)
+            // -------------------------
+            decimal rate = 0;
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = txn;
+                cmd.CommandText = @"
+            SELECT NetRate
+            FROM ItemLedger
+            WHERE ItemId = @itemId
+              AND Qty > 0
+            ORDER BY Date DESC, Id DESC
+            LIMIT 1;
+        ";
+                cmd.Parameters.AddWithValue("@itemId", itemId);
+
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value)
+                    rate = Convert.ToDecimal(o);
+            }
+
+            return (qty, rate);
+        }
+
+        private long GetOpeningBalanceAccountId(SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = txn;
+                cmd.CommandText = @"
+            SELECT AccountId
+            FROM Accounts
+            WHERE AccountName = 'Opening Balance Adjustment'
+            LIMIT 1;
+        ";
+
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value)
+                    return Convert.ToInt64(o);
+            }
+
+            // Create account if missing
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = txn;
+                cmd.CommandText = @"
+            INSERT INTO Accounts
+            (AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, IsActive, CreatedAt)
+            VALUES
+            ('Opening Balance Adjustment', 'Equity', NULL, 'Credit', 0, 1, datetime('now'));
+
+            SELECT last_insert_rowid();
+        ";
+
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
+        private long GetStockAccountId(SQLiteConnection conn, SQLiteTransaction txn)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = txn;
+                cmd.CommandText = @"
+            SELECT AccountId
+            FROM Accounts
+            WHERE AccountName = 'Opening Stock'
+            LIMIT 1;
+        ";
+
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value)
+                    return Convert.ToInt64(o);
+            }
+
+            // Create account if missing
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = txn;
+                cmd.CommandText = @"
+            INSERT INTO Accounts
+            (AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, IsActive, CreatedAt)
+            VALUES
+            ('Opening Stock', 'Asset', NULL, 'Debit', 0, 1, datetime('now'));
+
+            SELECT last_insert_rowid();
+        ";
+
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
+
         public bool SaveCompanyProfile(CompanyProfile data)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -1353,44 +1855,47 @@ reorderlevel=@reorderlevel
         //    try { return Convert.FromBase64String(base64); }
         //    catch { return null; }
         //}
-        public (string InvoiceNo, int InvoiceNum) GetNextInvoiceNumber(int companyProfileId = 1)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
-                using (var txn = conn.BeginTransaction())
-                {
-                    // read current
-                    string q = "SELECT InvoicePrefix, CurrentInvoiceNo FROM CompanyProfile WHERE Id = @Id LIMIT 1";
-                    using (var cmd = new SQLiteCommand(q, conn, txn))
-                    {
-                        cmd.Parameters.AddWithValue("@Id", companyProfileId);
-                        using (var r = cmd.ExecuteReader())
-                        {
-                            if (!r.Read()) throw new Exception("CompanyProfile missing");
-                            string prefix = (r["InvoicePrefix"]?.ToString()) ?? "INV-";
-                            int cur = r["CurrentInvoiceNo"] == DBNull.Value ? 1 : Convert.ToInt32(r["CurrentInvoiceNo"]);
-                            int next = cur;
+        //public (string InvoiceNo, int InvoiceNum) GetNextInvoiceNumber(int companyProfileId = 1)
+        //{
+        //    using (var conn = new SQLiteConnection(_connectionString))
+        //    {
+        //        conn.Open();
+        //        using (var txn = conn.BeginTransaction())
+        //        {
+        //            // read current
+        //            string q = "SELECT InvoicePrefix, CurrentInvoiceNo FROM CompanyProfile WHERE Id = @Id LIMIT 1";
+        //            using (var cmd = new SQLiteCommand(q, conn, txn))
+        //            {
+        //                cmd.Parameters.AddWithValue("@Id", companyProfileId);
+        //                using (var r = cmd.ExecuteReader())
+        //                {
+        //                    if (!r.Read()) throw new Exception("CompanyProfile missing");
+        //                    string prefix = (r["InvoicePrefix"]?.ToString()) ?? "INV-";
+        //                    string currFinYear = GetFinancialYear();
+        //                    prefix=prefix + currFinYear + "-";
+        //                    int cur = r["CurrentInvoiceNo"] == DBNull.Value ? 1 : Convert.ToInt32(r["CurrentInvoiceNo"]);
+        //                    int next = cur;
 
-                            // format with leading zeros (customize digits)
-                            string formatted = $"{prefix}{next:00000}";
+        //                    // format with leading zeros (customize digits)
+        //                    string formatted = $"{prefix}{next:00000}";
 
-                            // increment and save
-                            string upd = "UPDATE CompanyProfile SET CurrentInvoiceNo = @Next WHERE Id = @Id";
-                            using (var cmd2 = new SQLiteCommand(upd, conn, txn))
-                            {
-                                cmd2.Parameters.AddWithValue("@Next", next + 1);
-                                cmd2.Parameters.AddWithValue("@Id", companyProfileId);
-                                cmd2.ExecuteNonQuery();
-                            }
+        //                    // increment and save
+        //                    string upd = "UPDATE CompanyProfile SET CurrentInvoiceNo = @Next WHERE Id = @Id";
+        //                    using (var cmd2 = new SQLiteCommand(upd, conn, txn))
+        //                    {
+        //                        cmd2.Parameters.AddWithValue("@Next", next + 1);
+        //                        cmd2.Parameters.AddWithValue("@Id", companyProfileId);
+        //                        cmd2.ExecuteNonQuery();
+        //                    }
 
-                            txn.Commit();
-                            return (formatted, next);
-                        }
-                    }
-                }
-            }
-        }
+        //                    txn.Commit();
+        //                    return (formatted, next);
+        //                }
+        //            }
+        //        }
+        //    }
+        //}
+        
         public bool DecreaseItemBalance(ItemLedger entry, SQLiteConnection conn, SQLiteTransaction txn)
         {
             try
@@ -1839,7 +2344,7 @@ reorderlevel=@reorderlevel
                         //    tx
                         //);
 
-
+                        var nextinvoiceresult=ConsumeInvoiceNumber( conn,  tx, dto.CompanyId);
                         tx.Commit();
                         return (invoiceId, dto.InvoiceNo);
                     }
@@ -3946,6 +4451,32 @@ State=@state
         }
 
 
+        public bool CheckDuplicatePurchaseInvoice(long supplierId, string invoiceNo)
+        {
+            if (string.IsNullOrWhiteSpace(invoiceNo))
+                return false;
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT COUNT(1)
+                FROM PurchaseHeader
+                WHERE SupplierId = @sid
+                  AND InvoiceNo = @invno;
+            ";
+
+                    cmd.Parameters.AddWithValue("@sid", supplierId);
+                    cmd.Parameters.AddWithValue("@invno", invoiceNo);
+
+                    var count = Convert.ToInt32(cmd.ExecuteScalar());
+                    return count > 0;
+                }
+            }
+        }
 
         public (long purchaseId, string invoiceNo) SavePurchaseInvoice(PurchaseInvoiceDto dto)
         {
@@ -3986,7 +4517,7 @@ State=@state
                         // 1) Insert header
                         using (var cmd = conn.CreateCommand())
                         {
-                            //long nextInvoiceNum = GetNextPurchaseInvoiceNum();
+                            long nextInvoiceNum = GetNextPurchaseInvoiceNum();
 
                             cmd.Transaction = tran;
                             cmd.CommandText = @"
@@ -3995,7 +4526,7 @@ VALUES (@InvoiceNo,@InvoiceNum, @InvoiceDate, @SupplierId, @TotalAmount, @TotalT
 SELECT last_insert_rowid();
 ";
                             cmd.Parameters.AddWithValue("@InvoiceNo", dto.InvoiceNo);
-                            cmd.Parameters.AddWithValue("@InvoiceNum", dto.InvoiceNum);
+                            cmd.Parameters.AddWithValue("@InvoiceNum", nextInvoiceNum);
                             cmd.Parameters.AddWithValue(
                             "@InvoiceDate",
                             string.IsNullOrWhiteSpace(dto.InvoiceDate)
@@ -4248,6 +4779,100 @@ VALUES
                 }
             }
         }
+        public (string InvoiceNo, int InvoiceNum) GetNextInvoiceNumberFromCompanyProfile(
+    int companyProfileId = 1)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var txn = conn.BeginTransaction())
+                {
+                    string q = @"
+                SELECT InvoicePrefix, InvoiceStartNo, CurrentInvoiceNo
+                FROM CompanyProfile
+                WHERE Id = @Id
+                LIMIT 1";
+
+                    using (var cmd = new SQLiteCommand(q, conn, txn))
+                    {
+                        cmd.Parameters.AddWithValue("@Id", companyProfileId);
+
+                        using (var r = cmd.ExecuteReader())
+                        {
+                            if (!r.Read())
+                                throw new Exception("CompanyProfile missing");
+
+                            string prefix = r["InvoicePrefix"]?.ToString() ?? "INV-";
+
+                            string currFinYear = GetFinancialYear();
+                            prefix = prefix + currFinYear + "-";
+
+                            int startNo = r["InvoiceStartNo"] == DBNull.Value
+                                            ? 1
+                                            : Convert.ToInt32(r["InvoiceStartNo"]);
+
+                            int curNo = r["CurrentInvoiceNo"] == DBNull.Value
+                                            ? startNo
+                                            : Convert.ToInt32(r["CurrentInvoiceNo"]);
+
+                            string formatted = $"{prefix}{curNo:00000}";
+
+                            txn.Commit(); // read-only, but fine
+                            return (formatted, curNo);
+                        }
+                    }
+                }
+            }
+        }
+
+        private (string InvoiceNo, int InvoiceNum) ConsumeInvoiceNumber(
+    SQLiteConnection conn,
+    SQLiteTransaction txn,
+    int companyProfileId = 1)
+        {
+            string q = @"
+        SELECT InvoicePrefix, CurrentInvoiceNo
+        FROM CompanyProfile
+        WHERE Id = @Id
+        LIMIT 1";
+
+            using (var cmd = new SQLiteCommand(q, conn, txn))
+            {
+                cmd.Parameters.AddWithValue("@Id", companyProfileId);
+
+                using (var r = cmd.ExecuteReader())
+                {
+                    if (!r.Read())
+                        throw new Exception("CompanyProfile missing");
+
+                    string prefix = r["InvoicePrefix"]?.ToString() ?? "INV-";
+                    //string currFinYear = GetFinancialYear();
+                    //prefix = prefix + currFinYear + "-";
+                    int cur = r["CurrentInvoiceNo"] == DBNull.Value
+                                ? 1
+                                : Convert.ToInt32(r["CurrentInvoiceNo"]);
+
+                    string invoiceNo = $"{prefix}{cur:00000}";
+
+                    // Increment ONLY NOW
+                    string upd = @"
+                UPDATE CompanyProfile
+                SET CurrentInvoiceNo = @Next
+                WHERE Id = @Id";
+
+                    using (var cmd2 = new SQLiteCommand(upd, conn, txn))
+                    {
+                        cmd2.Parameters.AddWithValue("@Next", cur + 1);
+                        cmd2.Parameters.AddWithValue("@Id", companyProfileId);
+                        cmd2.ExecuteNonQuery();
+                    }
+
+                    return (invoiceNo, cur);
+                }
+            }
+        }
+
+
 
         public string GetFinancialYear()
         {
@@ -6813,6 +7438,169 @@ ORDER BY a.AccountType, a.AccountName;
                 }
             }
         }
+        public bool SaveStockAdjustment(string date,string type,string reason, string notes, string createdBy,List<StockAdjustmentItemDto> items)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1️⃣ Safety check
+                        if (HasAnyStockMovement(conn, tx) == false)
+                        {
+                            throw new Exception("Stock system not initialized.");
+                        }
+
+                        // 2️⃣ Journal Entry
+                        long jeId = InsertJournalEntry(
+                            conn, tx,
+                            date,
+                            $"Stock Adjustment ({reason})",
+                            "STOCK_ADJUSTMENT",
+                            0
+                        );
+
+                        long stockAcc = GetStockAccountId(conn, tx);
+                        long adjAcc = GetStockAdjustmentAccountId(conn, tx);
+
+                        foreach (var it in items)
+                        {
+                            decimal qty = it.AdjustQty;
+                            decimal rate = it.Rate;
+                            decimal amount = qty * rate;
+
+                            if (type == "DECREASE")
+                            {
+                                //qty = -qty; // 🔴 critical
+
+                                // 3️⃣ ITEM LEDGER
+                                InsertItemLedger(conn, tx,
+                                    itemId: it.ItemId,
+                                    batchNo: it.BatchNo,
+                                    date: date,
+                                    txnType: "STOCK_ADJUSTMENT",
+                                    refNo: null,
+                                    qty: -qty,
+                                    rate: rate,
+                                    totalAmount: -amount,
+                                    remarks: reason,
+                                    createdBy: createdBy
+                                );
+                                UpdateItemBalanceSales(new ItemLedger
+                                {
+                                    ItemId = (int)it.ItemId,
+                                    BatchNo = it.BatchNo,
+                                    Qty = it.AdjustQty
+                                }, conn, tx);
+
+                                
+
+                                
+                            }
+                            
+
+                            // 4️⃣ JOURNAL LINES
+                            if (type == "INCREASE")
+                            {
+                                UpdateItemBalance(new ItemLedger
+                                {
+                                    ItemId = (int)it.ItemId,
+                                    BatchNo = it.BatchNo,
+                                    Qty = it.AdjustQty
+                                }, conn, tx);
+                                // Stock ↑ , Adjustment ↓
+                                InsertJournalLine(conn, tx, jeId, stockAcc, amount, 0);
+                                InsertJournalLine(conn, tx, jeId, adjAcc, 0, amount);
+                            }
+                            else
+                            {
+                                // Stock ↓ , Adjustment ↑
+                                InsertJournalLine(conn, tx, jeId, adjAcc, amount, 0);
+                                InsertJournalLine(conn, tx, jeId, stockAcc, 0, amount);
+                            }
+                        }
+
+                        tx.Commit();
+
+
+                        return true;
+                    }
+
+                    catch
+                    {
+                        tx.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
+        private void InsertItemLedger(
+    SQLiteConnection conn,
+    SQLiteTransaction tx,
+    long itemId,
+    string batchNo,
+    string date,
+    string txnType,
+    string refNo,
+    decimal qty,
+    decimal rate,
+    decimal totalAmount,
+    string remarks,
+    string createdBy)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+        INSERT INTO ItemLedger
+        (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, TotalAmount, Remarks, CreatedBy)
+        VALUES
+        (@item, @batch, @date, @type, @ref, @qty, @rate, @amt, @remarks, @by);
+    ";
+
+                cmd.Parameters.AddWithValue("@item", itemId);
+                cmd.Parameters.AddWithValue("@batch", (object)batchNo ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@date", date);
+                cmd.Parameters.AddWithValue("@type", txnType);
+                cmd.Parameters.AddWithValue("@ref", (object)refNo ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@qty", qty);
+                cmd.Parameters.AddWithValue("@rate", rate);
+                cmd.Parameters.AddWithValue("@amt", totalAmount);
+                cmd.Parameters.AddWithValue("@remarks", remarks);
+                cmd.Parameters.AddWithValue("@by", createdBy);
+
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        private long GetStockAdjustmentAccountId(SQLiteConnection conn, SQLiteTransaction tx)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+        SELECT AccountId FROM Accounts
+        WHERE AccountName = 'Stock Adjustment'
+        LIMIT 1;
+    ";
+
+                var o = cmd.ExecuteScalar();
+                if (o != null) return Convert.ToInt64(o);
+
+                cmd.CommandText = @"
+        INSERT INTO Accounts
+        (AccountName, AccountType, NormalSide, OpeningBalance, IsActive)
+        VALUES ('Stock Adjustment', 'Expense', 'Debit', 0, 1);
+        SELECT last_insert_rowid();
+    ";
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
+
         public SaveSalesReturnResult SaveSalesReturn(SalesReturnDto dto)
         {
 

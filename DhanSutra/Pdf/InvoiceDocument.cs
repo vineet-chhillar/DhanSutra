@@ -93,8 +93,8 @@ namespace DhanSutra.Pdf
         public string BranchName { get; set; }
 
         public string InvoicePrefix { get; set; }
-        public int InvoiceStartNo { get; set; }
-        public int CurrentInvoiceNo { get; set; }
+        public int? InvoiceStartNo { get; set; }
+        public int? CurrentInvoiceNo { get; set; }
 
         public byte[] Logo { get; set; }
 

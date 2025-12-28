@@ -283,6 +283,7 @@
     <Compile Include="Models\LedgerRowDto.cs" />
     <Compile Include="Models\LoadSalesInvoiceDto.cs" />
     <Compile Include="Models\LoadSalesInvoiceItemDto.cs" />
+    <Compile Include="Models\OpeningStockHeaderDto.cs" />
     <Compile Include="Models\ProfitLossReportDto.cs" />
     <Compile Include="Models\ProfitLossRow.cs" />
     <Compile Include="Models\PurchaseInvoiceDto.cs" />
@@ -300,6 +301,7 @@
     <Compile Include="Models\SalesReturnItemDetailDto.cs" />
     <Compile Include="Models\SavePurchasepaymentResult.cs" />
     <Compile Include="Models\SaveSalesReturnResult.cs" />
+    <Compile Include="Models\StockAdjustmentItemDto.cs" />
     <Compile Include="Models\SupplierDraftDto.cs" />
     <Compile Include="Models\TrialBalanceRowDto.cs" />
     <Compile Include="Pdf\CompanyProfilePdfDto.cs" />

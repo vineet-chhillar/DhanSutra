@@ -780,7 +780,7 @@ namespace DhanSutra
                                     InvoicePrefix = profile.InvoicePrefix,
                                     InvoiceStartNo = profile.InvoiceStartNo,
                                     CurrentInvoiceNo = profile.CurrentInvoiceNo,
-
+                                    CanEditInvoiceStartNo = profile.CurrentInvoiceNo == null || profile.CurrentInvoiceNo <= profile.InvoiceStartNo,
                                     LogoBase64 = logoBase64,
 
                                     CreatedBy = profile.CreatedBy,
@@ -797,9 +797,26 @@ namespace DhanSutra
 
                     case "SaveCompanyProfile":
                         {
+
                             // Convert payload to JObject
                             var p = JObject.FromObject(req.Payload);
+                            // -------- Invoice number normalization --------
+                            int? startNo = p["InvoiceStartNo"]?.Type == JTokenType.Null
+                                ? (int?)null
+                                : p["InvoiceStartNo"]?.ToObject<int>();
 
+                            int? currentNo = p["CurrentInvoiceNo"]?.Type == JTokenType.Null
+                                ? (int?)null
+                                : p["CurrentInvoiceNo"]?.ToObject<int>();
+
+                            // RULE: CurrentInvoiceNo must never be NULL in DB
+                            if (currentNo == null)
+                            {
+                                if (startNo == null)
+                                    throw new Exception("Invoice Start No is required.");
+
+                                currentNo = startNo;
+                            }
                             // Extract profile JSON
                             //var p = payload["profile"];
 
@@ -823,10 +840,35 @@ namespace DhanSutra
                                 IFSC = p["IFSC"]?.ToString(),
                                 BranchName = p["BranchName"]?.ToString(),
                                 InvoicePrefix = p["InvoicePrefix"]?.ToString(),
-                                InvoiceStartNo = p["InvoiceStartNo"]?.ToObject<int>() ?? 1,
-                                CurrentInvoiceNo = p["CurrentInvoiceNo"]?.ToObject<int>() ?? 1,
+                                InvoiceStartNo = startNo,
+                                CurrentInvoiceNo = currentNo,
+
                                 CreatedBy = p["CreatedBy"]?.ToString()
                             };
+                            if (model.CurrentInvoiceNo == null && model.InvoiceStartNo != null)
+                            {
+                                // this is OK → preview will show start no
+                            }
+                            else if (model.CurrentInvoiceNo != null && model.InvoiceStartNo == null)
+                            {
+                                throw new Exception("Invoice Start No cannot be null when Current Invoice No exists.");
+                            }
+                            var existing = db.GetCompanyProfile();
+
+                            if (existing != null)
+                            {
+                                bool invoicesStarted =
+                                    existing.CurrentInvoiceNo != null &&
+                                    existing.CurrentInvoiceNo > existing.InvoiceStartNo;
+
+                                if (invoicesStarted &&
+                                    model.InvoiceStartNo != existing.InvoiceStartNo)
+                                {
+                                    throw new Exception(
+                                        "Invoice Start Number cannot be changed after invoices are created."
+                                    );
+                                }
+                            }
 
                             // ⭐ CORRECT PLACE FOR LOGO BASE64 HANDLING ⭐
                             var logoBase64 = p["LogoBase64"]?.ToString();
@@ -882,6 +924,121 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
+                    case "SaveOpeningStock":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            try
+                            {
+                                db.SaveOpeningStock(payload);
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveOpeningStockResponse",
+                                        success = true,
+                                        message = "Opening stock saved successfully."
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveOpeningStockResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+                    case "GetOpeningStock":
+                        {
+                            var result = db.GetOpeningStock();
+
+                            var response = new
+                            {
+                                action = "GetOpeningStockResponse",
+                                exists = result.Header != null,
+                                header = result.Header,
+                                items = result.Items
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+                        }
+                    case "SaveStockAdjustment":
+                        {
+                            var p = JObject.FromObject(req.Payload);
+
+                            bool ok;
+                            string stockadjustmentmessage;
+
+                            try
+                            {
+                                ok = db.SaveStockAdjustment(
+                                    date: p.Value<string>("Date"),
+                                    type: p.Value<string>("AdjustmentType"),
+                                    reason: p.Value<string>("Reason"),
+                                    notes: p.Value<string>("Notes"),
+                                    createdBy: p.Value<string>("CreatedBy"),
+                                    items: p["Items"].ToObject<List<StockAdjustmentItemDto>>()
+                                );
+
+                                stockadjustmentmessage = "Stock adjustment saved successfully.";
+                            }
+                            catch (Exception ex)
+                            {
+                                ok = false;
+                                stockadjustmentmessage = ex.Message;
+                            }
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "SaveStockAdjustmentResponse",
+                                    success = ok,
+                                    stockadjustmentmessage
+                                })
+                            );
+                            break;
+                        }
+
+                    case "GetCurrentStockForAdjustment":
+                        {
+                            var p = JObject.FromObject(req.Payload);
+                            long itemId = p.Value<long>("ItemId");
+
+                            using (var conn = new SQLiteConnection(_connectionString1))
+                            {
+                                conn.Open();
+                                using (var txn = conn.BeginTransaction())
+                                {
+                                    var (qty, rate) = db.GetCurrentStockAndRate(conn, txn, itemId);
+                                    txn.Commit();
+
+                                    var response = new
+                                    {
+                                        action = "GetCurrentStockForAdjustmentResponse",
+                                        ItemId = itemId,
+                                        CurrentQty = qty,
+                                        Rate = rate
+                                    };
+
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(response)
+                                    );
+                                }
+                            }
+                            break;
+                        }
+
                     case "CreateInvoice":
                         {
                             try
@@ -2036,6 +2193,47 @@ namespace DhanSutra
                             };
 
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+                    case "GetNextInvoiceNumberFromCompanyProfile":
+                        {
+                            var result = db.GetNextInvoiceNumberFromCompanyProfile();
+
+                            //string fy = GetFinancialYear();   // EX: "24-25"
+                            //string padded = nextNum.ToString("D5"); // 00001, 00002
+
+                            //string invoiceNo = $"SINV-{fy}-{padded}";
+
+                            var response = new
+                            {
+                                action = "GetNextInvoiceNumberFromCompanyProfileResponse",
+                                nextNum = result.InvoiceNum,
+                                invoiceNo = result.InvoiceNo
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                        }
+
+                    case "CheckDuplicatePurchaseInvoice":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long supplierId = payload.Value<long>("SupplierId");
+                            string invoiceNo = payload.Value<string>("InvoiceNo")?.Trim();
+
+                            bool exists = db.CheckDuplicatePurchaseInvoice(supplierId, invoiceNo);
+
+                            var response = new
+                            {
+                                action = "CheckDuplicatePurchaseInvoiceResponse",
+                                exists = exists
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
                             break;
                         }
 
