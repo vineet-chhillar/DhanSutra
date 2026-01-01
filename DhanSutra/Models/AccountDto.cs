@@ -11,6 +11,10 @@ namespace DhanSutra.Models
         public long AccountId { get; set; }
         public string AccountName { get; set; }
         public string AccountType { get; set; }
+
+        public long ParentAccountId { get; set; }
+        
+
         public string NormalSide { get; set; }
         public double OpeningBalance { get; set; }
         public bool IsActive { get; set; }

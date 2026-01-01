@@ -973,16 +973,41 @@ namespace DhanSutra
                             );
                             break;
                         }
+                    case "GetCashBankAccounts":
+                        {
+                            var data = db.GetCashBankAccounts();
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "GetCashBankAccountsResponse",
+                                    data
+                                })
+                            );
+                            break;
+                        }
+                    case "GetExpenseAccounts":
+                        {
+                            var data = db.GetExpenseAccounts();
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "GetExpenseAccountsResponse",
+                                    data
+                                })
+                            );
+                            break;
+                        }
+
+
                     case "SaveStockAdjustment":
                         {
                             var p = JObject.FromObject(req.Payload);
 
-                            bool ok;
-                            string stockadjustmentmessage;
-
                             try
                             {
-                                ok = db.SaveStockAdjustment(
+                                var result = db.SaveStockAdjustment(
                                     date: p.Value<string>("Date"),
                                     type: p.Value<string>("AdjustmentType"),
                                     reason: p.Value<string>("Reason"),
@@ -991,22 +1016,290 @@ namespace DhanSutra
                                     items: p["Items"].ToObject<List<StockAdjustmentItemDto>>()
                                 );
 
-                                stockadjustmentmessage = "Stock adjustment saved successfully.";
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveStockAdjustmentResponse",
+                                        success = true,
+                                        AdjustmentId = result.AdjustmentId,
+                                        AdjustmentNo = result.AdjustmentNo,
+                                        message = "Stock adjustment saved successfully."
+                                    })
+                                );
                             }
                             catch (Exception ex)
                             {
-                                ok = false;
-                                stockadjustmentmessage = ex.Message;
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveStockAdjustmentResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
                             }
+
+                            break;
+                        }
+                    case "GetRecentStockAdjustments":
+                        {
+                            var list = db.GetRecentStockAdjustments();
 
                             webView.CoreWebView2.PostWebMessageAsJson(
                                 JsonConvert.SerializeObject(new
                                 {
-                                    action = "SaveStockAdjustmentResponse",
-                                    success = ok,
-                                    stockadjustmentmessage
+                                    action = "GetRecentStockAdjustmentsResponse",
+                                    data = list
                                 })
                             );
+                            break;
+                        }
+
+                    case "LoadStockAdjustment":
+                        {
+                            var p = JObject.FromObject(req.Payload);
+                            long id = p.Value<long>("AdjustmentId");
+
+                            try
+                            {
+                                var detail = db.GetStockAdjustmentDetail(id);
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "LoadStockAdjustmentResponse",
+                                        success = true,
+                                        data = detail
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "LoadStockAdjustmentResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+                    case "LoadExpenseVoucher":
+                        {
+                            var p = JObject.FromObject(req.Payload);
+
+                            try
+                            {
+                                long id = p.Value<long>("ExpenseVoucherId");
+
+                                var data = db.LoadExpenseVoucher(id);
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "LoadExpenseVoucherResponse",
+                                        success = true,
+                                        data
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "LoadExpenseVoucherResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+                    case "SaveExpensePayment":
+                        {
+                            var p = JObject.FromObject(req.Payload);
+
+                            try
+                            {
+                                db.SaveExpensePayment(
+                                    expenseVoucherId: p.Value<long>("ExpenseVoucherId"),
+                                    paymentDate: p.Value<string>("PaymentDate"),
+                                    paidViaAccountId: p.Value<long>("PaidViaAccountId"),
+                                    amount: p.Value<decimal>("Amount"),
+                                    notes: p.Value<string>("Notes"),
+                                    createdBy: p.Value<string>("CreatedBy")
+                                );
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveExpensePaymentResponse",
+                                        success = true
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveExpensePaymentResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+                    case "ReverseExpenseVoucher":
+                        {
+                            var p = JObject.FromObject(req.Payload);
+
+                            try
+                            {
+                                db.ReverseExpenseVoucher(
+                                    expenseVoucherId: p.Value<long>("ExpenseVoucherId"),
+                                    reversedBy: p.Value<string>("ReversedBy")
+                                );
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseExpenseVoucherResponse",
+                                        success = true
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseExpenseVoucherResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+                            break;
+                        }
+
+                    case "GetExpenseVouchers":
+                        {
+                            try
+                            {
+                                var list = db.GetExpenseVouchers();
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "GetExpenseVouchersResponse",
+                                        success = true,
+                                        data = list
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "GetExpenseVouchersResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+
+                    case "SaveExpenseVoucher":
+                        {
+                            var p = JObject.FromObject(req.Payload);
+
+                            try
+                            {
+                                var items = p["Items"]?.ToObject<List<ExpenseItemDto>>();
+
+                                var result = db.SaveExpenseVoucher(
+                                    date: p.Value<string>("Date"),
+                                    paymentMode: p.Value<string>("PaymentMode"),
+                                    //paidViaAccountId: p["PaidVia"]?.Type == JTokenType.Null
+                                    //    ? null
+                                    //    : p["PaidVia"]?.ToObject<long?>(),
+                                    totalAmount: p.Value<decimal>("TotalAmount"),
+                                    notes: p.Value<string>("Notes"),
+                                    createdBy: p.Value<string>("CreatedBy"),
+                                    items: items
+                                );
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveExpenseVoucherResponse",
+                                        success = true,
+                                        VoucherNo = result.VoucherNo,
+                                        ExpenseVoucherId = result.ExpenseVoucherId
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveExpenseVoucherResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+
+
+
+
+                    case "ReverseStockAdjustment":
+                        {
+                            var p = JObject.FromObject(req.Payload);
+
+                            try
+                            {
+                                var result = db.ReverseStockAdjustment(
+                                    p.Value<long>("AdjustmentId"),
+                                    p.Value<string>("ReversedBy")
+                                );
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseStockAdjustmentResponse",
+                                        success = true,
+                                        AdjustmentNo = result.AdjustmentNo
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseStockAdjustmentResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
                             break;
                         }
 
@@ -2855,13 +3148,13 @@ namespace DhanSutra
                             if (payload == null) break;
 
                             var dto = payload.ToObject<AccountDto>();
-                            long id = db.CreateAccount(dto);
+                             db.CreateAccount(dto);
 
                             var response = new
                             {
                                 action = "createAccountResult",
                                 success = true,
-                                id = id
+                                message = "Account created successfully"
                             };
 
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
@@ -3001,34 +3294,43 @@ namespace DhanSutra
                             if (payload == null) break;
 
                             var dto = payload.ToObject<AccountDto>();
-                            db.UpdateAccount(dto);
+                            var result = db.UpdateAccount(dto);
 
                             var response = new
                             {
                                 action = "updateAccountResult",
-                                success = true
+                                success = result.Success,
+                                message = result.Message
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
                             break;
                         }
+
                     case "deleteAccount":
                         {
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
                             long id = payload.Value<long>("AccountId");
-                            db.DeleteAccount(id);
+
+                            var result = db.DeleteAccount(id);
 
                             var response = new
                             {
                                 action = "deleteAccountResult",
-                                success = true
+                                success = result.Success,
+                                message = result.Message
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
                             break;
                         }
+
                     case "GetCustomerById":
                         {
                             var payload = req.Payload as JObject;

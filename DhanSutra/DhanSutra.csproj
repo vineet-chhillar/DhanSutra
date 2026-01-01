@@ -265,6 +265,9 @@
     <Compile Include="Models\CompanyProfile.cs" />
     <Compile Include="Models\CreateInvoiceDto.cs" />
     <Compile Include="Models\CustomerDto.cs" />
+    <Compile Include="Models\ExpenseItemDto.cs" />
+    <Compile Include="Models\ExpenseVoucherDetailDto.cs" />
+    <Compile Include="Models\ExpenseVoucherSummaryDto.cs" />
     <Compile Include="Models\GstMaster.cs" />
     <Compile Include="Models\InvoiceDto.cs" />
     <Compile Include="Models\InvoiceForReturnDto.cs" />
@@ -284,6 +287,7 @@
     <Compile Include="Models\LoadSalesInvoiceDto.cs" />
     <Compile Include="Models\LoadSalesInvoiceItemDto.cs" />
     <Compile Include="Models\OpeningStockHeaderDto.cs" />
+    <Compile Include="Models\OperationResult.cs" />
     <Compile Include="Models\ProfitLossReportDto.cs" />
     <Compile Include="Models\ProfitLossRow.cs" />
     <Compile Include="Models\PurchaseInvoiceDto.cs" />
@@ -302,6 +306,8 @@
     <Compile Include="Models\SavePurchasepaymentResult.cs" />
     <Compile Include="Models\SaveSalesReturnResult.cs" />
     <Compile Include="Models\StockAdjustmentItemDto.cs" />
+    <Compile Include="Models\StockAdjustmentItemViewDto.cs" />
+    <Compile Include="Models\StockAdjustmentSummaryDto.cs" />
     <Compile Include="Models\SupplierDraftDto.cs" />
     <Compile Include="Models\TrialBalanceRowDto.cs" />
     <Compile Include="Pdf\CompanyProfilePdfDto.cs" />

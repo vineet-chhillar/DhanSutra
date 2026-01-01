@@ -1631,6 +1631,873 @@ reorderlevel=@reorderlevel
                 cmd.ExecuteNonQuery();
             }
         }
+        public StockAdjustmentDetailDto GetStockAdjustmentDetail(long adjustmentId)
+        {
+            var dto = new StockAdjustmentDetailDto
+            {
+                Items = new List<StockAdjustmentItemViewDto>()
+            };
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // 1️⃣ HEADER
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    AdjustmentNo,
+    AdjustmentDate,
+    AdjustmentType,
+    Reason,
+    Notes
+FROM StockAdjustments
+WHERE AdjustmentId = @id;
+";
+                    cmd.Parameters.AddWithValue("@id", adjustmentId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read())
+                            throw new Exception("Stock adjustment not found.");
+
+                        dto.AdjustmentNo = r.GetString(0);
+                        dto.Date = r.GetString(1);
+                        dto.Type = r.GetString(2);
+                        dto.Reason = r.IsDBNull(3) ? "" : r.GetString(3);
+                        dto.Notes = r.IsDBNull(4) ? "" : r.GetString(4);
+                    }
+                }
+
+                // 2️⃣ ITEMS (FROM ITEM LEDGER)
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    item.name,
+    il.BatchNo,
+    il.Qty,
+    il.Rate,
+    il.TotalAmount
+FROM ItemLedger il
+JOIN Item item ON item.id = il.ItemId
+WHERE il.TxnType = 'STOCK_ADJUSTMENT'
+  AND il.RefNo = @ref
+ORDER BY il.Id;
+";
+                    cmd.Parameters.AddWithValue("@ref", dto.AdjustmentNo);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            dto.Items.Add(new StockAdjustmentItemViewDto
+                            {
+                                ItemName = r.GetString(0),
+                                BatchNo = r.IsDBNull(1) ? "" : r.GetString(1),
+                                Qty = r.GetDecimal(2),
+                                Rate = r.GetDecimal(3),
+                                ValueImpact = r.GetDecimal(4)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return dto;
+        }
+        private (long AdjustmentId, string AdjustmentNo) SaveStockAdjustmentCore(
+    SQLiteConnection conn,
+    SQLiteTransaction tx,
+    string date,
+    string type,
+    string reason,
+    string notes,
+    string createdBy,
+    List<StockAdjustmentItemDto> items
+)
+        {
+            // 1️⃣ Safety check
+            if (!HasAnyStockMovement(conn, tx))
+                throw new Exception("Stock system not initialized.");
+
+            // 2️⃣ Create header
+            long adjustmentId;
+            string adjustmentNo;
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+INSERT INTO StockAdjustments
+(AdjustmentDate, AdjustmentType, Reason, Notes, CreatedBy, CreatedAt)
+VALUES
+(@dt, @type, @reason, @notes, @by, datetime('now'));
+
+SELECT last_insert_rowid();
+";
+                cmd.Parameters.AddWithValue("@dt", date);
+                cmd.Parameters.AddWithValue("@type", type);
+                cmd.Parameters.AddWithValue("@reason", reason);
+                cmd.Parameters.AddWithValue("@notes", notes);
+                cmd.Parameters.AddWithValue("@by", createdBy);
+
+                adjustmentId = Convert.ToInt64(cmd.ExecuteScalar());
+            }
+
+            adjustmentNo = $"SA-{adjustmentId:00000}";
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText =
+                    "UPDATE StockAdjustments SET AdjustmentNo=@no WHERE AdjustmentId=@id";
+                cmd.Parameters.AddWithValue("@no", adjustmentNo);
+                cmd.Parameters.AddWithValue("@id", adjustmentId);
+                cmd.ExecuteNonQuery();
+            }
+
+            // 3️⃣ Journal entry
+            long jeId = InsertJournalEntry(
+                conn, tx,
+                date,
+                $"Stock Adjustment ({adjustmentNo})",
+                "STOCK_ADJUSTMENT",
+                adjustmentId
+            );
+
+            long stockAcc = GetStockAccountId(conn, tx);
+            long adjAcc = GetStockAdjustmentAccountId(conn, tx);
+
+            // 4️⃣ Items
+            foreach (var it in items)
+            {
+                decimal qty = it.AdjustQty;
+                decimal rate = it.Rate;
+                decimal amount = qty * rate;
+
+                if (type == "INCREASE")
+                {
+                    InsertItemLedger(conn, tx,
+                        it.ItemId, it.BatchNo, date,
+                        "STOCK_ADJUSTMENT", adjustmentNo,
+                        qty, rate, amount, reason, createdBy);
+
+                    UpdateItemBalance(new ItemLedger
+                    {
+                        ItemId = (int)it.ItemId,
+                        BatchNo = it.BatchNo,
+                        Qty = qty
+                    }, conn, tx);
+
+                    InsertJournalLine(conn, tx, jeId, stockAcc, amount, 0);
+                    InsertJournalLine(conn, tx, jeId, adjAcc, 0, amount);
+                }
+                else
+                {
+                    InsertItemLedger(conn, tx,
+                        it.ItemId, it.BatchNo, date,
+                        "STOCK_ADJUSTMENT", adjustmentNo,
+                        -qty, rate, -amount, reason, createdBy);
+
+                    UpdateItemBalanceSales(new ItemLedger
+                    {
+                        ItemId = (int)it.ItemId,
+                        BatchNo = it.BatchNo,
+                        Qty = qty
+                    }, conn, tx);
+
+                    InsertJournalLine(conn, tx, jeId, adjAcc, amount, 0);
+                    InsertJournalLine(conn, tx, jeId, stockAcc, 0, amount);
+                }
+            }
+
+            return (adjustmentId, adjustmentNo);
+        }
+
+        public (long ExpenseVoucherId, string VoucherNo) SaveExpenseVoucher(
+     string date,
+     string paymentMode,
+     //long? paidViaAccountId,
+     decimal totalAmount,
+     string notes,
+     string createdBy,
+     List<ExpenseItemDto> items
+ )
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1️⃣ VALIDATIONS
+                        if (items == null || items.Count == 0)
+                            throw new Exception("At least one expense line is required.");
+
+                        if (totalAmount <= 0)
+                            throw new Exception("Total amount must be greater than zero.");
+
+                        decimal calcTotal = items.Sum(i => i.Amount);
+                        if (calcTotal != totalAmount)
+                            throw new Exception("Total amount mismatch.");
+
+                        //if (paymentMode != "Credit" && !paidViaAccountId.HasValue)
+                        //    throw new Exception("Paid via account is required.");
+
+                        // 2️⃣ INSERT EXPENSE VOUCHER (HEADER)
+                        long voucherId;
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO ExpenseVouchers
+(VoucherDate, PaymentMode, TotalAmount, Notes, CreatedBy)
+VALUES
+(@dt, @mode, @total, @notes, @by);
+SELECT last_insert_rowid();
+";
+                            cmd.Parameters.AddWithValue("@dt", date);
+                            cmd.Parameters.AddWithValue("@mode", paymentMode);
+                            
+                            //if (paymentMode == "Credit")
+                            //    cmd.Parameters.AddWithValue("@paidvia", DBNull.Value);
+                            //else
+                            //    cmd.Parameters.AddWithValue("@paidvia", paidViaAccountId);
+
+                            cmd.Parameters.AddWithValue("@total", totalAmount);
+                            cmd.Parameters.AddWithValue("@notes", notes);
+                            cmd.Parameters.AddWithValue("@by", createdBy);
+
+                            voucherId = Convert.ToInt64(cmd.ExecuteScalar());
+                        }
+
+                        string voucherNo = $"EXP-{voucherId:00000}";
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText =
+                                "UPDATE ExpenseVouchers SET VoucherNo=@no WHERE ExpenseVoucherId=@id";
+                            cmd.Parameters.AddWithValue("@no", voucherNo);
+                            cmd.Parameters.AddWithValue("@id", voucherId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // 3️⃣ JOURNAL ENTRY
+                        long jeId = InsertJournalEntry(
+                            conn, tx,
+                            date,
+                            $"Expense Voucher {voucherNo}",
+                            "EXPENSE",
+                            voucherId
+                        );
+
+                        // 4️⃣ DEBIT ACTUAL EXPENSE ACCOUNTS (🔥 THIS IS THE FIX)
+                        foreach (var it in items)
+                        {
+                            InsertJournalLine(
+                                conn, tx,
+                                jeId,
+                                it.AccountId,   // Rent / Electricity / etc.
+                                it.Amount,
+                                0
+                            );
+                        }
+                        // 5️⃣ CREDIT SIDE BASED ON PAYMENT MODE
+                        if (paymentMode == "Credit")
+                        {
+                            // Expense Payable
+                            long expensePayableAcc = GetExpensePayableAccountId(conn, tx);
+
+                            InsertJournalLine(
+                                conn, tx,
+                                jeId,
+                                expensePayableAcc,
+                                0,
+                                totalAmount
+                            );
+                        }
+                        else if (paymentMode == "Cash")
+                        {
+                            long cashAcc = GetCashAccountId(conn, tx);
+
+                            InsertJournalLine(
+                                conn, tx,
+                                jeId,
+                                cashAcc,
+                                0,
+                                totalAmount
+                            );
+                        }
+                        else if (paymentMode == "Bank")
+                        {
+                            long bankAcc = GetBankAccountId(conn, tx);
+
+                            InsertJournalLine(
+                                conn, tx,
+                                jeId,
+                                bankAcc,
+                                0,
+                                totalAmount
+                            );
+                        }
+                        else
+                        {
+                            throw new Exception("Invalid payment mode.");
+                        }
+                        // 5️⃣ CREDIT SIDE
+                        //if (paymentMode == "Credit")
+                        //{
+                        //    long expensePayableAcc = GetExpensePayableAccountId(conn, tx);
+                        //    InsertJournalLine(
+                        //        conn, tx,
+                        //        jeId,
+                        //        expensePayableAcc,
+                        //        0,
+                        //        totalAmount
+                        //    );
+                        //}
+                        //else
+                        //{
+                        //    InsertJournalLine(
+                        //        conn, tx,
+                        //        jeId,
+                        //        paidViaAccountId.Value,
+                        //        0,
+                        //        totalAmount
+                        //    );
+                        //}
+
+                        tx.Commit();
+                        return (voucherId, voucherNo);
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
+        private long GetCashAccountId(
+    SQLiteConnection conn,
+    SQLiteTransaction tx
+)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+SELECT AccountId
+FROM Accounts
+WHERE AccountType = 'Asset'
+  AND AccountName = 'Cash'
+  AND IFNULL(IsActive, 1) = 1
+LIMIT 1;
+";
+
+                var o = cmd.ExecuteScalar();
+
+                if (o == null || o == DBNull.Value)
+                    throw new Exception("Cash account not found.");
+
+                return Convert.ToInt64(o);
+            }
+        }
+        private long GetBankAccountId(
+            SQLiteConnection conn,
+            SQLiteTransaction tx
+        )
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+SELECT AccountId
+FROM Accounts
+WHERE AccountType = 'Asset'
+  AND AccountName = 'Bank'
+  AND IFNULL(IsActive, 1) = 1
+ORDER BY AccountId
+LIMIT 1;
+";
+
+                var o = cmd.ExecuteScalar();
+
+                if (o == null || o == DBNull.Value)
+                    throw new Exception("Bank account not found.");
+
+                return Convert.ToInt64(o);
+            }
+        }
+
+
+        private long GetExpenseControlAccountId(
+    SQLiteConnection conn,
+    SQLiteTransaction tx
+)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+SELECT AccountId
+FROM Accounts
+WHERE AccountName = 'Expenses'
+  AND AccountType = 'Expense'
+  AND IFNULL(IsSystemAccount, 0) = 1
+LIMIT 1;
+";
+
+                var o = cmd.ExecuteScalar();
+
+                if (o == null || o == DBNull.Value)
+                    throw new Exception(
+                        "Expense control account 'Expenses' not found."
+                    );
+
+                return Convert.ToInt64(o);
+            }
+        }
+
+        public List<ExpenseVoucherSummaryDto> GetExpenseVouchers()
+        {
+            var list = new List<ExpenseVoucherSummaryDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    ev.ExpenseVoucherId,
+    ev.VoucherNo,
+    ev.VoucherDate,
+    ev.Notes,
+    ev.PaymentMode,
+    ev.TotalAmount,
+    IFNULL((
+        SELECT SUM(ep.Amount)
+        FROM ExpensePayments ep
+        WHERE ep.ExpenseVoucherId = ev.ExpenseVoucherId
+    ), 0) AS PaidAmount
+FROM ExpenseVouchers ev
+ORDER BY ev.ExpenseVoucherId DESC;
+";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new ExpenseVoucherSummaryDto
+                            {
+                                ExpenseVoucherId = r.GetInt64(0),
+                                VoucherNo = r.GetString(1),
+                                Date = r.GetString(2),
+                                Notes = r.GetString(3),
+                                PaymentMode = r.GetString(4),
+                                TotalAmount = r.GetDecimal(5),
+                                PaidAmount = r.GetDecimal(6)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+        public ExpenseVoucherDetailDto LoadExpenseVoucher(long expenseVoucherId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                ExpenseVoucherDetailDto dto;
+
+                // 1️⃣ Load voucher header
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    ExpenseVoucherId,
+    VoucherNo,
+    VoucherDate,
+    PaymentMode,
+    TotalAmount
+FROM ExpenseVouchers
+WHERE ExpenseVoucherId = @id;
+";
+                    cmd.Parameters.AddWithValue("@id", expenseVoucherId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read())
+                            throw new Exception("Expense voucher not found.");
+
+                        dto = new ExpenseVoucherDetailDto
+                        {
+                            ExpenseVoucherId = r.GetInt64(0),
+                            VoucherNo = r.GetString(1),
+                            Date = r.GetString(2),
+                            PaymentMode = r.GetString(3),
+                            TotalAmount = r.GetDecimal(4),
+                            Items = new List<ExpenseVoucherItemDto>()
+                        };
+                    }
+                }
+
+                // 2️⃣ Paid amount
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT IFNULL(SUM(Amount), 0)
+FROM ExpensePayments
+WHERE ExpenseVoucherId = @id;
+";
+                    cmd.Parameters.AddWithValue("@id", expenseVoucherId);
+
+                    dto.PaidAmount = Convert.ToDecimal(cmd.ExecuteScalar());
+                }
+
+                // 3️⃣ Expense lines (from JournalLines)
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    a.AccountName,
+    jl.Debit
+FROM JournalLines jl
+JOIN JournalEntries je ON je.JournalId = jl.JournalId
+JOIN Accounts a ON a.AccountId = jl.AccountId
+WHERE je.VoucherType = 'EXPENSE'
+  AND je.VoucherId = @id
+  AND jl.Debit > 0
+ORDER BY jl.LineId;
+";
+                    cmd.Parameters.AddWithValue("@id", expenseVoucherId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            dto.Items.Add(new ExpenseVoucherItemDto
+                            {
+                                AccountName = r.GetString(0),
+                                Amount = r.GetDecimal(1)
+                            });
+                        }
+                    }
+                }
+
+                return dto;
+            }
+        }
+
+
+        private long GetExpensePayableAccountId(SQLiteConnection conn, SQLiteTransaction tx)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+SELECT AccountId FROM Accounts
+WHERE AccountName = 'Expenses Payable'
+LIMIT 1;
+";
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value)
+                    return Convert.ToInt64(o);
+            }
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+INSERT INTO Accounts
+(AccountName, AccountType, NormalSide, IsActive)
+VALUES
+('Expenses Payable', 'Liability', 'Credit', 1);
+
+SELECT last_insert_rowid();
+";
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+        public void SaveExpensePayment(
+            long expenseVoucherId,
+            string paymentDate,
+            long paidViaAccountId,
+            decimal amount,
+            string notes,
+            string createdBy
+        )
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1️⃣ Insert payment record
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO ExpensePayments
+(ExpenseVoucherId, PaymentDate, PaidViaAccountId, Amount, Notes, CreatedBy)
+VALUES
+(@vid, @dt, @acc, @amt, @notes, @by);
+";
+                            cmd.Parameters.AddWithValue("@vid", expenseVoucherId);
+                            cmd.Parameters.AddWithValue("@dt", paymentDate);
+                            cmd.Parameters.AddWithValue("@acc", paidViaAccountId);
+                            cmd.Parameters.AddWithValue("@amt", amount);
+                            cmd.Parameters.AddWithValue("@notes", notes);
+                            cmd.Parameters.AddWithValue("@by", createdBy);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // 2️⃣ Journal entry
+                        long jeId = InsertJournalEntry(
+                            conn, tx,
+                            paymentDate,
+                            $"Expense Payment (Voucher #{expenseVoucherId})",
+                            "EXPENSE_PAYMENT",
+                            expenseVoucherId
+                        );
+
+                        long expensePayableAcc = GetExpensePayableAccountId(conn, tx);
+
+                        // Expenses Payable Dr
+                        InsertJournalLine(conn, tx, jeId, expensePayableAcc, amount, 0);
+
+                        // Cash/Bank Cr
+                        InsertJournalLine(conn, tx, jeId, paidViaAccountId, 0, amount);
+
+                        tx.Commit();
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
+        public List<AccountDto> GetCashBankAccounts()
+        {
+            var list = new List<AccountDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    AccountId,
+    AccountName
+FROM Accounts
+WHERE AccountName IN ('Cash', 'Bank')
+  AND IsActive = 1
+ORDER BY AccountName;
+";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new AccountDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+        public List<AccountDto> GetExpenseAccounts()
+        {
+            var list = new List<AccountDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    AccountId,
+    AccountName
+FROM Accounts
+WHERE AccountType = 'Expense'
+AND IFNULL(IsSystemAccount, 0) = 0
+  AND IsActive = 1
+ORDER BY AccountName;
+";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new AccountDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
+
+        public (long AdjustmentId, string AdjustmentNo) ReverseStockAdjustment(
+    long originalAdjustmentId,
+    string reversedBy
+)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1️⃣ Load original header
+                        string origNo, origType, origReason, origDate;
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT AdjustmentNo, AdjustmentType, Reason, AdjustmentDate
+FROM StockAdjustments
+WHERE AdjustmentId = @id;
+";
+                            cmd.Parameters.AddWithValue("@id", originalAdjustmentId);
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                if (!r.Read())
+                                    throw new Exception("Original adjustment not found.");
+
+                                origNo = r.GetString(0);
+                                origType = r.GetString(1);
+                                origReason = r.GetString(2);
+                                origDate = r.GetString(3);
+                            }
+                        }
+
+                        // 2️⃣ Opposite type
+                        string reverseType =
+                            origType == "INCREASE" ? "DECREASE" : "INCREASE";
+
+                        // 3️⃣ Load original items from ItemLedger
+                        var items = new List<StockAdjustmentItemDto>();
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT ItemId, BatchNo, ABS(Qty), Rate
+FROM ItemLedger
+WHERE TxnType = 'STOCK_ADJUSTMENT'
+  AND RefNo = @ref;
+";
+                            cmd.Parameters.AddWithValue("@ref", origNo);
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                while (r.Read())
+                                {
+                                    items.Add(new StockAdjustmentItemDto
+                                    {
+                                        ItemId = r.GetInt64(0),
+                                        BatchNo = r.IsDBNull(1) ? null : r.GetString(1),
+                                        AdjustQty = r.GetDecimal(2),
+                                        Rate = r.GetDecimal(3)
+                                    });
+                                }
+                            }
+                        }
+
+                        // 4️⃣ Save reverse adjustment (reuse existing method)
+                        var result = SaveStockAdjustmentCore(conn, tx,
+                            date: DateTime.Now.ToString("yyyy-MM-dd"),
+                            type: reverseType,
+                            reason: $"Reversal of {origNo}",
+                            notes: $"Auto reversal of stock adjustment {origNo}",
+                            createdBy: reversedBy,
+                            items: items
+                        );
+
+                        tx.Commit();
+                        return result;
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
+
+        public List<StockAdjustmentSummaryDto> GetRecentStockAdjustments()
+        {
+            var list = new List<StockAdjustmentSummaryDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    AdjustmentId,
+    AdjustmentNo,
+    AdjustmentDate,
+    AdjustmentType,
+    Reason
+FROM StockAdjustments
+ORDER BY AdjustmentId DESC
+;
+";
+                    //cmd.Parameters.AddWithValue("@limit", limit);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new StockAdjustmentSummaryDto
+                            {
+                                AdjustmentId = r.GetInt64(0),
+                                AdjustmentNo = r.GetString(1),
+                                AdjustmentDate = r.GetString(2),
+                                AdjustmentType = r.GetString(3),
+                                Reason = r.IsDBNull(4) ? "" : r.GetString(4)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
 
         private void CreateOpeningStockJournal(SQLiteConnection conn,SQLiteTransaction txn,string asOnDate,decimal amount,long openingStockId)
         {
@@ -5521,6 +6388,129 @@ ORDER BY pi.PurchaseItemId
                 }
             }
         }
+        public void ReverseExpenseVoucher(
+    long expenseVoucherId,
+    string reversedBy
+)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1️⃣ Load voucher
+                        string voucherNo, voucherDate, paymentMode;
+                        decimal totalAmount;
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT VoucherNo, VoucherDate, PaymentMode, TotalAmount
+FROM ExpenseVouchers
+WHERE ExpenseVoucherId = @id;
+";
+                            cmd.Parameters.AddWithValue("@id", expenseVoucherId);
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                if (!r.Read())
+                                    throw new Exception("Expense voucher not found.");
+
+                                voucherNo = r.GetString(0);
+                                voucherDate = r.GetString(1);
+                                paymentMode = r.GetString(2);
+                                totalAmount = r.GetDecimal(3);
+                            }
+                        }
+
+                        // 2️⃣ Ensure no payments exist
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT COUNT(*)
+FROM ExpensePayments
+WHERE ExpenseVoucherId = @id;
+";
+                            cmd.Parameters.AddWithValue("@id", expenseVoucherId);
+
+                            long count = (long)cmd.ExecuteScalar();
+                            if (count > 0)
+                                throw new Exception(
+                                    "Expense cannot be reversed because payments exist."
+                                );
+                        }
+
+                        // 3️⃣ Create reverse journal entry
+                        long jeId = InsertJournalEntry(
+                            conn, tx,
+                            DateTime.Now.ToString("yyyy-MM-dd"),
+                            $"Reversal of Expense Voucher {voucherNo}",
+                            "EXPENSE_REVERSAL",
+                            expenseVoucherId
+                        );
+
+                        // 4️⃣ Load original expense journal lines
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT AccountId, Debit, Credit
+FROM JournalLines jl
+JOIN JournalEntries je ON je.JournalId = jl.JournalId
+WHERE je.VoucherType = 'EXPENSE'
+  AND je.VoucherId = @id;
+";
+                            cmd.Parameters.AddWithValue("@id", expenseVoucherId);
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                while (r.Read())
+                                {
+                                    long accId = r.GetInt64(0);
+                                    decimal dr = r.GetDecimal(1);
+                                    decimal cr = r.GetDecimal(2);
+
+                                    // 🔁 reverse the entry
+                                    InsertJournalLine(
+                                        conn, tx,
+                                        jeId,
+                                        accId,
+                                        cr,   // debit ← credit
+                                        dr    // credit ← debit
+                                    );
+                                }
+                            }
+                        }
+
+                        // 5️⃣ (Optional but recommended) mark voucher reversed
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+UPDATE ExpenseVouchers
+SET Notes = IFNULL(Notes, '') || ' [REVERSED]',
+    CreatedBy = @by
+WHERE ExpenseVoucherId = @id;
+";
+                            cmd.Parameters.AddWithValue("@by", reversedBy);
+                            cmd.Parameters.AddWithValue("@id", expenseVoucherId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        tx.Commit();
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
 
         private void CreateLedgerEntryForSalesPayment(
     SQLiteConnection conn,
@@ -7438,7 +8428,7 @@ ORDER BY a.AccountType, a.AccountName;
                 }
             }
         }
-        public bool SaveStockAdjustment(string date,string type,string reason, string notes, string createdBy,List<StockAdjustmentItemDto> items)
+        public (long AdjustmentId, string AdjustmentNo) SaveStockAdjustment(string date,string type, string reason, string notes,string createdBy, List<StockAdjustmentItemDto> items)
         {
             using (var conn = new SQLiteConnection(_connectionString))
             {
@@ -7449,86 +8439,105 @@ ORDER BY a.AccountType, a.AccountName;
                     try
                     {
                         // 1️⃣ Safety check
-                        if (HasAnyStockMovement(conn, tx) == false)
-                        {
+                        if (!HasAnyStockMovement(conn, tx))
                             throw new Exception("Stock system not initialized.");
+
+                        // 2️⃣ Create Stock Adjustment HEADER
+                        long adjustmentId;
+                        string adjustmentNo;
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO StockAdjustments
+(AdjustmentDate, AdjustmentType, Reason, Notes, CreatedBy, CreatedAt)
+VALUES
+(@dt, @type, @reason, @notes, @by, datetime('now'));
+
+SELECT last_insert_rowid();
+";
+                            cmd.Parameters.AddWithValue("@dt", date);
+                            cmd.Parameters.AddWithValue("@type", type);
+                            cmd.Parameters.AddWithValue("@reason", reason);
+                            cmd.Parameters.AddWithValue("@notes", notes);
+                            cmd.Parameters.AddWithValue("@by", createdBy);
+
+                            adjustmentId = Convert.ToInt64(cmd.ExecuteScalar());
                         }
 
-                        // 2️⃣ Journal Entry
+                        adjustmentNo = $"SA-{adjustmentId:00000}";
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText =
+                                "UPDATE StockAdjustments SET AdjustmentNo=@no WHERE AdjustmentId=@id";
+                            cmd.Parameters.AddWithValue("@no", adjustmentNo);
+                            cmd.Parameters.AddWithValue("@id", adjustmentId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // 3️⃣ Journal Entry HEADER
                         long jeId = InsertJournalEntry(
                             conn, tx,
                             date,
-                            $"Stock Adjustment ({reason})",
+                            $"Stock Adjustment ({adjustmentNo})",
                             "STOCK_ADJUSTMENT",
-                            0
+                            adjustmentId
                         );
 
                         long stockAcc = GetStockAccountId(conn, tx);
                         long adjAcc = GetStockAdjustmentAccountId(conn, tx);
 
+                        // 4️⃣ Items
                         foreach (var it in items)
                         {
                             decimal qty = it.AdjustQty;
                             decimal rate = it.Rate;
                             decimal amount = qty * rate;
 
-                            if (type == "DECREASE")
-                            {
-                                //qty = -qty; // 🔴 critical
-
-                                // 3️⃣ ITEM LEDGER
-                                InsertItemLedger(conn, tx,
-                                    itemId: it.ItemId,
-                                    batchNo: it.BatchNo,
-                                    date: date,
-                                    txnType: "STOCK_ADJUSTMENT",
-                                    refNo: null,
-                                    qty: -qty,
-                                    rate: rate,
-                                    totalAmount: -amount,
-                                    remarks: reason,
-                                    createdBy: createdBy
-                                );
-                                UpdateItemBalanceSales(new ItemLedger
-                                {
-                                    ItemId = (int)it.ItemId,
-                                    BatchNo = it.BatchNo,
-                                    Qty = it.AdjustQty
-                                }, conn, tx);
-
-                                
-
-                                
-                            }
-                            
-
-                            // 4️⃣ JOURNAL LINES
                             if (type == "INCREASE")
                             {
+                                // Item Ledger
+                                InsertItemLedger(conn, tx,
+                                    it.ItemId, it.BatchNo, date,
+                                    "STOCK_ADJUSTMENT", adjustmentNo,
+                                    qty, rate, amount, reason, createdBy);
+
                                 UpdateItemBalance(new ItemLedger
                                 {
                                     ItemId = (int)it.ItemId,
                                     BatchNo = it.BatchNo,
-                                    Qty = it.AdjustQty
+                                    Qty = qty
                                 }, conn, tx);
-                                // Stock ↑ , Adjustment ↓
+
+                                // Accounting
                                 InsertJournalLine(conn, tx, jeId, stockAcc, amount, 0);
                                 InsertJournalLine(conn, tx, jeId, adjAcc, 0, amount);
                             }
-                            else
+                            else // DECREASE
                             {
-                                // Stock ↓ , Adjustment ↑
+                                InsertItemLedger(conn, tx,
+                                    it.ItemId, it.BatchNo, date,
+                                    "STOCK_ADJUSTMENT", adjustmentNo,
+                                    -qty, rate, -amount, reason, createdBy);
+
+                                UpdateItemBalanceSales(new ItemLedger
+                                {
+                                    ItemId = (int)it.ItemId,
+                                    BatchNo = it.BatchNo,
+                                    Qty = qty
+                                }, conn, tx);
+
                                 InsertJournalLine(conn, tx, jeId, adjAcc, amount, 0);
                                 InsertJournalLine(conn, tx, jeId, stockAcc, 0, amount);
                             }
                         }
 
                         tx.Commit();
-
-
-                        return true;
+                        return (adjustmentId, adjustmentNo);
                     }
-
                     catch
                     {
                         tx.Rollback();
@@ -7537,6 +8546,7 @@ ORDER BY a.AccountType, a.AccountName;
                 }
             }
         }
+
         private void InsertItemLedger(
     SQLiteConnection conn,
     SQLiteTransaction tx,
@@ -7556,9 +8566,9 @@ ORDER BY a.AccountType, a.AccountName;
                 cmd.Transaction = tx;
                 cmd.CommandText = @"
         INSERT INTO ItemLedger
-        (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate, TotalAmount, Remarks, CreatedBy)
+        (ItemId, BatchNo, Date, TxnType, RefNo, Qty, Rate,NetRate, TotalAmount, Remarks, CreatedBy)
         VALUES
-        (@item, @batch, @date, @type, @ref, @qty, @rate, @amt, @remarks, @by);
+        (@item, @batch, @date, @type, @ref, @qty, @rate,@rate, @amt, @remarks, @by);
     ";
 
                 cmd.Parameters.AddWithValue("@item", itemId);
@@ -7568,6 +8578,7 @@ ORDER BY a.AccountType, a.AccountName;
                 cmd.Parameters.AddWithValue("@ref", (object)refNo ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@qty", qty);
                 cmd.Parameters.AddWithValue("@rate", rate);
+                
                 cmd.Parameters.AddWithValue("@amt", totalAmount);
                 cmd.Parameters.AddWithValue("@remarks", remarks);
                 cmd.Parameters.AddWithValue("@by", createdBy);
@@ -8561,7 +9572,7 @@ WHERE Id = @id;
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-                SELECT AccountId, AccountName, AccountType, NormalSide, OpeningBalance, IsActive
+                SELECT AccountId, AccountName, AccountType,parentaccountid, NormalSide, OpeningBalance, IsActive
                 FROM Accounts
                 ORDER BY AccountName;
             ";
@@ -8575,9 +9586,10 @@ WHERE Id = @id;
                                 AccountId = rd.GetInt64(0),
                                 AccountName = rd.GetString(1),
                                 AccountType = rd.GetString(2),
-                                NormalSide = rd.GetString(3),
-                                OpeningBalance = rd.GetDouble(4),
-                                IsActive = rd.GetInt32(5) == 1
+                                ParentAccountId = rd.IsDBNull(3) ? 0 : rd.GetInt64(3), // ✅ FIX
+                                NormalSide = rd.GetString(4),
+                                OpeningBalance = rd.GetDouble(5),
+                                IsActive = rd.GetInt32(6) == 1
                             });
                         }
                     }
@@ -8586,98 +9598,275 @@ WHERE Id = @id;
 
             return list;
         }
-        public long CreateAccount(AccountDto dto)
+        public void CreateAccount(AccountDto dto)
         {
+            if (string.IsNullOrWhiteSpace(dto.AccountName))
+                throw new Exception("Account name is required");
+
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
-
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-                INSERT INTO Accounts (AccountName, AccountType, NormalSide, OpeningBalance, IsActive)
-                VALUES (@name, @type, @side, @opening, 1);
-
-                SELECT last_insert_rowid();
-            ";
-
+INSERT INTO Accounts
+(AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, IsSystemAccount)
+VALUES
+(@name, @type, @parent, @side, @opening, 0);
+";
                     cmd.Parameters.AddWithValue("@name", dto.AccountName);
                     cmd.Parameters.AddWithValue("@type", dto.AccountType);
+                    cmd.Parameters.AddWithValue("@parent", dto.ParentAccountId == 0 ? (object)DBNull.Value : dto.ParentAccountId);
                     cmd.Parameters.AddWithValue("@side", dto.NormalSide);
                     cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
 
-                    return (long)cmd.ExecuteScalar();
-                }
-            }
-        }
-        public void UpdateAccount(AccountDto dto)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
+                    // Replace this line:
+                    // cmd.Parameters.AddWithValue("@parent", dto.ParentAccountId == 0 ? DBNull.Value : dto.ParentAccountId);
 
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-                UPDATE Accounts
-                SET AccountName = @name,
-                    AccountType = @type,
-                    NormalSide = @side,
-                    OpeningBalance = @opening
-                WHERE AccountId = @id;
-            ";
-
-                    cmd.Parameters.AddWithValue("@id", dto.AccountId);
-                    cmd.Parameters.AddWithValue("@name", dto.AccountName);
-                    cmd.Parameters.AddWithValue("@type", dto.AccountType);
-                    cmd.Parameters.AddWithValue("@side", dto.NormalSide);
-                    cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
-
-                    cmd.ExecuteNonQuery();
-                }
-            }
-        }
-        public void DeleteAccount(long id)
-        {
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
-
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"UPDATE Accounts SET IsActive = 0 WHERE AccountId = @id;";
-                    cmd.Parameters.AddWithValue("@id", id);
+                    // With this fix:
+                    
                     cmd.ExecuteNonQuery();
                 }
             }
         }
 
-    //    public void InsertSalesPaymentSummary(
-    //long invoiceId,
-    //decimal totalAmount,
-    //decimal paidAmount,
-    //SQLiteConnection conn,
-    //SQLiteTransaction tx)
-    //    {
-    //        paidAmount = Math.Max(0, Math.Min(paidAmount, totalAmount));
-    //        var balance = totalAmount - paidAmount;
+        public OperationResult UpdateAccount(AccountDto dto)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        bool isSystem;
+                        using (var c = conn.CreateCommand())
+                        {
+                            c.Transaction = tx;
+                            c.CommandText =
+                                "SELECT IFNULL(IsSystemAccount,0) FROM Accounts WHERE AccountId=@id";
+                            c.Parameters.AddWithValue("@id", dto.AccountId);
+                            isSystem = Convert.ToInt32(c.ExecuteScalar()) == 1;
+                        }
 
-    //        using (var cmd = conn.CreateCommand())
-    //        {
-    //            cmd.Transaction = tx;
-    //            cmd.CommandText = @"
-    //        INSERT INTO SalesPaymentSummary
-    //        (InvoiceId, PaidAmount, BalanceAmount)
-    //        VALUES
-    //        (@InvoiceId, @PaidAmount, @BalanceAmount)";
+                        bool hasTxn = HasTransactions(dto.AccountId);
 
-    //            cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
-    //            cmd.Parameters.AddWithValue("@PaidAmount", paidAmount);
-    //            cmd.Parameters.AddWithValue("@BalanceAmount", balance);
+                        // 🔒 SYSTEM ACCOUNT RULES
+                        if (isSystem)
+                        {
+                            if (hasTxn)
+                            {
+                                tx.Rollback();
+                                return new OperationResult
+                                {
+                                    Success = false,
+                                    Message =
+                                        "System account has transactions. Opening balance cannot be modified."
+                                };
+                            }
 
-    //            cmd.ExecuteNonQuery();
-    //        }
-    //    }
+                            // ✅ Only opening balance allowed
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+                                cmd.CommandText = @"
+UPDATE Accounts
+SET OpeningBalance = @opening
+WHERE AccountId = @id;
+";
+                                cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
+                                cmd.Parameters.AddWithValue("@id", dto.AccountId);
+                                cmd.ExecuteNonQuery();
+                            }
+
+                            tx.Commit();
+                            return new OperationResult
+                            {
+                                Success = true,
+                                Message = "System account opening balance updated successfully."
+                            };
+                        }
+
+                        // 🔒 NORMAL ACCOUNT WITH TRANSACTIONS
+                        if (hasTxn)
+                        {
+                            tx.Rollback();
+                            return new OperationResult
+                            {
+                                Success = false,
+                                Message =
+                                    "Account cannot be modified because transactions already exist."
+                            };
+                        }
+
+                        // ✅ FULL UPDATE
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+UPDATE Accounts
+SET AccountName = @name,
+    AccountType = @type,
+    ParentAccountId = @parent,
+    NormalSide = @side,
+    OpeningBalance = @opening
+WHERE AccountId = @id;
+";
+
+                            cmd.Parameters.AddWithValue("@name", dto.AccountName);
+                            cmd.Parameters.AddWithValue("@type", dto.AccountType);
+
+                            if (dto.ParentAccountId == 0)
+                                cmd.Parameters.AddWithValue("@parent", DBNull.Value);
+                            else
+                                cmd.Parameters.AddWithValue("@parent", dto.ParentAccountId);
+
+                            cmd.Parameters.AddWithValue("@side", dto.NormalSide);
+                            cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
+                            cmd.Parameters.AddWithValue("@id", dto.AccountId);
+
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        tx.Commit();
+                        return new OperationResult
+                        {
+                            Success = true,
+                            Message = "Account updated successfully."
+                        };
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        return new OperationResult
+                        {
+                            Success = false,
+                            Message = "Unexpected error while updating account."
+                        };
+                    }
+                }
+            }
+        }
+
+
+        private bool HasTransactions(long accountId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT 1
+FROM JournalLines
+WHERE AccountId = @id
+LIMIT 1;
+";
+                    cmd.Parameters.AddWithValue("@id", accountId);
+                    return cmd.ExecuteScalar() != null;
+                }
+            }
+        }
+
+        public OperationResult DeleteAccount(long accountId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        bool isSystem;
+                        using (var c = conn.CreateCommand())
+                        {
+                            c.Transaction = tx;
+                            c.CommandText =
+                                "SELECT IFNULL(IsSystemAccount,0) FROM Accounts WHERE AccountId=@id";
+                            c.Parameters.AddWithValue("@id", accountId);
+                            isSystem = Convert.ToInt32(c.ExecuteScalar()) == 1;
+                        }
+
+                        // 🔒 RULE 1: System account
+                        if (isSystem)
+                        {
+                            tx.Rollback();
+                            return new OperationResult
+                            {
+                                Success = false,
+                                Message = "System accounts cannot be deleted."
+                            };
+                        }
+
+                        // 🔒 RULE 2: Has transactions
+                        if (HasTransactions(accountId))
+                        {
+                            tx.Rollback();
+                            return new OperationResult
+                            {
+                                Success = false,
+                                Message =
+                                    "Account cannot be deleted because transactions exist."
+                            };
+                        }
+
+                        // ✅ DELETE
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText =
+                                "DELETE FROM Accounts WHERE AccountId=@id";
+                            cmd.Parameters.AddWithValue("@id", accountId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        tx.Commit();
+                        return new OperationResult
+                        {
+                            Success = true,
+                            Message = "Account deleted successfully."
+                        };
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        return new OperationResult
+                        {
+                            Success = false,
+                            Message = "Unexpected error while deleting account."
+                        };
+                    }
+                }
+            }
+        }
+
+
+        //    public void InsertSalesPaymentSummary(
+        //long invoiceId,
+        //decimal totalAmount,
+        //decimal paidAmount,
+        //SQLiteConnection conn,
+        //SQLiteTransaction tx)
+        //    {
+        //        paidAmount = Math.Max(0, Math.Min(paidAmount, totalAmount));
+        //        var balance = totalAmount - paidAmount;
+
+        //        using (var cmd = conn.CreateCommand())
+        //        {
+        //            cmd.Transaction = tx;
+        //            cmd.CommandText = @"
+        //        INSERT INTO SalesPaymentSummary
+        //        (InvoiceId, PaidAmount, BalanceAmount)
+        //        VALUES
+        //        (@InvoiceId, @PaidAmount, @BalanceAmount)";
+
+        //            cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
+        //            cmd.Parameters.AddWithValue("@PaidAmount", paidAmount);
+        //            cmd.Parameters.AddWithValue("@BalanceAmount", balance);
+
+        //            cmd.ExecuteNonQuery();
+        //        }
+        //    }
 
 
         public ProfitLossReportDto GetProfitAndLoss(string from, string to)
