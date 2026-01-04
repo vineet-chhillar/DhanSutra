@@ -999,6 +999,167 @@ namespace DhanSutra
                             );
                             break;
                         }
+                    case "GetAccountsForVoucherSide":
+                        {
+                            var payload = req.Payload as JObject;
+
+                            string voucherType = payload.Value<string>("VoucherType");
+                            string side = payload.Value<string>("Side"); // Debit / Credit
+
+                            var data = db.GetAccountsForVoucherSide(voucherType, side);
+
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "GetAccountsForVoucherSideResponse",
+                                    side,
+                                    data
+                                })
+                            );
+                            break;
+                                                    
+                        }
+
+                    case "GetAccountsForVoucher":
+                        {
+                            var payload = req.Payload as JObject;
+
+                            string voucherType = payload?.Value<string>("VoucherType");
+
+                            if (string.IsNullOrWhiteSpace(voucherType))
+                                voucherType = "JV"; // safe default
+
+                            var data = db.GetAccountsForVoucher(voucherType);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "GetAccountsForVoucherResponse",
+                                    data
+                                })
+                            );
+                            break;
+                        }
+                    case "GetNextVoucherNo":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string voucherType = payload.Value<string>("VoucherType");
+
+                            var voucherNo = db.GetNextVoucherNo(voucherType);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "GetNextVoucherNoResponse",
+                                    voucherNo
+                                })
+                            );
+                            break;
+                        }
+                    case "SaveVoucher":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            try
+                            {
+                                var dto = payload.ToObject<VoucherDto>();
+                                db.SaveVoucher(dto);
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveVoucherResponse",
+                                        success = true
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveVoucherResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+                            break;
+                        }
+                    case "LoadVoucherById":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long journalEntryId = payload.Value<long>("JournalEntryId");
+
+                            var data = db.LoadVoucherById(journalEntryId);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "LoadVoucherByIdResponse",
+                                    data
+                                })
+                            );
+                            break;
+                        }
+                    case "GetVoucherIdsByDate":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string date = payload.Value<string>("Date");
+
+                            var data = db.GetVoucherIdsByDate(date);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "GetVoucherIdsByDateResponse",
+                                    data
+                                })
+                            );
+                            break;
+                        }
+
+                    case "ReverseVoucher":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long journalEntryId = payload.Value<long>("JournalEntryId");
+
+                            try
+                            {
+                                db.ReverseVoucher(journalEntryId);
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseVoucherResponse",
+                                        success = true
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseVoucherResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
 
 
                     case "SaveStockAdjustment":

@@ -310,6 +310,8 @@
     <Compile Include="Models\StockAdjustmentSummaryDto.cs" />
     <Compile Include="Models\SupplierDraftDto.cs" />
     <Compile Include="Models\TrialBalanceRowDto.cs" />
+    <Compile Include="Models\VoucherDto.cs" />
+    <Compile Include="Models\VoucherViewDto.cs" />
     <Compile Include="Pdf\CompanyProfilePdfDto.cs" />
     <Compile Include="Pdf\PurchaseInvoiceDocument.cs" />
     <Compile Include="Pdf\PurchaseInvoicePdfDto.cs" />

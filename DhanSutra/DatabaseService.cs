@@ -7679,7 +7679,598 @@ SELECT last_insert_rowid();";
                 }
             }
         }
-        
+        public void SaveVoucher(VoucherDto dto)
+        {
+            
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    // -----------------------------
+                    // 1. Basic Dr / Cr validation
+                    // -----------------------------
+                    decimal dr = dto.Lines.Sum(x => Convert.ToDecimal(x.Debit));
+                    decimal cr = dto.Lines.Sum(x => Convert.ToDecimal(x.Credit));
+
+                    if (dr != cr || dr <= 0)
+                        throw new Exception("Debit and Credit mismatch.");
+
+                    // -----------------------------
+                    // 2. Load account metadata
+                    // -----------------------------
+                    var accInfo = new Dictionary<long, (string type, bool isCashBank)>();
+
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+SELECT AccountId, AccountType, LOWER(AccountName)
+FROM Accounts
+WHERE AccountId IN (" +
+                            string.Join(",", dto.Lines.Select(l => l.AccountId)) + @")";
+
+                        using (var r = cmd.ExecuteReader())
+                        {
+                            while (r.Read())
+                            {
+                                string name = r.GetString(2);
+                                accInfo[r.GetInt64(0)] = (
+                                    r.GetString(1),
+                                    name.Contains("cash") || name.Contains("bank")
+                                );
+                            }
+                        }
+                    }
+
+                    
+
+                    // -----------------------------
+                    // 5. Save Journal Entry
+                    // -----------------------------
+                    ValidateVoucher(dto, accInfo);
+
+                    long journalEntryId;
+                    int voucherNumericId = 0;
+
+                    if (!string.IsNullOrWhiteSpace(dto.VoucherNo))
+                    {
+                        var parts = dto.VoucherNo.Split('/');
+                        int.TryParse(parts.Length > 0 ? parts[parts.Length - 1] : null, out voucherNumericId);
+                    }
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+INSERT INTO JournalEntries
+(VoucherType, VoucherNo, Date, Description, VoucherId)
+VALUES (@vt,@vn,@dt,@nar,@ref);
+SELECT last_insert_rowid();";
+
+                        cmd.Parameters.AddWithValue("@vt", dto.VoucherType);
+                        cmd.Parameters.AddWithValue("@vn", dto.VoucherNo);
+                        cmd.Parameters.AddWithValue("@dt", dto.VoucherDate);
+                        cmd.Parameters.AddWithValue("@nar", dto.Narration);
+                        cmd.Parameters.AddWithValue("@ref", voucherNumericId);
+
+                        journalEntryId = (long)cmd.ExecuteScalar();
+                    }
+
+                    // -----------------------------
+                    // 6. Save Lines
+                    // -----------------------------
+                    foreach (var l in dto.Lines)
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO JournalLines
+(JournalId, AccountId, Debit, Credit)
+VALUES (@jid,@acc,@dr,@cr);";
+
+                            cmd.Parameters.AddWithValue("@jid", journalEntryId);
+                            cmd.Parameters.AddWithValue("@acc", l.AccountId);
+                            cmd.Parameters.AddWithValue("@dr", l.Debit);
+                            cmd.Parameters.AddWithValue("@cr", l.Credit);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    tx.Commit();
+                }
+            }
+        }
+        public void ValidateVoucher(VoucherDto dto, Dictionary<long, (string, bool)> accInfo)
+        {
+            //decimal dr = dto.Lines.Sum(x => x.Debit);
+            //decimal cr = dto.Lines.Sum(x => x.Credit);
+            decimal dr = dto.Lines.Sum(x => x.Debit ?? 0m);
+            decimal cr = dto.Lines.Sum(x => x.Credit ?? 0m);
+            if (dr != cr || dr <= 0)
+                throw new Exception("Debit and Credit must be equal and greater than zero.");
+
+            int cashDr = 0, cashCr = 0;
+
+            foreach (var l in dto.Lines)
+            {
+                var info = accInfo[l.AccountId];
+                bool isCash = info.Item2;
+
+                if (isCash && l.Debit > 0) cashDr++;
+                if (isCash && l.Credit > 0) cashCr++;
+
+                if (dto.VoucherType == "JV" && isCash)
+                    throw new Exception("Cash/Bank not allowed in Journal Voucher.");
+            }
+
+            if (dto.VoucherType == "PV" && cashCr != 1)
+                throw new Exception("Payment Voucher must credit exactly one Cash/Bank.");
+
+            if (dto.VoucherType == "RV" && cashDr != 1)
+                throw new Exception("Receipt Voucher must debit exactly one Cash/Bank.");
+
+            if (dto.VoucherType == "CV" && (cashDr != 1 || cashCr != 1))
+                throw new Exception("Contra Voucher must have one Cash/Bank debit and credit.");
+        }
+
+        private Exception VoucherError(string msg)
+        {
+            return new Exception(msg);
+        }
+
+        public List<AccountDto> GetAccountsForVoucherSide(string voucherType, string side)
+        {
+            var list = new List<AccountDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    var sql = @"
+SELECT AccountId, AccountName, AccountType, LOWER(AccountName)
+FROM Accounts
+WHERE IFNULL(IsActive,1)=1
+";
+
+                    switch (voucherType)
+                    {
+                        case "JV":
+                            sql += @" AND LOWER(AccountName) NOT LIKE '%cash%' 
+                              AND LOWER(AccountName) NOT LIKE '%bank%'";
+                            break;
+
+                        case "PV": // Payment
+                            if (side == "Debit")
+                                sql += @" AND AccountType IN ('Expense','Asset','Liability')";
+                            else
+                                sql += @" AND LOWER(AccountName) LIKE '%cash%' 
+                                  OR LOWER(AccountName) LIKE '%bank%'";
+                            break;
+
+                        case "RV": // Receipt
+                            if (side == "Debit")
+                                sql += @" AND LOWER(AccountName) LIKE '%cash%' 
+                                  OR LOWER(AccountName) LIKE '%bank%'";
+                            else
+                                sql += @" AND AccountType IN ('Income','Asset','Liability')";
+                            break;
+
+                        case "CV": // Contra
+                            sql += @" AND LOWER(AccountName) LIKE '%cash%' 
+                              OR LOWER(AccountName) LIKE '%bank%'";
+                            break;
+                    }
+
+                    sql += " ORDER BY AccountName";
+
+                    cmd.CommandText = sql;
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new AccountDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1)
+                            });
+                        }
+                    }
+                }
+            }
+            return list;
+        }
+
+        public VoucherViewDto LoadVoucherById(long journalEntryId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                var header = new VoucherViewDto();
+
+                // ---------------- Header ----------------
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT VoucherType, VoucherNo, Date, Description
+FROM JournalEntries
+WHERE JournalId = @id";
+                    cmd.Parameters.AddWithValue("@id", journalEntryId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read())
+                            throw new Exception("Voucher not found");
+
+                        header.VoucherType = r.GetString(0);
+                        header.VoucherNo = r.GetString(1);
+                        header.VoucherDate = r.GetDateTime(2).ToString("yyyy-MM-dd");
+                        header.Narration = r.GetString(3);
+                    }
+                }
+
+                // ---------------- Lines ----------------
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT jl.AccountId, a.AccountName, jl.Debit, jl.Credit
+FROM JournalLines jl
+JOIN Accounts a ON a.AccountId = jl.AccountId
+WHERE jl.JournalId = @id";
+                    cmd.Parameters.AddWithValue("@id", journalEntryId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            header.Lines.Add(new VoucherLineViewDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1),
+                                Debit = r.IsDBNull(2) ? 0 : r.GetDecimal(2),
+                                Credit = r.IsDBNull(3) ? 0 : r.GetDecimal(3)
+                            });
+
+                        }
+                    }
+                }
+
+
+                return header;
+            }
+        }
+        public List<object> GetVoucherIdsByDate(string date)
+        {
+            var list = new List<object>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT JournalId
+FROM JournalEntries
+WHERE DATE(Date) = DATE(@dt)
+  AND VoucherNo IS NOT NULL
+  and IFNULL(IsReversal,0) = 0
+ORDER BY JournalId;
+";
+                    cmd.Parameters.AddWithValue("@dt", date);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new
+                            {
+                                JournalEntryId = r.GetInt64(0)
+                            });
+                        }
+
+                        return list;
+                    }
+                }
+            }
+        }
+
+
+        public string GetNextVoucherNo(string voucherType)
+        {
+            string prefix;
+            if (voucherType == "JV")
+                prefix = "JV";
+            else if (voucherType == "PV")
+                prefix = "PV";
+            else if (voucherType == "RV")
+                prefix = "RV";
+            else if (voucherType == "CV")
+                prefix = "CV";
+            else
+                prefix = "JV";
+
+
+            string fy = GetFinancialYear();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT COUNT(*) FROM JournalEntries
+WHERE VoucherType=@vt AND VoucherNo LIKE @fy;
+";
+                    cmd.Parameters.AddWithValue("@vt", voucherType);
+                    cmd.Parameters.AddWithValue("@fy", $"{prefix}/{fy}/%");
+
+                    int next = Convert.ToInt32(cmd.ExecuteScalar()) + 1;
+                    return $"{prefix}/{fy}/{next:D4}";
+                }
+            }
+        }
+        public void ReverseVoucher(long journalEntryId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+
+                    // -----------------------------
+                    // 0. Validate not already reversed
+                    // -----------------------------
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+        SELECT IFNULL(IsReversed,0)
+        FROM JournalEntries
+        WHERE JournalId = @id
+    ";
+                        cmd.Parameters.AddWithValue("@id", journalEntryId);
+
+                        if (Convert.ToInt32(cmd.ExecuteScalar()) == 1)
+                            throw new Exception("This voucher has already been reversed.");
+                    }
+
+
+                    // -----------------------------
+                    // 1. Load original voucher
+                    // -----------------------------
+                    string originalVoucherNo;
+                    string voucherType;
+                    DateTime entryDate;
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+SELECT VoucherNo, VoucherType, Date
+FROM JournalEntries
+WHERE JournalId = @id;
+";
+                        cmd.Parameters.AddWithValue("@id", journalEntryId);
+
+                        using (var r = cmd.ExecuteReader())
+                        {
+                            if (!r.Read())
+                                throw new Exception("Original voucher not found.");
+
+                            originalVoucherNo = r.GetString(0);
+                            voucherType = r.GetString(1);
+                            entryDate = r.GetDateTime(2);
+                        }
+                    }
+
+                    // -----------------------------
+                    // 2. Load lines
+                    // -----------------------------
+                    var lines = new List<(long acc, decimal dr, decimal cr)>();
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+SELECT AccountId, Debit, Credit
+FROM JournalLines
+WHERE JournalId = @id;
+";
+                        cmd.Parameters.AddWithValue("@id", journalEntryId);
+
+                        using (var r = cmd.ExecuteReader())
+                        {
+                            while (r.Read())
+                                lines.Add((r.GetInt64(0), r.IsDBNull(1) ? 0 : r.GetDecimal(1), r.IsDBNull(2) ? 0 : r.GetDecimal(2)));
+                        }
+                    }
+
+                    if (!lines.Any())
+                        throw new Exception("No journal lines found.");
+
+                    // -----------------------------
+                    // 3. Create reversal entry
+                    // -----------------------------
+                    string reversalVoucherNo = GetNextVoucherNo("JV");
+                    long reversalEntryId;
+
+                    int voucherNumericId = 0;
+                    if (!string.IsNullOrWhiteSpace(reversalVoucherNo))
+                    {
+                        var parts = reversalVoucherNo.Split('/');
+                        if (parts.Length > 0)
+                            //int.TryParse(parts[^1], out voucherNumericId); // last part
+                            int.TryParse(parts[parts.Length - 1], out voucherNumericId); // last part
+                    }
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+INSERT INTO JournalEntries
+(VoucherType, VoucherNo, Date, Description, VoucherId, IsReversal, SourceJournalId)
+VALUES ('JV',@vn,@dt,@nar,@ref,1,@src);
+SELECT last_insert_rowid();
+";
+                        cmd.Parameters.AddWithValue("@vn", reversalVoucherNo);
+                        cmd.Parameters.AddWithValue("@dt", DateTime.Now);
+                        cmd.Parameters.AddWithValue(
+                            "@nar",
+                            $"Reversal of {originalVoucherNo}"
+                        );
+                        cmd.Parameters.AddWithValue("@ref", voucherNumericId);
+                        cmd.Parameters.AddWithValue("@isrev", 1);
+                        cmd.Parameters.AddWithValue("@src", journalEntryId);
+
+                        reversalEntryId = (long)cmd.ExecuteScalar();
+                    }
+
+                    // -----------------------------
+                    // 4. Insert reversed lines
+                    // -----------------------------
+                    foreach (var l in lines)
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO JournalLines
+(JournalId, AccountId, Debit, Credit)
+VALUES (@jid,@acc,@dr,@cr);
+";
+                            cmd.Parameters.AddWithValue("@jid", reversalEntryId);
+                            cmd.Parameters.AddWithValue("@acc", l.acc);
+                            cmd.Parameters.AddWithValue("@dr", l.cr);
+                            cmd.Parameters.AddWithValue("@cr", l.dr);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
+        UPDATE JournalEntries
+        SET IsReversed = 1,
+            ReversedJournalId = @rid
+        WHERE JournalId = @oid
+    ";
+                        cmd.Parameters.AddWithValue("@rid", reversalEntryId);
+                        cmd.Parameters.AddWithValue("@oid", journalEntryId);
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    tx.Commit();
+                }
+            }
+        }
+
+
+        public List<AccountDto> GetAccountsForVoucher(string voucherType)
+        {
+            var list = new List<AccountDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    // Base query
+                    var sql = @"
+SELECT 
+    AccountId,
+    AccountName,
+    AccountType
+FROM Accounts
+WHERE IFNULL(IsActive,1) = 1
+";
+
+                    // Voucher-type specific filtering
+                    switch (voucherType)
+                    {
+                        case "JV": // Journal Voucher
+                                   // Allow all types BUT exclude Cash/Bank
+                            sql += @"
+AND AccountType IN ('Income','Expense','Asset','Liability','Equity')
+AND LOWER(AccountName) NOT LIKE '%cash%'
+AND LOWER(AccountName) NOT LIKE '%bank%'
+";
+                            break;
+
+                        case "PV": // Payment Voucher
+                                   // Expense / Asset / Liability + Cash/Bank
+                            sql += @"
+AND (
+    AccountType IN ('Expense','Asset','Liability')
+    OR LOWER(AccountName) LIKE '%cash%'
+    OR LOWER(AccountName) LIKE '%bank%'
+)
+";
+                            break;
+
+                        case "RV": // Receipt Voucher
+                                   // Income / Asset / Liability + Cash/Bank
+                            sql += @"
+AND (
+    AccountType IN ('Income','Asset','Liability')
+    OR LOWER(AccountName) LIKE '%cash%'
+    OR LOWER(AccountName) LIKE '%bank%'
+)
+";
+                            break;
+
+                        case "CV": // Contra Voucher
+                                   // ONLY Cash & Bank
+                            sql += @"
+AND AccountType = 'Asset'
+AND (
+    LOWER(AccountName) LIKE '%cash%'
+    OR LOWER(AccountName) LIKE '%bank%'
+)
+";
+                            break;
+
+                        default:
+                            throw new Exception("Invalid voucher type.");
+                    }
+
+                    sql += " ORDER BY AccountName;";
+
+                    cmd.CommandText = sql;
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new AccountDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
+
+        //private string GetFinancialYear()
+        //{
+        //    var now = DateTime.Now;
+        //    return now.Month >= 4
+        //        ? $"{now.Year}-{(now.Year + 1).ToString().Substring(2)}"
+        //        : $"{now.Year - 1}-{now.Year.ToString().Substring(2)}";
+        //}
+
         public List<TrialBalanceRowDto> GetTrialBalance()
         {
             var rows = new List<TrialBalanceRowDto>();
@@ -7818,58 +8409,51 @@ ORDER BY a.AccountType, a.AccountName;
                 // ─────────────────────────────────────────────
                 // 3️⃣ Build accountId list (leaf or group)
                 // ─────────────────────────────────────────────
-                var accountIds = new List<long>();
+                var accountIds = new HashSet<long>();
 
-                if (!isGroupAccount)
-                {
-                    accountIds.Add(accountId);
-                }
-                else
-                {
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = @"
-                    SELECT AccountId
-                    FROM Accounts
-                    WHERE ParentAccountId = @aid;
-                ";
-                        cmd.Parameters.AddWithValue("@aid", accountId);
-
-                        using (var rd = cmd.ExecuteReader())
-                        {
-                            while (rd.Read())
-                                accountIds.Add(rd.GetInt64(0));
-                        }
-                    }
-
-                    report.AccountName += " (Group)";
-                }
+                LoadAccountAndChildren(accountId, accountIds, conn);
 
                 if (accountIds.Count == 0)
-                    return report; // nothing to show
+                    return report;
 
                 string idList = string.Join(",", accountIds);
+
+                report.AccountName += " (Group)";
+
+
+                
 
                 // ─────────────────────────────────────────────
                 // 4️⃣ Opening balance
                 // ─────────────────────────────────────────────
+                // Ensure FROM is start of day in ISO format
+                //string fromDateTime = DateTime
+                //    .Parse(from)
+                //    .Date
+                //    .ToString("yyyy-MM-dd HH:mm:ss");
+
                 decimal opening;
+
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = $@"
-                SELECT IFNULL(SUM(jl.Debit) - SUM(jl.Credit), 0)
-                FROM JournalLines jl
-                JOIN JournalEntries je ON jl.JournalId = je.JournalId
-                WHERE jl.AccountId IN ({idList})
-                  AND Date(je.Date) < Date(@from);
-            ";
-                    cmd.Parameters.AddWithValue("@from", from);
+SELECT IFNULL(SUM(jl.Debit) - SUM(jl.Credit), 0)
+FROM JournalLines jl
+JOIN JournalEntries je ON jl.JournalId = je.JournalId
+WHERE jl.AccountId IN ({idList})
+  AND substr(je.Date, 1, 10) < @from;
+";
+
+                    // @from MUST be yyyy-MM-dd
+                    cmd.Parameters.AddWithValue("@from", from.Substring(0, 10));
 
                     opening = Convert.ToDecimal(cmd.ExecuteScalar());
                 }
 
                 report.OpeningBalance = Math.Abs(opening);
                 report.OpeningSide = opening >= 0 ? "Dr" : "Cr";
+
+
 
                 // ─────────────────────────────────────────────
                 // 5️⃣ Ledger rows
@@ -7882,11 +8466,12 @@ ORDER BY a.AccountType, a.AccountName;
                 FROM JournalLines jl
                 JOIN JournalEntries je ON jl.JournalId = je.JournalId
                 WHERE jl.AccountId IN ({idList})
-                  AND Date(je.Date) BETWEEN Date(@from) AND Date(@to)
-                ORDER BY Date(je.Date), jl.LineId;
+                 AND substr(je.Date, 1, 10) BETWEEN @from AND @to
+
+                ORDER BY substr(je.Date, 1, 10), jl.LineId;
             ";
-                    cmd.Parameters.AddWithValue("@from", from);
-                    cmd.Parameters.AddWithValue("@to", to);
+                    cmd.Parameters.AddWithValue("@from", from.Substring(0, 10));
+                    cmd.Parameters.AddWithValue("@to", to.Substring(0, 10));
 
                     using (var rd = cmd.ExecuteReader())
                     {
@@ -7919,6 +8504,37 @@ ORDER BY a.AccountType, a.AccountName;
             }
 
             return report;
+        }
+        void LoadAccountAndChildren(
+    long accountId,
+    HashSet<long> accountIds,
+    SQLiteConnection conn
+)
+        {
+            // ✅ Add parent itself (once)
+            if (!accountIds.Add(accountId))
+                return; // already added → stop duplicate recursion
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"
+            SELECT AccountId
+            FROM Accounts
+            WHERE ParentAccountId = @pid;
+        ";
+                cmd.Parameters.AddWithValue("@pid", accountId);
+
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        long childId = r.GetInt64(0);
+
+                        // 🔁 recurse for each child
+                        LoadAccountAndChildren(childId, accountIds, conn);
+                    }
+                }
+            }
         }
 
 
