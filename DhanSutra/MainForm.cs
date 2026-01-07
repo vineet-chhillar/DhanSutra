@@ -2020,6 +2020,34 @@ namespace DhanSutra
 
                             break;
                         }
+                    case "GetDashboardOutstanding":
+                        {
+                            var rows = db.GetDashboardOutstanding();
+                            var response = new
+                            {
+                                action = "GetDashboardOutstandingResult",
+                                data = rows
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+                         
+                        }
+                    case "getDashboardStockAlerts":
+                        {
+                            var data = db.GetDashboardStockAlerts();
+
+                            var response = new
+                            {
+                                action = "getDashboardStockAlertsResult",
+                                rows = data
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+                        }
+
 
                     case "LoadSalesInvoice":
                         {
@@ -3217,6 +3245,24 @@ namespace DhanSutra
 
                             break;
                         }
+                    case "getDashboardProfitLoss":
+                        {
+                            var p = req.Payload as JObject;
+
+                            var from = p.Value<string>("From");
+                            var to = p.Value<string>("To");
+
+                            var data = db.GetDashboardProfitLoss(from, to);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "getDashboardProfitLossResult",
+                                    data
+                                })
+                            );
+                            break;
+                        }
 
                     case "SavePurchaseReturn":
                         {
@@ -3309,18 +3355,65 @@ namespace DhanSutra
                             if (payload == null) break;
 
                             var dto = payload.ToObject<AccountDto>();
-                             db.CreateAccount(dto);
+
+                            OperationResult result = db.CreateAccount(dto);
 
                             var response = new
                             {
                                 action = "createAccountResult",
-                                success = true,
-                                message = "Account created successfully"
+                                success = result.Success,
+                                message = result.Message
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+
+                            break;
+                        }
+
+                    case "GetDayBook":
+                        {
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var from = p.Value<string>("From");
+                            var to = p.Value<string>("To");
+
+                            var data = db.GetDayBook(from, to);
+
+                            var response = new
+                            {
+                                Status = "Success",
+                                Data = data,
+                                action= "GetDayBookResponse"
                             };
 
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
+
+                            
                         }
+                    case "getVoucherReport":
+                        {
+                            var p = req.Payload as JObject;
+                            var from = p.Value<string>("From");
+                            var to = p.Value<string>("To");
+                            var voucherType = p.Value<string>("VoucherType");
+
+                            var rows = db.GetVoucherReport(from, to, voucherType);
+                            var response = new
+                            {
+                                Status = "Success",
+                                rows,
+                                action = "getVoucherReportResult"
+                            };
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+
+                            
+                        }
+
                     case "getProfitLoss":
                         {
                             var payload = req.Payload as JObject;
@@ -3510,6 +3603,99 @@ namespace DhanSutra
                             );
                             break;
                         }
+                    case "getVoucherTypes":
+                        {
+                            var types = db.GetVoucherTypes();
+
+                            var response = new
+                            {
+                                action = "getVoucherTypesResult",
+                                rows = types
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+
+
+                           
+                        }
+                    case "getCashBook":
+                        {
+                            var p = req.Payload as JObject;
+                            var from = p.Value<string>("From");
+                            var to = p.Value<string>("To");
+
+                            CashBookDto dto = db.GetCashBook(from, to);
+
+                            var response = new
+                            {
+                                action = "getCashBookResult",
+                                OpeningBalance = dto.OpeningBalance,
+                                ClosingBalance = dto.ClosingBalance,
+                                Rows = dto.Rows
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+                        }
+
+                    case "getBankBook":
+                        {
+                            var p = req.Payload as JObject;
+                            var from = p.Value<string>("From");
+                            var to = p.Value<string>("To");
+
+                            CashBookDto dto = db.GetBankBook(from, to);
+
+                            var response = new
+                            {
+                                action = "getBankBookResult",
+                                OpeningBalance = dto.OpeningBalance,
+                                ClosingBalance = dto.ClosingBalance,
+                                Rows = dto.Rows
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+                        }
+
+                    case "getOutstandingReport":
+                        {
+                            var p = req.Payload as JObject;
+                            var balanceType = p.Value<string>("BalanceType") ?? "ALL";
+
+                            var rows = db.GetOutstandingReport(balanceType);
+
+                            var response = new
+                            {
+                                action = "getOutstandingReportResult",
+                                rows
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+                            break;
+                        }
+                    case "getDashboardSummary":
+                        {
+                            var data = db.GetDashboardSummary();
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "getDashboardSummaryResult",
+                                    data
+                                })
+                            );
+                            break;
+                        }
 
 
                     case "GetInvoiceNumbersByDate":
@@ -3572,6 +3758,7 @@ namespace DhanSutra
                 webView.CoreWebView2.PostWebMessageAsString("Error: " + ex.Message);
             }
         }
+       
         public string GetFinancialYear()
         {
             DateTime today = DateTime.Now;

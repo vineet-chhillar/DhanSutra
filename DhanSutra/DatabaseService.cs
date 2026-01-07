@@ -1153,6 +1153,7 @@ reorderlevel=@reorderlevel
                 return null;
             }
         }
+       
         public CompanyProfile GetCompanyProfile()
         {
             CompanyProfile profile = null;
@@ -7004,7 +7005,7 @@ WHERE ExpenseVoucherId = @id;
                                             conn, tx,
                                             DateTime.Now.ToString("yyyy-MM-dd"),
                                             $"Reversal of SalesInvoice #{oldInvoiceId}",
-                                            "Reversal",
+                                            "Reversal of SalesInvoice",
                                             oldInvoiceId
                                         );
 
@@ -7358,7 +7359,7 @@ WHERE ExpenseVoucherId = @id;
                                             conn, tx,
                                             DateTime.Now.ToString("yyyy-MM-dd"),
                                             $"Reversal of PurchaseInvoice #{oldId}",
-                                            "Reversal",
+                                            "Reversal of PurchaseInvoice",
                                             oldId
                                         );
 
@@ -8182,58 +8183,53 @@ VALUES (@jid,@acc,@dr,@cr);
 
                 using (var cmd = conn.CreateCommand())
                 {
-                    // Base query
                     var sql = @"
-SELECT 
-    AccountId,
-    AccountName,
-    AccountType
+SELECT AccountId, AccountName, AccountType
 FROM Accounts
 WHERE IFNULL(IsActive,1) = 1
+  AND (
+        (
+          ParentAccountId IS NOT NULL
+          AND AccountId NOT IN (
+              SELECT DISTINCT ParentAccountId
+              FROM Accounts
+              WHERE ParentAccountId IS NOT NULL
+          )
+        )
+        OR AccountName IN ('Cash','Bank')
+      )
 ";
 
-                    // Voucher-type specific filtering
                     switch (voucherType)
                     {
                         case "JV": // Journal Voucher
-                                   // Allow all types BUT exclude Cash/Bank
                             sql += @"
 AND AccountType IN ('Income','Expense','Asset','Liability','Equity')
-AND LOWER(AccountName) NOT LIKE '%cash%'
-AND LOWER(AccountName) NOT LIKE '%bank%'
+AND AccountName NOT IN ('Cash','Bank')
 ";
                             break;
 
                         case "PV": // Payment Voucher
-                                   // Expense / Asset / Liability + Cash/Bank
                             sql += @"
 AND (
     AccountType IN ('Expense','Asset','Liability')
-    OR LOWER(AccountName) LIKE '%cash%'
-    OR LOWER(AccountName) LIKE '%bank%'
+    OR AccountName IN ('Cash','Bank')
 )
 ";
                             break;
 
                         case "RV": // Receipt Voucher
-                                   // Income / Asset / Liability + Cash/Bank
                             sql += @"
 AND (
     AccountType IN ('Income','Asset','Liability')
-    OR LOWER(AccountName) LIKE '%cash%'
-    OR LOWER(AccountName) LIKE '%bank%'
+    OR AccountName IN ('Cash','Bank')
 )
 ";
                             break;
 
                         case "CV": // Contra Voucher
-                                   // ONLY Cash & Bank
                             sql += @"
-AND AccountType = 'Asset'
-AND (
-    LOWER(AccountName) LIKE '%cash%'
-    OR LOWER(AccountName) LIKE '%bank%'
-)
+AND AccountName IN ('Cash','Bank')
 ";
                             break;
 
@@ -8261,6 +8257,7 @@ AND (
 
             return list;
         }
+
 
 
         //private string GetFinancialYear()
@@ -8958,8 +8955,8 @@ WHERE jl.AccountId IN ({idList})
                                 cmdp.Transaction = tx;
                                 cmdp.CommandText = @"
         UPDATE purchaseheader
-        SET BalanceAmount = BalanceAmount - 
-        WHERE Id = @iid";
+        SET BalanceAmount = BalanceAmount - @adj
+        WHERE PurchaseId = @iid";
 
                                 cmdp.Parameters.AddWithValue("@adj", adjustAmount);
                                 cmdp.Parameters.AddWithValue("@iid", dto.PurchaseId);
@@ -9794,6 +9791,666 @@ WHERE Id = @id;
             }
             return dto;
         }
+        public List<DayBookRowDto> GetDayBook(string from, string to)
+        {
+            var list = new List<DayBookRowDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+                     datetime(je.CreatedAt, '+5 hours', '+30 minutes') AS CreatedAt,
+                    je.VoucherType,
+                    je.VoucherNo,
+                    a.AccountName,
+                    jl.Debit,
+                    jl.Credit,
+                    je.Description
+                FROM JournalEntries je
+                JOIN JournalLines jl ON jl.JournalId = je.JournalId
+                JOIN Accounts a ON a.AccountId = jl.AccountId
+                WHERE je.Date BETWEEN @from AND @to
+                  --AND IFNULL(je.IsReversed, 0) = 0
+                  --AND IFNULL(je.IsReversal, 0) = 0
+                ORDER BY je.CreatedAt, je.JournalId, jl.LineId;
+            ";
+
+                    cmd.Parameters.AddWithValue("@from", from);
+                    cmd.Parameters.AddWithValue("@to", to);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new DayBookRowDto
+                            {
+                                EntryDate = r.GetString(0),
+                                VoucherType = r.IsDBNull(1) ? "" : r.GetString(1),
+                                VoucherNo = r.IsDBNull(2) ? "" : r.GetString(2),
+                                AccountName = r.GetString(3),
+                                Debit = r.IsDBNull(4) ? 0 : r.GetDecimal(4),
+                                Credit = r.IsDBNull(5) ? 0 : r.GetDecimal(5),
+                                Description = r.IsDBNull(6) ? "" : r.GetString(6)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+        public List<VoucherReportRowDto> GetVoucherReport(
+    string from,
+    string to,
+    string voucherType
+)
+        {
+            var list = new List<VoucherReportRowDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+                    je.JournalId,
+                    je.Date,
+                    je.VoucherType,
+                    je.VoucherNo,
+                    je.Description,
+                    jl.LineId,
+                    jl.AccountId,
+                    a.AccountName,
+                    jl.Debit,
+                    jl.Credit
+                FROM JournalEntries je
+                JOIN JournalLines jl ON jl.JournalId = je.JournalId
+                JOIN Accounts a ON a.AccountId = jl.AccountId
+                WHERE je.Date BETWEEN @from AND @to
+                  --AND IFNULL(je.IsReversed, 0) = 0
+                  --AND IFNULL(je.IsReversal, 0) = 0
+                  AND (@voucherType IS NULL OR je.VoucherType = @voucherType)
+                ORDER BY je.Date, je.JournalId, jl.LineId;
+            ";
+
+                    cmd.Parameters.AddWithValue("@from", from);
+                    cmd.Parameters.AddWithValue("@to", to);
+                    cmd.Parameters.AddWithValue(
+                        "@voucherType",
+                        string.IsNullOrEmpty(voucherType)
+                            ? (object)DBNull.Value
+                            : voucherType
+                    );
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new VoucherReportRowDto
+                            {
+                                JournalId = r.GetInt64(0),
+                                Date = r.GetString(1),
+                                VoucherType = r.GetString(2),
+                                VoucherNo = r.IsDBNull(3) ? "" : r.GetString(3),
+                                Description = r.IsDBNull(4) ? "" : r.GetString(4),
+
+                                LineId = r.GetInt64(5),
+                                AccountId = r.GetInt64(6),
+                                AccountName = r.GetString(7),
+
+                                Debit = r.IsDBNull(8) ? 0 : r.GetDecimal(8),
+                                Credit = r.IsDBNull(9) ? 0 : r.GetDecimal(9),
+                            });
+                        }
+                    }
+                }
+            }
+            return list;
+        }
+        public CashBookDto GetCashBook(
+    string from,
+    string to
+)
+        {
+            var dto = new CashBookDto();
+            var rows = new List<VoucherReportRowDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // 1️⃣ Get all cash accounts
+                var cashAccounts = new List<long>();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT AccountId FROM Accounts WHERE AccountName = 'Cash'";
+                    using (var r = cmd.ExecuteReader())
+                        while (r.Read())
+                            cashAccounts.Add(r.GetInt64(0));
+                }
+
+                // 2️⃣ Opening Balance
+                decimal opening = 0;
+                foreach (var acc in cashAccounts)
+                    opening += GetOpeningBalance(conn, acc, from);
+
+                dto.OpeningBalance = opening;
+
+                // 3️⃣ Transactions
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+                    je.JournalId, je.Date, je.VoucherType, je.VoucherNo,
+                    je.Description,
+                    jl.LineId, jl.AccountId, a.AccountName,
+                    jl.Debit, jl.Credit
+                FROM JournalEntries je
+                JOIN JournalLines jl ON jl.JournalId = je.JournalId
+                JOIN Accounts a ON a.AccountId = jl.AccountId
+                WHERE je.Date BETWEEN @from AND @to
+                  --AND IFNULL(je.IsReversed, 0) = 0
+                  --AND IFNULL(je.IsReversal, 0) = 0
+                  AND jl.AccountId IN (
+                      SELECT AccountId FROM Accounts WHERE AccountName = 'Cash'
+                  )
+                ORDER BY je.Date, je.JournalId, jl.LineId;
+            ";
+
+                    cmd.Parameters.AddWithValue("@from", from);
+                    cmd.Parameters.AddWithValue("@to", to);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            rows.Add(new VoucherReportRowDto
+                            {
+                                JournalId = r.GetInt64(0),
+                                Date = r.GetString(1),
+                                VoucherType = r.GetString(2),
+                                VoucherNo = r.IsDBNull(3) ? "" : r.GetString(3),
+                                Description = r.IsDBNull(4) ? "" : r.GetString(4),
+                                LineId = r.GetInt64(5),
+                                AccountId = r.GetInt64(6),
+                                AccountName = r.GetString(7),
+                                Debit = r.IsDBNull(8) ? 0 : r.GetDecimal(8),
+                                Credit = r.IsDBNull(9) ? 0 : r.GetDecimal(9)
+                            });
+                        }
+                    }
+                }
+
+                dto.Rows = rows;
+
+                // 4️⃣ Closing Balance
+                dto.ClosingBalance =
+                    opening +
+                    rows.Sum(r => r.Debit) -
+                    rows.Sum(r => r.Credit);
+            }
+
+            return dto;
+        }
+        public DashboardDto GetDashboardSummary()
+        {
+            var dto = new DashboardDto
+            {
+                SalesPurchaseChart = new List<SalesPurchaseChartDto>(),
+                CashBankTrend = new List<CashBankTrendDto>()
+            };
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                var today = DateTime.Today.ToString("yyyy-MM-dd");
+                var monthStart = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)
+                    .ToString("yyyy-MM-dd");
+
+                // 1️⃣ Cash Balance
+                dto.CashBalance = GetCashBook(monthStart, today).ClosingBalance;
+
+                // 2️⃣ Bank Balance
+                dto.BankBalance = GetBankBook(monthStart, today).ClosingBalance;
+
+                // 3️⃣ Receivable / Payable
+                var outstanding = GetOutstandingReport("ALL");
+                dto.TotalReceivable = outstanding.Where(x => x.Balance > 0).Sum(x => x.Balance);
+                dto.TotalPayable = Math.Abs(outstanding.Where(x => x.Balance < 0).Sum(x => x.Balance));
+
+                // 4️⃣ Today Sales
+                dto.TodaySales = ExecuteScalarDecimal(conn, @"
+            SELECT 
+    IFNULL(SUM(
+        CASE
+            WHEN je.VoucherType = 'SalesInvoice'
+                THEN jl.Credit
+
+            WHEN je.VoucherType = 'Reversal of SalesInvoice'
+                THEN -jl.Debit
+
+            WHEN je.VoucherType = 'SalesReturn'
+                THEN -jl.Debit
+
+            ELSE 0
+        END
+    ), 0) AS NetSales
+FROM JournalEntries je
+JOIN JournalLines jl ON jl.JournalId = je.JournalId
+WHERE je.Date = @today
+        ", today);
+
+                // 5️⃣ Today Purchase
+                dto.TodayPurchase = ExecuteScalarDecimal(conn, @"
+            SELECT 
+    IFNULL(SUM(
+        CASE
+            WHEN je.VoucherType = 'PurchaseInvoice'
+                THEN jl.Debit
+
+            WHEN je.VoucherType = 'Reversal of PurchaseInvoice'
+                THEN -jl.Credit
+
+            WHEN je.VoucherType = 'PurchaseReturn'
+                THEN -jl.Credit
+
+            ELSE 0
+        END
+    ), 0) AS NetPurchase
+FROM JournalEntries je
+JOIN JournalLines jl ON jl.JournalId = je.JournalId
+WHERE je.Date = @today;
+
+        ", today);
+
+                // 6️⃣ Monthly Profit Snapshot
+                var pl = GetProfitAndLoss(monthStart, today);
+                dto.MonthlyRevenue = pl.TotalIncome;
+                dto.MonthlyExpense = pl.TotalExpenses;
+                dto.MonthlyProfit = pl.NetProfit;
+
+                // 7️⃣ Sales vs Purchase Chart (Weekly)
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT strftime('%W', Date) AS Week,
+       SUM(CASE WHEN je.VoucherType = 'SalesInvoice'THEN jl.Credit
+     WHEN je.VoucherType = 'Reversal of SalesInvoice' THEN -jl.Debit
+     WHEN je.VoucherType = 'SalesReturn' THEN -jl.Debit
+     ELSE 0
+END) AS NetSales,
+       SUM(CASE WHEN je.VoucherType = 'PurchaseInvoice' THEN jl.Debit
+     WHEN je.VoucherType = 'Reversal of PurchaseInvoice' THEN -jl.Credit
+     WHEN je.VoucherType = 'PurchaseReturn' THEN -jl.Credit
+     ELSE 0
+END) AS NetPurchase
+FROM JournalEntries je
+JOIN JournalLines jl ON jl.JournalId = je.JournalId
+WHERE Date BETWEEN @from AND @to
+GROUP BY Week
+ORDER BY Week;
+            ";
+
+                    cmd.Parameters.AddWithValue("@from", monthStart);
+                    cmd.Parameters.AddWithValue("@to", today);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            dto.SalesPurchaseChart.Add(new SalesPurchaseChartDto
+                            {
+                                Label = "Week " + r.GetString(0),
+                                Sales = r.GetDecimal(1),
+                                Purchase = r.GetDecimal(2)
+                            });
+                        }
+                    }
+                }
+
+                // 8️⃣ Cash & Bank Trend (Last 7 Days)
+                for (int i = 6; i >= 0; i--)
+                {
+                    var d = DateTime.Today.AddDays(-i).ToString("yyyy-MM-dd");
+
+                    dto.CashBankTrend.Add(new CashBankTrendDto
+                    {
+                        Date = d,
+                        Cash = GetCashBook(d, d).ClosingBalance,
+                        Bank = GetBankBook(d, d).ClosingBalance
+                    });
+                }
+            }
+
+            return dto;
+        }
+        private decimal ExecuteScalarDecimal(SQLiteConnection conn, string sql, string date)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = sql;
+                cmd.Parameters.AddWithValue("@today", date);
+                return Convert.ToDecimal(cmd.ExecuteScalar());
+            }
+        }
+        public List<DashboardOutstandingRowDto> GetDashboardOutstanding()
+        {
+            var list = new List<DashboardOutstandingRowDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT *\r\nFROM (\r\n    SELECT\r\n        a.AccountId,\r\n        CASE\r\n            WHEN a.AccountName LIKE 'Customer%' \r\n " +
+                        "               THEN 'Customer (' || IFNULL(c.CustomerName, a.AccountName) || ')'\r\n            WHEN a.AccountName LIKE 'Supplier%' \r\n  " +
+                        "              THEN 'Supplier (' || IFNULL(s.SupplierName, a.AccountName) || ')'\r\n        END AS AccountName,\r\n      " +
+                        "  IFNULL(SUM(jl.Debit),0) - IFNULL(SUM(jl.Credit),0) AS Balance\r\n    FROM Accounts a\r\n    " +
+                        "JOIN JournalLines jl ON jl.AccountId = a.AccountId\r\n    JOIN JournalEntries je ON je.JournalId = jl.JournalId\r\n    " +
+                        "LEFT JOIN Customers c\r\n        ON a.AccountName LIKE 'Customer%'\r\n       AND c.CustomerId = CAST(SUBSTR(a.AccountName, 10) AS INTEGER)\r\n " +
+                        "   LEFT JOIN Suppliers s\r\n        ON a.AccountName LIKE 'Supplier%'\r\n       AND s.SupplierId = CAST(SUBSTR(a.AccountName, 10) AS INTEGER)\r\n  " +
+                        "  WHERE\r\n        a.AccountName LIKE 'Customer%'\r\n        OR a.AccountName LIKE 'Supplier%'\r\n    GROUP BY\r\n        a.AccountId,\r\n     " +
+                        "   AccountName\r\n)\r\nWHERE Balance <> 0\r\nORDER BY ABS(Balance) DESC\r\nLIMIT 5;\r\n";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new DashboardOutstandingRowDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1),
+                                Balance = r.GetDecimal(2)
+                            });
+                        }
+                    }
+                }
+            }
+            return list;
+
+        }
+
+        public List<DashboardStockAlertDto> GetDashboardStockAlerts()
+        {
+            var list = new List<DashboardStockAlertDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT\r\n    i.Id,\r\n    i.Name,\r\n    IFNULL(b.CurrentQty, 0) AS CurrentQty,\r\n  " +
+                        "  IFNULL(i.ReorderLevel, 5) AS ReorderLevel\r\nFROM Item i\r\nLEFT JOIN (\r\n    SELECT ItemId, CurrentQty\r\n " +
+                        "   FROM ItemBalance\r\n    WHERE Id IN (\r\n        SELECT MAX(Id)\r\n        FROM ItemBalance\r\n        GROUP BY ItemId\r\n " +
+                        "   )\r\n) b ON b.ItemId = i.Id\r\nWHERE IFNULL(b.CurrentQty, 0) <= IFNULL(i.ReorderLevel, 5)\r\nORDER BY b.CurrentQty ASC;";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            int qty = r.IsDBNull(2) ? 0 : Convert.ToInt32(r.GetValue(2));
+                            int reorder = r.GetInt32(3);
+
+                            list.Add(new DashboardStockAlertDto
+                            {
+                                ItemId = r.GetInt64(0),
+                                ItemName = r.GetString(1),
+                                CurrentQty = qty,
+                                Status = qty <= 0 ? "OUT" : "LOW"
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
+
+        public DashboardProfitLossDto GetDashboardProfitLoss(string from, string to)
+        {
+            var pl = GetProfitAndLoss(from, to);
+
+            return new DashboardProfitLossDto
+            {
+                Revenue = pl.TotalIncome,
+                Expenses = pl.TotalExpenses
+                // NetProfit auto-calculated
+            };
+        }
+
+
+
+        public List<OutstandingRowDto> GetOutstandingReport(string balanceType)
+        {
+            var list = new List<OutstandingRowDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                string having =
+     "HAVING (IFNULL(SUM(jl.Debit),0) - IFNULL(SUM(jl.Credit),0)) <> 0";
+
+                if (balanceType == "RECEIVABLE")
+                    having =
+                        "HAVING (IFNULL(SUM(jl.Debit),0) - IFNULL(SUM(jl.Credit),0)) > 0";
+                else if (balanceType == "PAYABLE")
+                    having =
+                        "HAVING (IFNULL(SUM(jl.Debit),0) - IFNULL(SUM(jl.Credit),0)) < 0";
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = $@"
+                SELECT 
+    a.AccountId,
+    CASE
+        WHEN a.AccountName LIKE 'Customer%' 
+            THEN 'Customer (' || IFNULL(c.CustomerName, a.AccountName) || ')'
+        WHEN a.AccountName LIKE 'Supplier%' 
+            THEN 'Supplier (' || IFNULL(s.SupplierName, a.AccountName) || ')'
+        ELSE a.AccountName
+    END AS AccountName,
+    --a.AccountName AS LedgerName,
+    IFNULL(SUM(jl.Debit),0)  AS TotalDebit,
+    IFNULL(SUM(jl.Credit),0) AS TotalCredit,
+    IFNULL(SUM(jl.Debit),0) - IFNULL(SUM(jl.Credit),0) AS Balance
+FROM Accounts a
+JOIN JournalLines jl ON jl.AccountId = a.AccountId
+JOIN JournalEntries je ON je.JournalId = jl.JournalId
+LEFT JOIN Customers c
+    ON a.AccountName LIKE 'Customer%'
+   AND c.CustomerId = CAST(SUBSTR(a.AccountName, 10) AS INTEGER)
+LEFT JOIN Suppliers s
+    ON a.AccountName LIKE 'Supplier%'
+   AND s.SupplierId = CAST(SUBSTR(a.AccountName, 10) AS INTEGER)
+WHERE
+    (a.AccountName LIKE 'Customer%' OR a.AccountName LIKE 'Supplier%')
+GROUP BY
+    a.AccountId,
+    AccountName
+    --,
+    --LedgerName
+{having}
+ORDER BY AccountName;
+;
+            ";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new OutstandingRowDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1),
+                                TotalDebit = r.GetDecimal(2),
+                                TotalCredit = r.GetDecimal(3),
+                                Balance = r.GetDecimal(4)
+                            });
+                        }
+                    }
+                }
+            }
+            return list;
+        }
+
+
+
+        public CashBookDto GetBankBook(
+    string from,
+    string to
+)
+        {
+            var dto = new CashBookDto();
+            var rows = new List<VoucherReportRowDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                // 1️⃣ Get all cash accounts
+                var cashAccounts = new List<long>();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT AccountId FROM Accounts WHERE AccountName = 'Bank'";
+                    using (var r = cmd.ExecuteReader())
+                        while (r.Read())
+                            cashAccounts.Add(r.GetInt64(0));
+                }
+
+                // 2️⃣ Opening Balance
+                decimal opening = 0;
+                foreach (var acc in cashAccounts)
+                    opening += GetOpeningBalance(conn, acc, from);
+
+                dto.OpeningBalance = opening;
+
+                // 3️⃣ Transactions
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT
+                    je.JournalId, je.Date, je.VoucherType, je.VoucherNo,
+                    je.Description,
+                    jl.LineId, jl.AccountId, a.AccountName,
+                    jl.Debit, jl.Credit
+                FROM JournalEntries je
+                JOIN JournalLines jl ON jl.JournalId = je.JournalId
+                JOIN Accounts a ON a.AccountId = jl.AccountId
+                WHERE je.Date BETWEEN @from AND @to
+                  --AND IFNULL(je.IsReversed, 0) = 0
+                  --AND IFNULL(je.IsReversal, 0) = 0
+                  AND jl.AccountId IN (
+                      SELECT AccountId FROM Accounts WHERE AccountName = 'Bank'
+                  )
+                ORDER BY je.Date, je.JournalId, jl.LineId;
+            ";
+
+                    cmd.Parameters.AddWithValue("@from", from);
+                    cmd.Parameters.AddWithValue("@to", to);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            rows.Add(new VoucherReportRowDto
+                            {
+                                JournalId = r.GetInt64(0),
+                                Date = r.GetString(1),
+                                VoucherType = r.GetString(2),
+                                VoucherNo = r.IsDBNull(3) ? "" : r.GetString(3),
+                                Description = r.IsDBNull(4) ? "" : r.GetString(4),
+                                LineId = r.GetInt64(5),
+                                AccountId = r.GetInt64(6),
+                                AccountName = r.GetString(7),
+                                Debit = r.IsDBNull(8) ? 0 : r.GetDecimal(8),
+                                Credit = r.IsDBNull(9) ? 0 : r.GetDecimal(9)
+                            });
+                        }
+                    }
+                }
+
+                dto.Rows = rows;
+
+                // 4️⃣ Closing Balance
+                dto.ClosingBalance =
+                    opening +
+                    rows.Sum(r => r.Debit) -
+                    rows.Sum(r => r.Credit);
+            }
+
+            return dto;
+        }
+
+        public decimal GetOpeningBalance(
+    SQLiteConnection conn,
+    long accountId,
+    string fromDate
+)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"
+            SELECT
+                IFNULL(SUM(jl.Debit), 0) - IFNULL(SUM(jl.Credit), 0)
+            FROM JournalLines jl
+            JOIN JournalEntries je ON je.JournalId = jl.JournalId
+            WHERE jl.AccountId = @acc
+              AND je.Date < @from
+              AND IFNULL(je.IsReversed, 0) = 0
+              AND IFNULL(je.IsReversal, 0) = 0;
+        ";
+
+                cmd.Parameters.AddWithValue("@acc", accountId);
+                cmd.Parameters.AddWithValue("@from", fromDate);
+
+                return Convert.ToDecimal(cmd.ExecuteScalar() ?? 0);
+            }
+        }
+
+
+
+        public List<string> GetVoucherTypes()
+        {
+            var list = new List<string>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                SELECT DISTINCT VoucherType
+                FROM JournalEntries
+                WHERE VoucherType IS NOT NULL
+                  AND TRIM(VoucherType) <> ''
+                ORDER BY VoucherType;
+            ";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(r.GetString(0));
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
         public decimal? GetPurchaseNetRate(long itemId, string batchNo)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -10214,40 +10871,75 @@ WHERE Id = @id;
 
             return list;
         }
-        public void CreateAccount(AccountDto dto)
+        public OperationResult CreateAccount(AccountDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.AccountName))
-                throw new Exception("Account name is required");
+            {
+                return new OperationResult
+                {
+                    Success = false,
+                    Message = "Account name is required."
+                };
+            }
 
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
-                using (var cmd = conn.CreateCommand())
+                using (var tx = conn.BeginTransaction())
                 {
-                    cmd.CommandText = @"
+                    // 🚫 Duplicate name check
+                    if (AccountNameExists(conn, tx, dto.AccountName))
+                    {
+                        tx.Rollback();
+                        return new OperationResult
+                        {
+                            Success = false,
+                            Message = "An account with this name already exists. Please use a different name."
+                        };
+                    }
+
+                    var openingType =
+                        dto.NormalSide == "Debit" ? "DR" : "CR";
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"
 INSERT INTO Accounts
-(AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, IsSystemAccount)
+(AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, OpeningBalanceType, IsSystemAccount)
 VALUES
-(@name, @type, @parent, @side, @opening, 0);
+(@name, @type, @parent, @side, @opening, @openingType, 0);
 ";
-                    cmd.Parameters.AddWithValue("@name", dto.AccountName);
-                    cmd.Parameters.AddWithValue("@type", dto.AccountType);
-                    cmd.Parameters.AddWithValue("@parent", dto.ParentAccountId == 0 ? (object)DBNull.Value : dto.ParentAccountId);
-                    cmd.Parameters.AddWithValue("@side", dto.NormalSide);
-                    cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
 
-                    // Replace this line:
-                    // cmd.Parameters.AddWithValue("@parent", dto.ParentAccountId == 0 ? DBNull.Value : dto.ParentAccountId);
+                        cmd.Parameters.AddWithValue("@name", dto.AccountName.Trim());
+                        cmd.Parameters.AddWithValue("@type", dto.AccountType);
+                        cmd.Parameters.AddWithValue(
+                            "@parent",
+                            dto.ParentAccountId == 0 ? (object)DBNull.Value : dto.ParentAccountId
+                        );
+                        cmd.Parameters.AddWithValue("@side", dto.NormalSide);
+                        cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
+                        cmd.Parameters.AddWithValue("@openingType", openingType);
 
-                    // With this fix:
-                    
-                    cmd.ExecuteNonQuery();
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    tx.Commit();
+                    return new OperationResult
+                    {
+                        Success = true,
+                        Message = "Account created successfully."
+                    };
                 }
             }
         }
 
+
+
         public OperationResult UpdateAccount(AccountDto dto)
         {
+
+
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
@@ -10259,15 +10951,37 @@ VALUES
                         using (var c = conn.CreateCommand())
                         {
                             c.Transaction = tx;
-                            c.CommandText =
-                                "SELECT IFNULL(IsSystemAccount,0) FROM Accounts WHERE AccountId=@id";
+                            c.CommandText = @"
+SELECT IFNULL(IsSystemAccount,0)
+FROM Accounts
+WHERE AccountId = @id";
                             c.Parameters.AddWithValue("@id", dto.AccountId);
                             isSystem = Convert.ToInt32(c.ExecuteScalar()) == 1;
                         }
 
                         bool hasTxn = HasTransactions(dto.AccountId);
 
+
+                        // 🚫 Duplicate name check (exclude self)
+                        if (AccountNameExists(conn, tx, dto.AccountName, dto.AccountId))
+                        {
+                            tx.Rollback();
+                            return new OperationResult
+                            {
+                                Success = false,
+                                Message = "Another account with the same name already exists."
+                            };
+                        }
+
+
+                        // 🔐 Derive OpeningBalanceType safely
+                        var openingType = string.IsNullOrWhiteSpace(dto.OpeningBalanceType)
+                            ? (dto.NormalSide == "Debit" ? "DR" : "CR")
+                            : dto.OpeningBalanceType;
+
+                        // ─────────────────────────────────────────
                         // 🔒 SYSTEM ACCOUNT RULES
+                        // ─────────────────────────────────────────
                         if (isSystem)
                         {
                             if (hasTxn)
@@ -10281,16 +10995,18 @@ VALUES
                                 };
                             }
 
-                            // ✅ Only opening balance allowed
+                            // ✅ ONLY opening balance + opening balance type allowed
                             using (var cmd = conn.CreateCommand())
                             {
                                 cmd.Transaction = tx;
                                 cmd.CommandText = @"
 UPDATE Accounts
-SET OpeningBalance = @opening
+SET OpeningBalance = @opening,
+    OpeningBalanceType = @openingType
 WHERE AccountId = @id;
 ";
                                 cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
+                                cmd.Parameters.AddWithValue("@openingType", openingType);
                                 cmd.Parameters.AddWithValue("@id", dto.AccountId);
                                 cmd.ExecuteNonQuery();
                             }
@@ -10303,7 +11019,9 @@ WHERE AccountId = @id;
                             };
                         }
 
-                        // 🔒 NORMAL ACCOUNT WITH TRANSACTIONS
+                        // ─────────────────────────────────────────
+                        // 🔒 NON-SYSTEM ACCOUNT WITH TRANSACTIONS
+                        // ─────────────────────────────────────────
                         if (hasTxn)
                         {
                             tx.Rollback();
@@ -10315,7 +11033,9 @@ WHERE AccountId = @id;
                             };
                         }
 
-                        // ✅ FULL UPDATE
+                        // ─────────────────────────────────────────
+                        // ✅ FULL UPDATE (NO TRANSACTIONS)
+                        // ─────────────────────────────────────────
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = tx;
@@ -10325,20 +11045,20 @@ SET AccountName = @name,
     AccountType = @type,
     ParentAccountId = @parent,
     NormalSide = @side,
-    OpeningBalance = @opening
+    OpeningBalance = @opening,
+    OpeningBalanceType = @openingType
 WHERE AccountId = @id;
 ";
 
-                            cmd.Parameters.AddWithValue("@name", dto.AccountName);
+                            cmd.Parameters.AddWithValue("@name", dto.AccountName.Trim());
                             cmd.Parameters.AddWithValue("@type", dto.AccountType);
-
-                            if (dto.ParentAccountId == 0)
-                                cmd.Parameters.AddWithValue("@parent", DBNull.Value);
-                            else
-                                cmd.Parameters.AddWithValue("@parent", dto.ParentAccountId);
-
+                            cmd.Parameters.AddWithValue(
+                                "@parent",
+                                dto.ParentAccountId == 0 ? (object)DBNull.Value : dto.ParentAccountId
+                            );
                             cmd.Parameters.AddWithValue("@side", dto.NormalSide);
                             cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
+                            cmd.Parameters.AddWithValue("@openingType", openingType);
                             cmd.Parameters.AddWithValue("@id", dto.AccountId);
 
                             cmd.ExecuteNonQuery();
@@ -10351,18 +11071,19 @@ WHERE AccountId = @id;
                             Message = "Account updated successfully."
                         };
                     }
-                    catch
+                    catch (Exception ex)
                     {
                         tx.Rollback();
                         return new OperationResult
                         {
                             Success = false,
-                            Message = "Unexpected error while updating account."
+                            Message = "Unexpected error while updating account: " + ex.Message
                         };
                     }
                 }
             }
         }
+
 
 
         private bool HasTransactions(long accountId)
@@ -10453,6 +11174,23 @@ LIMIT 1;
                         };
                     }
                 }
+            }
+        }
+        private bool AccountNameExists(SQLiteConnection conn, SQLiteTransaction tx, string name, long excludeAccountId = 0)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+SELECT COUNT(1)
+FROM Accounts
+WHERE LOWER(AccountName) = LOWER(@name)
+  AND AccountId <> @id;
+";
+                cmd.Parameters.AddWithValue("@name", name.Trim());
+                cmd.Parameters.AddWithValue("@id", excludeAccountId);
+
+                return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
             }
         }
 

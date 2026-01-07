@@ -16,6 +16,7 @@ namespace DhanSutra.Models
         
 
         public string NormalSide { get; set; }
+        public string OpeningBalanceType { get; set; }
         public double OpeningBalance { get; set; }
         public bool IsActive { get; set; }
     }
