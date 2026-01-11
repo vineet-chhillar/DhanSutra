@@ -7680,12 +7680,68 @@ SELECT last_insert_rowid();";
                 }
             }
         }
+        public List<AccountDto> LoadAccountsByIds(List<long> accountIds)
+        {
+            var list = new List<AccountDto>();
+
+            if (accountIds == null || accountIds.Count == 0)
+                return list;
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    // Create IN (@id0,@id1,...)
+                    var parameters = accountIds
+                        .Select((id, i) => $"@id{i}")
+                        .ToList();
+
+                    cmd.CommandText = $@"
+SELECT AccountId, AccountName, AccountType
+FROM Accounts
+WHERE AccountId IN ({string.Join(",", parameters)})
+";
+
+                    for (int i = 0; i < accountIds.Count; i++)
+                    {
+                        cmd.Parameters.AddWithValue(parameters[i], accountIds[i]);
+                    }
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new AccountDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1),
+                                AccountType = r.GetString(2)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+
         public void SaveVoucher(VoucherDto dto)
         {
             
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
+                // Load all accounts used in voucher
+                var accountIds = dto.Lines.Select(l => l.AccountId).Distinct().ToList();
+
+                var accountMap = LoadAccountsByIds(accountIds)
+                    .ToDictionary(a => a.AccountId);
+
+                // BACKEND VALIDATION (CRITICAL)
+                ValidateVoucherLines(dto.VoucherType, dto.Lines, accountMap);
+
                 using (var tx = conn.BeginTransaction())
                 {
                     // -----------------------------
@@ -7821,6 +7877,108 @@ VALUES (@jid,@acc,@dr,@cr);";
         {
             return new Exception(msg);
         }
+        private bool IsCashOrBank(AccountDto acc)
+        {
+            return acc.AccountName == "Cash" || acc.AccountName == "Bank";
+        }
+
+        
+        public ValidationResult ValidateVoucherLines(
+    string voucherType,
+    List<VoucherLineDto> lines,
+    Dictionary<long, AccountDto> accountMap
+)
+        {
+            foreach (var l in lines)
+            {
+                if (!accountMap.TryGetValue(l.AccountId, out var acc))
+                    return ValidationResult.Fail("Invalid account selected.");
+
+                bool isDebit = l.Debit > 0;
+                bool isCredit = l.Credit > 0;
+
+                if (isDebit == isCredit)
+                    return ValidationResult.Fail(
+                        $"Account '{acc.AccountName}' must have either Debit or Credit."
+                    );
+
+                switch (voucherType)
+                {
+                    // ---------------- PAYMENT ----------------
+                    case "PV":
+                        if (isDebit)
+                        {
+                            if (acc.AccountType != "Expense" &&
+                                acc.AccountType != "Asset" &&
+                                acc.AccountType != "Liability")
+                                return ValidationResult.Fail(
+                                    $"'{acc.AccountName}' is not allowed on Debit side in Payment Voucher."
+                                );
+                        }
+                        else
+                        {
+                            if (!IsCashOrBank(acc))
+                                return ValidationResult.Fail(
+                                    "Payment Voucher credit must be Cash or Bank."
+                                );
+                        }
+                        break;
+
+                    // ---------------- RECEIPT ----------------
+                    case "RV":
+                        if (isDebit)
+                        {
+                            if (!IsCashOrBank(acc))
+                                return ValidationResult.Fail(
+                                    "Receipt Voucher debit must be Cash or Bank."
+                                );
+                        }
+                        else
+                        {
+                            if (acc.AccountType != "Income" &&
+                                acc.AccountType != "Asset" &&
+                                acc.AccountType != "Liability")
+                                return ValidationResult.Fail(
+                                    $"'{acc.AccountName}' is not allowed on Credit side in Receipt Voucher."
+                                );
+                        }
+                        break;
+
+                    // ---------------- CONTRA ----------------
+                    case "CV":
+                        if (!IsCashOrBank(acc))
+                            return ValidationResult.Fail(
+                                "Contra Voucher allows only Cash and Bank accounts."
+                            );
+                        break;
+
+                    // ---------------- JOURNAL ----------------
+                    case "JV":
+                        if (IsCashOrBank(acc))
+                            return ValidationResult.Fail(
+                                "Cash / Bank accounts are not allowed in Journal Voucher."
+                            );
+                        break;
+
+                    default:
+                        return ValidationResult.Fail("Invalid voucher type.");
+                }
+            }
+
+            return ValidationResult.Ok();
+        }
+
+        public class ValidationResult
+        {
+            public bool IsValid { get; set; }
+            public string Message { get; set; }
+
+            public static ValidationResult Ok()
+                => new ValidationResult { IsValid = true };
+
+            public static ValidationResult Fail(string msg)
+                => new ValidationResult { IsValid = false, Message = msg };
+        }
 
         public List<AccountDto> GetAccountsForVoucherSide(string voucherType, string side)
         {
@@ -7829,45 +7987,90 @@ VALUES (@jid,@acc,@dr,@cr);";
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
+
                 using (var cmd = conn.CreateCommand())
                 {
+                    // Base query:
+                    // - Only active accounts
+                    // - Only leaf accounts (no parent accounts)
+                    // - Cash & Bank are always allowed when needed
                     var sql = @"
-SELECT AccountId, AccountName, AccountType, LOWER(AccountName)
+SELECT AccountId, AccountName, AccountType
 FROM Accounts
-WHERE IFNULL(IsActive,1)=1
+WHERE IFNULL(IsActive,1) = 1
+  AND (
+        (
+            ParentAccountId IS NOT NULL
+            AND AccountId NOT IN (
+                SELECT DISTINCT ParentAccountId
+                FROM Accounts
+                WHERE ParentAccountId IS NOT NULL
+            )
+        )
+        OR AccountName IN ('Cash','Bank')
+      )
 ";
 
                     switch (voucherType)
                     {
+                        // ---------------- JOURNAL VOUCHER ----------------
                         case "JV":
-                            sql += @" AND LOWER(AccountName) NOT LIKE '%cash%' 
-                              AND LOWER(AccountName) NOT LIKE '%bank%'";
+                            // Journal vouchers should NOT use Cash/Bank
+                            sql += @"
+AND AccountType IN ('Income','Expense','Asset','Liability','Equity')
+AND AccountName NOT IN ('Cash','Bank')
+";
                             break;
 
-                        case "PV": // Payment
+                        // ---------------- PAYMENT VOUCHER ----------------
+                        case "PV":
                             if (side == "Debit")
-                                sql += @" AND AccountType IN ('Expense','Asset','Liability')";
-                            else
-                                sql += @" AND LOWER(AccountName) LIKE '%cash%' 
-                                  OR LOWER(AccountName) LIKE '%bank%'";
+                            {
+                                // Money is PAID TO
+                                sql += @"
+AND AccountType IN ('Expense','Asset','Liability')
+";
+                            }
+                            else // Credit
+                            {
+                                // Money is PAID FROM
+                                sql += @"
+AND (AccountName = 'Cash' OR AccountName = 'Bank')
+";
+                            }
                             break;
 
-                        case "RV": // Receipt
+                        // ---------------- RECEIPT VOUCHER ----------------
+                        case "RV":
                             if (side == "Debit")
-                                sql += @" AND LOWER(AccountName) LIKE '%cash%' 
-                                  OR LOWER(AccountName) LIKE '%bank%'";
-                            else
-                                sql += @" AND AccountType IN ('Income','Asset','Liability')";
+                            {
+                                // Money is RECEIVED IN
+                                sql += @"
+AND (AccountName = 'Cash' OR AccountName = 'Bank')
+";
+                            }
+                            else // Credit
+                            {
+                                // Money is RECEIVED FROM
+                                sql += @"
+AND AccountType IN ('Income','Asset','Liability')
+";
+                            }
                             break;
 
-                        case "CV": // Contra
-                            sql += @" AND LOWER(AccountName) LIKE '%cash%' 
-                              OR LOWER(AccountName) LIKE '%bank%'";
+                        // ---------------- CONTRA VOUCHER ----------------
+                        case "CV":
+                            // Only Cash & Bank on both sides
+                            sql += @"
+AND (AccountName = 'Cash' OR AccountName = 'Bank')
+";
                             break;
+
+                        default:
+                            throw new Exception("Invalid voucher type.");
                     }
 
-                    sql += " ORDER BY AccountName";
-
+                    sql += " ORDER BY AccountName;";
                     cmd.CommandText = sql;
 
                     using (var r = cmd.ExecuteReader())
@@ -7883,6 +8086,7 @@ WHERE IFNULL(IsActive,1)=1
                     }
                 }
             }
+
             return list;
         }
 
@@ -8173,90 +8377,90 @@ VALUES (@jid,@acc,@dr,@cr);
         }
 
 
-        public List<AccountDto> GetAccountsForVoucher(string voucherType)
-        {
-            var list = new List<AccountDto>();
+//        public List<AccountDto> GetAccountsForVoucher(string voucherType)
+//        {
+//            var list = new List<AccountDto>();
 
-            using (var conn = new SQLiteConnection(_connectionString))
-            {
-                conn.Open();
+//            using (var conn = new SQLiteConnection(_connectionString))
+//            {
+//                conn.Open();
 
-                using (var cmd = conn.CreateCommand())
-                {
-                    var sql = @"
-SELECT AccountId, AccountName, AccountType
-FROM Accounts
-WHERE IFNULL(IsActive,1) = 1
-  AND (
-        (
-          ParentAccountId IS NOT NULL
-          AND AccountId NOT IN (
-              SELECT DISTINCT ParentAccountId
-              FROM Accounts
-              WHERE ParentAccountId IS NOT NULL
-          )
-        )
-        OR AccountName IN ('Cash','Bank')
-      )
-";
+//                using (var cmd = conn.CreateCommand())
+//                {
+//                    var sql = @"
+//SELECT AccountId, AccountName, AccountType
+//FROM Accounts
+//WHERE IFNULL(IsActive,1) = 1
+//  AND (
+//        (
+//          ParentAccountId IS NOT NULL
+//          AND AccountId NOT IN (
+//              SELECT DISTINCT ParentAccountId
+//              FROM Accounts
+//              WHERE ParentAccountId IS NOT NULL
+//          )
+//        )
+//        OR AccountName IN ('Cash','Bank')
+//      )
+//";
 
-                    switch (voucherType)
-                    {
-                        case "JV": // Journal Voucher
-                            sql += @"
-AND AccountType IN ('Income','Expense','Asset','Liability','Equity')
-AND AccountName NOT IN ('Cash','Bank')
-";
-                            break;
+//                    switch (voucherType)
+//                    {
+//                        case "JV": // Journal Voucher
+//                            sql += @"
+//AND AccountType IN ('Income','Expense','Asset','Liability','Equity')
+//AND AccountName NOT IN ('Cash','Bank')
+//";
+//                            break;
 
-                        case "PV": // Payment Voucher
-                            sql += @"
-AND (
-    AccountType IN ('Expense','Asset','Liability')
-    OR AccountName IN ('Cash','Bank')
-)
-";
-                            break;
+//                        case "PV": // Payment Voucher
+//                            sql += @"
+//AND (
+//    AccountType IN ('Expense','Asset','Liability')
+//    OR AccountName IN ('Cash','Bank')
+//)
+//";
+//                            break;
 
-                        case "RV": // Receipt Voucher
-                            sql += @"
-AND (
-    AccountType IN ('Income','Asset','Liability')
-    OR AccountName IN ('Cash','Bank')
-)
-";
-                            break;
+//                        case "RV": // Receipt Voucher
+//                            sql += @"
+//AND (
+//    AccountType IN ('Income','Asset','Liability')
+//    OR AccountName IN ('Cash','Bank')
+//)
+//";
+//                            break;
 
-                        case "CV": // Contra Voucher
-                            sql += @"
-AND AccountName IN ('Cash','Bank')
-";
-                            break;
+//                        case "CV": // Contra Voucher
+//                            sql += @"
+//AND AccountName IN ('Cash','Bank')
+//";
+//                            break;
 
-                        default:
-                            throw new Exception("Invalid voucher type.");
-                    }
+//                        default:
+//                            throw new Exception("Invalid voucher type.");
+//                    }
 
-                    sql += " ORDER BY AccountName;";
+//                    sql += " ORDER BY AccountName;";
 
-                    cmd.CommandText = sql;
+//                    cmd.CommandText = sql;
 
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            list.Add(new AccountDto
-                            {
-                                AccountId = r.GetInt64(0),
-                                AccountName = r.GetString(1)
-                            });
-                        }
-                    }
-                }
-            }
+//                    using (var r = cmd.ExecuteReader())
+//                    {
+//                        while (r.Read())
+//                        {
+//                            list.Add(new AccountDto
+//                            {
+//                                AccountId = r.GetInt64(0),
+//                                AccountName = r.GetString(1)
+//                            });
+//                        }
+//                    }
+//                }
+//            }
 
-            return list;
-        }
+//            return list;
+//        }
 
 
 
@@ -10833,6 +11037,259 @@ ORDER BY AccountName;
             }
         }
 
+        public static class PasswordHelper
+        {
+            public static string Hash(string password)
+            {
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                {
+                    var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(password));
+                    return Convert.ToBase64String(bytes);
+                }
+            }
+
+            public static bool Verify(string password, string hash)
+            {
+                return Hash(password) == hash;
+            }
+        }
+        public OperationResult Login(string username, string password)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+        SELECT Id, Username, PasswordHash, Role, IsActive,MustChangePassword
+        FROM Users
+        WHERE Username = @u
+    ";
+                    cmd.Parameters.AddWithValue("@u", username);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read())
+                            return OperationResult.Fail("Invalid username or password");
+
+
+                        if (Convert.ToInt32(r["IsActive"]) == 0)
+                            return OperationResult.Fail("User is disabled");
+
+                        if (!PasswordHelper.Verify(password, r["PasswordHash"].ToString()))
+                            return OperationResult.Fail("Invalid username or password");
+
+                        return OperationResult.Ok(
+                            new UserDto
+                            {
+                                Id = Convert.ToInt64(r["Id"]),
+                                Username = r["Username"].ToString(),
+                                Role = r["Role"].ToString(),
+                                MustChangePassword = Convert.ToInt32(r["MustChangePassword"]) == 1,
+                                IsActive = Convert.ToBoolean(r["IsActive"])
+                                
+                            },
+                            "Login successful"
+                        );
+
+
+                        return OperationResult.Ok(new
+                        {
+                            Id = Convert.ToInt64(r["Id"]),
+                            Username = r["Username"].ToString(),
+                            Role = r["Role"].ToString(),
+                            MustChangePassword = Convert.ToInt32(r["MustChangePassword"]) == 1
+                        });
+
+                    }
+                }
+            }
+        }
+        public OperationResult CreateUser(
+    string username,
+    string password,
+    string role
+)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var check = conn.CreateCommand())
+                {
+                    check.CommandText = "SELECT COUNT(*) FROM Users WHERE Username = @u";
+                    check.Parameters.AddWithValue("@u", username);
+
+                    long exists = (long)check.ExecuteScalar();
+                    if (exists > 0)
+                        return OperationResult.Fail("Username already exists");
+
+                    using (var insert = conn.CreateCommand())
+                    {
+                        insert.CommandText = @"
+INSERT INTO Users
+(Username, PasswordHash, Role, IsActive, MustChangePassword, CreatedAt)
+VALUES (@u, @p, @r, 1, 1, datetime('now'))
+";
+
+                        insert.Parameters.AddWithValue("@u", username);
+                        insert.Parameters.AddWithValue("@p", PasswordHelper.Hash(password));
+                        insert.Parameters.AddWithValue("@r", role);
+
+                        insert.ExecuteNonQuery();
+
+                        return OperationResult.Ok(null, "User created successfully");
+                    }
+                }
+            }
+        }
+        public OperationResult GetUsers()
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+        SELECT Id, Username, Role, IsActive, CreatedAt
+        FROM Users
+        ORDER BY Username
+    ";
+
+                    var list = new List<object>();
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new
+                            {
+                                Id = Convert.ToInt64(r["Id"]),
+                                Username = r["Username"].ToString(),
+                                Role = r["Role"].ToString(),
+                                IsActive = Convert.ToInt32(r["IsActive"]) == 1,
+                                CreatedAt = r["CreatedAt"]?.ToString()
+                            });
+                        }
+                        
+                        return OperationResult.Ok(list);
+                    }
+                }
+            }
+        }
+        public OperationResult SetUserStatus(
+    long userId,
+    bool isActive,
+    UserDto currentUser
+)
+        {
+            if (currentUser == null)
+                return OperationResult.Fail("Not authenticated");
+
+            if (currentUser.Role != "Admin")
+                return OperationResult.Fail("Unauthorized: Admin access required");
+
+            if (currentUser.Id == userId)
+                return OperationResult.Fail("You cannot disable your own account");
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                UPDATE Users
+                SET IsActive = @a
+                WHERE Id = @id
+            ";
+                    cmd.Parameters.AddWithValue("@a", isActive ? 1 : 0);
+                    cmd.Parameters.AddWithValue("@id", userId);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            return OperationResult.Ok(null, "User status updated");
+        }
+
+
+
+
+        public OperationResult ChangePassword(
+    long userId,
+    string oldPassword,
+    string newPassword
+)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+        SELECT PasswordHash
+        FROM Users
+        WHERE Id = @id AND IsActive = 1
+    ";
+                    cmd.Parameters.AddWithValue("@id", userId);
+
+                    var existingHash = cmd.ExecuteScalar()?.ToString();
+                    if (existingHash == null)
+                        return OperationResult.Fail("User not found");
+
+                    if (!PasswordHelper.Verify(oldPassword, existingHash))
+                        return OperationResult.Fail("Old password is incorrect");
+
+                    using (var update = conn.CreateCommand())
+                    {
+                        update.CommandText = @"
+        UPDATE Users
+        SET PasswordHash = @p, MustChangePassword = 0
+        WHERE Id = @id
+    ";
+                        update.Parameters.AddWithValue("@p", PasswordHelper.Hash(newPassword));
+                        update.Parameters.AddWithValue("@id", userId);
+
+                        update.ExecuteNonQuery();
+
+                        return OperationResult.Ok(null, "Password changed successfully");
+                    }
+                }
+            }
+        }
+
+        public void EnsureDefaultAdmin()
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var check = conn.CreateCommand())
+                {
+                    check.CommandText = "SELECT COUNT(*) FROM Users WHERE Role = 'Admin'";
+                    long count = (long)check.ExecuteScalar();
+
+                    if (count > 0)
+                        return; // Admin already exists
+
+                    using (var insert = conn.CreateCommand())
+                    {
+                        insert.CommandText = @"
+INSERT INTO Users
+(Username, PasswordHash, Role, IsActive, MustChangePassword, CreatedAt)
+VALUES (@u, @p, 'Admin', 1, 1, datetime('now'))
+";
+
+                        insert.Parameters.AddWithValue("@u", "admin");
+                        insert.Parameters.AddWithValue("@p", PasswordHelper.Hash("admin123"));
+
+                        insert.ExecuteNonQuery();
+                    }
+                }
+            }
+        }
 
         public List<AccountDto> FetchAccounts()
         {
@@ -10845,10 +11302,20 @@ ORDER BY AccountName;
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-                SELECT AccountId, AccountName, AccountType,parentaccountid, NormalSide, OpeningBalance, IsActive
-                FROM Accounts
-                ORDER BY AccountName;
-            ";
+SELECT
+    AccountId,
+    AccountName,
+    AccountType,
+    ParentAccountId,
+    NormalSide,
+    OpeningBalance,
+    OpeningBalanceType,
+    IsGroup,
+    IFNULL(IsSystemAccount,0),
+    IFNULL(IsActive,1)
+FROM Accounts
+ORDER BY AccountName;
+";
 
                     using (var rd = cmd.ExecuteReader())
                     {
@@ -10859,10 +11326,13 @@ ORDER BY AccountName;
                                 AccountId = rd.GetInt64(0),
                                 AccountName = rd.GetString(1),
                                 AccountType = rd.GetString(2),
-                                ParentAccountId = rd.IsDBNull(3) ? 0 : rd.GetInt64(3), // ✅ FIX
+                                ParentAccountId = rd.IsDBNull(3) ? 0 : rd.GetInt64(3),
                                 NormalSide = rd.GetString(4),
                                 OpeningBalance = rd.GetDouble(5),
-                                IsActive = rd.GetInt32(6) == 1
+                                OpeningBalanceType = rd.IsDBNull(6) ? "DR" : rd.GetString(6),
+                                IsGroup = rd.GetInt32(7) == 1,
+                                IsSystemAccount = rd.GetInt32(8) == 1,
+                                IsActive = rd.GetInt32(9) == 1
                             });
                         }
                     }
@@ -10871,6 +11341,7 @@ ORDER BY AccountName;
 
             return list;
         }
+
         public OperationResult CreateAccount(AccountDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.AccountName))
@@ -10898,6 +11369,16 @@ ORDER BY AccountName;
                         };
                     }
 
+                    // ✅ If parent selected → force parent to group
+                    if (dto.ParentAccountId > 0)
+                    {
+                        conn.Execute(
+                            "UPDATE Accounts SET IsGroup = 1 WHERE AccountId = @id",
+                            new { id = dto.ParentAccountId },
+                            tx
+                        );
+                    }
+
                     var openingType =
                         dto.NormalSide == "Debit" ? "DR" : "CR";
 
@@ -10906,9 +11387,9 @@ ORDER BY AccountName;
                         cmd.Transaction = tx;
                         cmd.CommandText = @"
 INSERT INTO Accounts
-(AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, OpeningBalanceType, IsSystemAccount)
+(AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, OpeningBalanceType, IsSystemAccount, IsGroup)
 VALUES
-(@name, @type, @parent, @side, @opening, @openingType, 0);
+(@name, @type, @parent, @side, @opening, @openingType, 0, @isGroup);
 ";
 
                         cmd.Parameters.AddWithValue("@name", dto.AccountName.Trim());
@@ -10920,6 +11401,9 @@ VALUES
                         cmd.Parameters.AddWithValue("@side", dto.NormalSide);
                         cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
                         cmd.Parameters.AddWithValue("@openingType", openingType);
+
+                        // ✅ THIS IS THE KEY LINE
+                        cmd.Parameters.AddWithValue("@isGroup", dto.IsGroup ? 1 : 0);
 
                         cmd.ExecuteNonQuery();
                     }
@@ -10936,10 +11420,9 @@ VALUES
 
 
 
+
         public OperationResult UpdateAccount(AccountDto dto)
         {
-
-
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
@@ -10947,20 +11430,36 @@ VALUES
                 {
                     try
                     {
+                        // ─────────────────────────────────────────
+                        // 🔍 Load current state
+                        // ─────────────────────────────────────────
                         bool isSystem;
+                        bool currentIsGroup;
+
                         using (var c = conn.CreateCommand())
                         {
                             c.Transaction = tx;
                             c.CommandText = @"
-SELECT IFNULL(IsSystemAccount,0)
+SELECT IFNULL(IsSystemAccount,0), IFNULL(IsGroup,0)
 FROM Accounts
 WHERE AccountId = @id";
                             c.Parameters.AddWithValue("@id", dto.AccountId);
-                            isSystem = Convert.ToInt32(c.ExecuteScalar()) == 1;
+
+                            using (var r = c.ExecuteReader())
+                            {
+                                if (!r.Read())
+                                    return new OperationResult
+                                    {
+                                        Success = false,
+                                        Message = "Account not found."
+                                    };
+
+                                isSystem = r.GetInt32(0) == 1;
+                                currentIsGroup = r.GetInt32(1) == 1;
+                            }
                         }
 
                         bool hasTxn = HasTransactions(dto.AccountId);
-
 
                         // 🚫 Duplicate name check (exclude self)
                         if (AccountNameExists(conn, tx, dto.AccountName, dto.AccountId))
@@ -10972,7 +11471,6 @@ WHERE AccountId = @id";
                                 Message = "Another account with the same name already exists."
                             };
                         }
-
 
                         // 🔐 Derive OpeningBalanceType safely
                         var openingType = string.IsNullOrWhiteSpace(dto.OpeningBalanceType)
@@ -10995,7 +11493,6 @@ WHERE AccountId = @id";
                                 };
                             }
 
-                            // ✅ ONLY opening balance + opening balance type allowed
                             using (var cmd = conn.CreateCommand())
                             {
                                 cmd.Transaction = tx;
@@ -11003,8 +11500,7 @@ WHERE AccountId = @id";
 UPDATE Accounts
 SET OpeningBalance = @opening,
     OpeningBalanceType = @openingType
-WHERE AccountId = @id;
-";
+WHERE AccountId = @id;";
                                 cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
                                 cmd.Parameters.AddWithValue("@openingType", openingType);
                                 cmd.Parameters.AddWithValue("@id", dto.AccountId);
@@ -11015,26 +11511,39 @@ WHERE AccountId = @id;
                             return new OperationResult
                             {
                                 Success = true,
-                                Message = "System account opening balance updated successfully."
+                                Message = "Account updated successfully."
                             };
+
                         }
 
                         // ─────────────────────────────────────────
-                        // 🔒 NON-SYSTEM ACCOUNT WITH TRANSACTIONS
+                        // 🔒 TRANSACTION SAFETY
                         // ─────────────────────────────────────────
-                        if (hasTxn)
+                        if (hasTxn && currentIsGroup != dto.IsGroup)
                         {
                             tx.Rollback();
                             return new OperationResult
                             {
                                 Success = false,
-                                Message =
-                                    "Account cannot be modified because transactions already exist."
+                                Message = "Account not found."
                             };
+
                         }
 
                         // ─────────────────────────────────────────
-                        // ✅ FULL UPDATE (NO TRANSACTIONS)
+                        // ✅ FORCE PARENT TO GROUP
+                        // ─────────────────────────────────────────
+                        if (dto.ParentAccountId > 0)
+                        {
+                            conn.Execute(
+                                "UPDATE Accounts SET IsGroup = 1 WHERE AccountId = @id",
+                                new { id = dto.ParentAccountId },
+                                tx
+                            );
+                        }
+
+                        // ─────────────────────────────────────────
+                        // ✅ FULL UPDATE
                         // ─────────────────────────────────────────
                         using (var cmd = conn.CreateCommand())
                         {
@@ -11046,7 +11555,8 @@ SET AccountName = @name,
     ParentAccountId = @parent,
     NormalSide = @side,
     OpeningBalance = @opening,
-    OpeningBalanceType = @openingType
+    OpeningBalanceType = @openingType,
+    IsGroup = @isGroup
 WHERE AccountId = @id;
 ";
 
@@ -11059,6 +11569,7 @@ WHERE AccountId = @id;
                             cmd.Parameters.AddWithValue("@side", dto.NormalSide);
                             cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
                             cmd.Parameters.AddWithValue("@openingType", openingType);
+                            cmd.Parameters.AddWithValue("@isGroup", dto.IsGroup ? 1 : 0);
                             cmd.Parameters.AddWithValue("@id", dto.AccountId);
 
                             cmd.ExecuteNonQuery();
@@ -11070,6 +11581,7 @@ WHERE AccountId = @id;
                             Success = true,
                             Message = "Account updated successfully."
                         };
+
                     }
                     catch (Exception ex)
                     {

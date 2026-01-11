@@ -27,6 +27,8 @@ namespace DhanSutra
     {
         private readonly string _connectionString1 = "Data Source=billing.db;Version=3;BusyTimeout=5000;";
         private DatabaseService db = new DatabaseService();
+        private UserDto _currentUser;
+
         public MainForm()
         {
             // ✅ Step 1: Define a safe, user-visible folder
@@ -48,6 +50,8 @@ namespace DhanSutra
             // ✅ Step 4: Final connection string
             _connectionString1 = $"Data Source={dbFile};Version=3;";
             Console.WriteLine("📂 Database path: " + dbFile);
+
+            db.EnsureDefaultAdmin();
 
             InitializeComponent();
             InitializeWebViewAsync();
@@ -1021,26 +1025,26 @@ namespace DhanSutra
                                                     
                         }
 
-                    case "GetAccountsForVoucher":
-                        {
-                            var payload = req.Payload as JObject;
+                    //case "GetAccountsForVoucher":
+                    //    {
+                    //        var payload = req.Payload as JObject;
 
-                            string voucherType = payload?.Value<string>("VoucherType");
+                    //        string voucherType = payload?.Value<string>("VoucherType");
 
-                            if (string.IsNullOrWhiteSpace(voucherType))
-                                voucherType = "JV"; // safe default
+                    //        if (string.IsNullOrWhiteSpace(voucherType))
+                    //            voucherType = "JV"; // safe default
 
-                            var data = db.GetAccountsForVoucher(voucherType);
+                    //        var data = db.GetAccountsForVoucher(voucherType);
 
-                            webView.CoreWebView2.PostWebMessageAsJson(
-                                JsonConvert.SerializeObject(new
-                                {
-                                    action = "GetAccountsForVoucherResponse",
-                                    data
-                                })
-                            );
-                            break;
-                        }
+                    //        webView.CoreWebView2.PostWebMessageAsJson(
+                    //            JsonConvert.SerializeObject(new
+                    //            {
+                    //                action = "GetAccountsForVoucherResponse",
+                    //                data
+                    //            })
+                    //        );
+                    //        break;
+                    //    }
                     case "GetNextVoucherNo":
                         {
                             var payload = req.Payload as JObject;
@@ -1064,32 +1068,51 @@ namespace DhanSutra
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
-                            try
-                            {
-                                var dto = payload.ToObject<VoucherDto>();
-                                db.SaveVoucher(dto);
+                            var dto = payload.ToObject<VoucherDto>();
 
-                                webView.CoreWebView2.PostWebMessageAsJson(
-                                    JsonConvert.SerializeObject(new
-                                    {
-                                        action = "SaveVoucherResponse",
-                                        success = true
-                                    })
-                                );
-                            }
-                            catch (Exception ex)
+                            // Load accounts used
+                            var accountIds = dto.Lines
+                                .Select(l => l.AccountId)
+                                .Distinct()
+                                .ToList();
+
+                            var accountMap = db.LoadAccountsByIds(accountIds)
+                                .ToDictionary(a => a.AccountId);
+
+                            // 🔐 VALIDATE (NO EXCEPTION)
+                            var validation = db.ValidateVoucherLines(
+                                dto.VoucherType,
+                                dto.Lines,
+                                accountMap
+                            );
+
+                            if (!validation.IsValid)
                             {
                                 webView.CoreWebView2.PostWebMessageAsJson(
                                     JsonConvert.SerializeObject(new
                                     {
                                         action = "SaveVoucherResponse",
                                         success = false,
-                                        message = ex.Message
+                                        message = validation.Message
                                     })
                                 );
+                                break;
                             }
+
+                            // ✅ SAFE TO SAVE
+                            db.SaveVoucher(dto);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "SaveVoucherResponse",
+                                    success = true
+                                })
+                            );
+
                             break;
                         }
+
                     case "LoadVoucherById":
                         {
                             var payload = req.Payload as JObject;
@@ -3332,7 +3355,132 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
-                    
+
+                    case "Login":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string username = payload.Value<string>("username");
+                            string password = payload.Value<string>("password");
+
+                            var result = db.Login(username, password);
+
+                            if (result.Success)
+                            {
+                                _currentUser = (UserDto)result.Data;   // ✅ STORE LOGGED-IN USER
+                            }
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Type = "Login",
+                                    Status = result.Success ? "Success" : "Error",
+                                    Message = result.Message,
+                                    Data = result.Data
+                                })
+                            );
+                            break;
+                        }
+
+                    case "ChangePassword":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+                            long userId = payload.Value<Int16>("userId");
+                            string oldPwd = payload.Value<String>("oldPassword");
+                            string newPwd = payload.Value<String>("newPassword");
+
+                            var result = db.ChangePassword(userId, oldPwd, newPwd);
+
+                            var response = new
+                            {
+                                Type = "ChangePassword",
+                                Status = result.Success ? "Success" : "Error",
+                                Message = result.Message
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+
+                           
+                        }
+                    case "CreateUser":
+                        {
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+                            var username = payload.Value<string>("username");
+                            var password = payload.Value<string>("password");
+                            string role = payload.Value<string>("role");
+
+                            var result = db.CreateUser(username, password, role);
+
+                            var response = new
+                            {
+                                Type = "CreateUser",
+                                Status = result.Success ? "Success" : "Error",
+                                Message = result.Message
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+
+                            
+                        }
+                    case "GetUsers":
+                        {
+                            var result = db.GetUsers();
+
+                            var response = new
+                            {
+                                Type = "GetUsers",
+                                Status = result.Success ? "Success" : "Error",
+                                Data = result.Data,
+                                Message = result.Message
+                            };
+
+                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            break;
+
+                           
+                        }
+
+                    case "SetUserStatus":
+                        {
+                            if (_currentUser == null)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "SetUserStatus",
+                                        Status = "Error",
+                                        Message = "Not authenticated"
+                                    })
+                                );
+                                break;
+                            }
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long userId = payload.Value<long>("userId");
+                            bool isActive = payload.Value<bool>("isActive");
+
+                            // ✅ PASS LOGGED-IN USER
+                            var result = db.SetUserStatus(userId, isActive, _currentUser);
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Type = "SetUserStatus",
+                                    Status = result.Success ? "Success" : "Error",
+                                    Message = result.Message
+                                })
+                            );
+                            break;
+                        }
+
+
 
 
                     case "fetchCoA":

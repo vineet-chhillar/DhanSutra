@@ -19,6 +19,9 @@ namespace DhanSutra.Models
         public string OpeningBalanceType { get; set; }
         public double OpeningBalance { get; set; }
         public bool IsActive { get; set; }
+        public bool IsGroup { get; set; }
+        public bool IsSystemAccount { get; set; }
+         
     }
 
 }
