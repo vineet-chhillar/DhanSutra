@@ -21,6 +21,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.ListView;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.TreeView;
 
@@ -1949,29 +1950,7 @@ SELECT last_insert_rowid();
                         {
                             throw new Exception("Invalid payment mode.");
                         }
-                        // 5️⃣ CREDIT SIDE
-                        //if (paymentMode == "Credit")
-                        //{
-                        //    long expensePayableAcc = GetExpensePayableAccountId(conn, tx);
-                        //    InsertJournalLine(
-                        //        conn, tx,
-                        //        jeId,
-                        //        expensePayableAcc,
-                        //        0,
-                        //        totalAmount
-                        //    );
-                        //}
-                        //else
-                        //{
-                        //    InsertJournalLine(
-                        //        conn, tx,
-                        //        jeId,
-                        //        paidViaAccountId.Value,
-                        //        0,
-                        //        totalAmount
-                        //    );
-                        //}
-
+                        
                         tx.Commit();
                         return (voucherId, voucherNo);
                     }
@@ -2112,6 +2091,55 @@ ORDER BY ev.ExpenseVoucherId DESC;
 
             return list;
         }
+//        public List<ExpenseVoucherSummaryDto> GetExpenseVouchers()
+//        {
+//            var list = new List<ExpenseVoucherSummaryDto>();
+
+//            using (var conn = new SQLiteConnection(_connectionString))
+//            {
+//                conn.Open();
+
+//                using (var cmd = conn.CreateCommand())
+//                {
+//                    cmd.CommandText = @"
+//SELECT
+//    ev.ExpenseVoucherId,
+//    ev.VoucherNo,
+//    ev.VoucherDate,
+//    ev.Notes,
+//    ev.PaymentMode,
+//    ev.TotalAmount,
+//    IFNULL((
+//        SELECT SUM(ep.Amount)
+//        FROM ExpensePayments ep
+//        WHERE ep.ExpenseVoucherId = ev.ExpenseVoucherId
+//    ), 0) AS PaidAmount
+//FROM ExpenseVouchers ev
+//ORDER BY ev.ExpenseVoucherId DESC;
+//";
+
+                   
+//                    using (var r = cmd.ExecuteReader())
+//                    {
+//                        while (r.Read())
+//                        {
+//                            list.Add(new ExpenseVoucherSummaryDto
+//                            {
+//                                ExpenseVoucherId = r.GetInt64(0),
+//                                VoucherNo = r.GetString(1),
+//                                Date = r.GetString(2),
+//                                Notes = r.GetString(3),
+//                                PaymentMode = r.GetString(4),
+//                                TotalAmount = r.GetDecimal(5),
+//                                PaidAmount = r.GetDecimal(6)
+//                            });
+//                        }
+//                    }
+//                }
+//            }
+
+//            return list;
+//        }
         public ExpenseVoucherDetailDto LoadExpenseVoucher(long expenseVoucherId)
         {
             using (var conn = new SQLiteConnection(_connectionString))
@@ -2187,6 +2215,92 @@ ORDER BY jl.LineId;
                         while (r.Read())
                         {
                             dto.Items.Add(new ExpenseVoucherItemDto
+                            {
+                                AccountName = r.GetString(0),
+                                Amount = r.GetDecimal(1)
+                            });
+                        }
+                    }
+                }
+
+                return dto;
+            }
+        }
+        public IncomeVoucherDetailDto LoadIncomeVoucher(long incomeVoucherId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                IncomeVoucherDetailDto dto;
+
+                // 1️⃣ Load voucher header
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    IncomeVoucherId,
+    VoucherNo,
+    VoucherDate,
+    PaymentMode,
+    TotalAmount
+FROM IncomeVouchers
+WHERE IncomeVoucherId = @id;
+";
+                    cmd.Parameters.AddWithValue("@id", incomeVoucherId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        if (!r.Read())
+                            throw new Exception("Income voucher not found.");
+
+                        dto = new IncomeVoucherDetailDto
+                        {
+                            IncomeVoucherId = r.GetInt64(0),
+                            VoucherNo = r.GetString(1),
+                            Date = r.GetString(2),
+                            PaymentMode = r.GetString(3),
+                            TotalAmount = r.GetDecimal(4),
+                            Items = new List<IncomeVoucherItemDto>()
+                        };
+                    }
+                }
+
+                // 2️⃣ Paid amount
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT IFNULL(SUM(Amount), 0)
+FROM IncomePayments
+WHERE IncomeVoucherId = @id;
+";
+                    cmd.Parameters.AddWithValue("@id", incomeVoucherId);
+
+                    dto.PaidAmount = Convert.ToDecimal(cmd.ExecuteScalar());
+                }
+
+                // 3️⃣ Income lines (from JournalLines)
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    a.AccountName,
+    jl.Credit
+FROM JournalLines jl
+JOIN JournalEntries je ON je.JournalId = jl.JournalId
+JOIN Accounts a ON a.AccountId = jl.AccountId
+WHERE je.VoucherType = 'INCOME'
+  AND je.VoucherId = @id
+  AND jl.Credit > 0
+ORDER BY jl.LineId;
+";
+                    cmd.Parameters.AddWithValue("@id", incomeVoucherId);
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            dto.Items.Add(new IncomeVoucherItemDto
                             {
                                 AccountName = r.GetString(0),
                                 Amount = r.GetDecimal(1)
@@ -2344,6 +2458,43 @@ SELECT
 FROM Accounts
 WHERE AccountType = 'Expense'
 AND IFNULL(IsSystemAccount, 0) = 0
+  AND IsActive = 1
+ORDER BY AccountName;
+";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new AccountDto
+                            {
+                                AccountId = r.GetInt64(0),
+                                AccountName = r.GetString(1)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+        public List<AccountDto> GetIncomeAccounts()
+        {
+            var list = new List<AccountDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    AccountId,
+    AccountName
+FROM Accounts
+WHERE AccountType = 'Income'
+  AND IFNULL(IsSystemAccount, 0) = 0
   AND IsActive = 1
 ORDER BY AccountName;
 ";
@@ -6512,6 +6663,425 @@ WHERE ExpenseVoucherId = @id;
                 }
             }
         }
+        public void SaveIncomePayment(
+    long incomeVoucherId,
+    string paymentDate,
+    long receivedInAccountId,
+    decimal amount,
+    string notes,
+    string createdBy
+)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1️⃣ Insert payment record
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO IncomePayments
+(IncomeVoucherId, PaymentDate, ReceivedInAccountId, Amount, Notes, CreatedBy)
+VALUES
+(@vid, @dt, @acc, @amt, @notes, @by);
+";
+                            cmd.Parameters.AddWithValue("@vid", incomeVoucherId);
+                            cmd.Parameters.AddWithValue("@dt", paymentDate);
+                            cmd.Parameters.AddWithValue("@acc", receivedInAccountId);
+                            cmd.Parameters.AddWithValue("@amt", amount);
+                            cmd.Parameters.AddWithValue("@notes", notes);
+                            cmd.Parameters.AddWithValue("@by", createdBy);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // 2️⃣ Journal entry
+                        long jeId = InsertJournalEntry(
+                            conn, tx,
+                            paymentDate,
+                            $"Income Receipt (Voucher #{incomeVoucherId})",
+                            "INCOME_PAYMENT",
+                            incomeVoucherId
+                        );
+
+                        long incomeReceivableAcc =
+                            GetIncomeReceivableAccountId(conn, tx);
+
+                        // Cash / Bank Dr
+                        InsertJournalLine(
+                            conn, tx,
+                            jeId,
+                            receivedInAccountId,
+                            amount,
+                            0
+                        );
+
+                        // Income Receivable Cr
+                        InsertJournalLine(
+                            conn, tx,
+                            jeId,
+                            incomeReceivableAcc,
+                            0,
+                            amount
+                        );
+
+                        tx.Commit();
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
+        public List<IncomeVoucherSummaryDto> GetIncomeVouchers()
+        {
+            var list = new List<IncomeVoucherSummaryDto>();
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+SELECT
+    iv.IncomeVoucherId,
+    iv.VoucherNo,
+    iv.VoucherDate,
+    iv.Notes,
+    iv.PaymentMode,
+    iv.TotalAmount,
+    IFNULL((
+        SELECT SUM(ip.Amount)
+        FROM IncomePayments ip
+        WHERE ip.IncomeVoucherId = iv.IncomeVoucherId
+    ), 0) AS ReceivedAmount
+FROM IncomeVouchers iv
+ORDER BY iv.IncomeVoucherId DESC;
+";
+
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        while (r.Read())
+                        {
+                            list.Add(new IncomeVoucherSummaryDto
+                            {
+                                IncomeVoucherId = r.GetInt64(0),
+                                VoucherNo = r.GetString(1),
+                                Date = r.GetString(2),
+                                Notes = r.GetString(3),
+                                PaymentMode = r.GetString(4),
+                                TotalAmount = r.GetDecimal(5),
+                                ReceivedAmount = r.GetDecimal(6)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return list;
+        }
+        public void ReverseIncomeVoucher(
+    long incomeVoucherId,
+    string reversedBy
+)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1️⃣ Load voucher
+                        string voucherNo, voucherDate, paymentMode;
+                        decimal totalAmount;
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT VoucherNo, VoucherDate, PaymentMode, TotalAmount
+FROM IncomeVouchers
+WHERE IncomeVoucherId = @id;
+";
+                            cmd.Parameters.AddWithValue("@id", incomeVoucherId);
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                if (!r.Read())
+                                    throw new Exception("Income voucher not found.");
+
+                                voucherNo = r.GetString(0);
+                                voucherDate = r.GetString(1);
+                                paymentMode = r.GetString(2);
+                                totalAmount = r.GetDecimal(3);
+                            }
+                        }
+
+                        // 2️⃣ Ensure no payments exist
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT COUNT(*)
+FROM IncomePayments
+WHERE IncomeVoucherId = @id;
+";
+                            cmd.Parameters.AddWithValue("@id", incomeVoucherId);
+
+                            long count = (long)cmd.ExecuteScalar();
+                            if (count > 0)
+                                throw new Exception(
+                                    "Income cannot be reversed because receipts exist."
+                                );
+                        }
+
+                        // 3️⃣ Reverse journal entry
+                        long jeId = InsertJournalEntry(
+                            conn, tx,
+                            DateTime.Now.ToString("yyyy-MM-dd"),
+                            $"Reversal of Income Voucher {voucherNo}",
+                            "INCOME_REVERSAL",
+                            incomeVoucherId
+                        );
+
+                        // 4️⃣ Load original income journal lines
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+SELECT AccountId, Debit, Credit
+FROM JournalLines jl
+JOIN JournalEntries je ON je.JournalId = jl.JournalId
+WHERE je.VoucherType = 'INCOME'
+  AND je.VoucherId = @id;
+";
+                            cmd.Parameters.AddWithValue("@id", incomeVoucherId);
+
+                            using (var r = cmd.ExecuteReader())
+                            {
+                                while (r.Read())
+                                {
+                                    long accId = r.GetInt64(0);
+                                    decimal dr = r.GetDecimal(1);
+                                    decimal cr = r.GetDecimal(2);
+
+                                    // 🔁 reverse
+                                    InsertJournalLine(
+                                        conn, tx,
+                                        jeId,
+                                        accId,
+                                        cr,
+                                        dr
+                                    );
+                                }
+                            }
+                        }
+
+                        // 5️⃣ Mark reversed
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+UPDATE IncomeVouchers
+SET Notes = IFNULL(Notes, '') || ' [REVERSED]',
+    CreatedBy = @by
+WHERE IncomeVoucherId = @id;
+";
+                            cmd.Parameters.AddWithValue("@by", reversedBy);
+                            cmd.Parameters.AddWithValue("@id", incomeVoucherId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        tx.Commit();
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
+
+        public (long IncomeVoucherId, string VoucherNo) SaveIncomeVoucher(
+    string date,
+    string paymentMode,
+    decimal totalAmount,
+    string notes,
+    string createdBy,
+    List<IncomeItemDto> items
+)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 1️⃣ VALIDATIONS
+                        if (items == null || items.Count == 0)
+                            throw new Exception("At least one income line is required.");
+
+                        if (totalAmount <= 0)
+                            throw new Exception("Total amount must be greater than zero.");
+
+                        decimal calcTotal = items.Sum(i => i.Amount);
+                        if (calcTotal != totalAmount)
+                            throw new Exception("Total amount mismatch.");
+
+                        // 2️⃣ INSERT INCOME VOUCHER (HEADER)
+                        long voucherId;
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO IncomeVouchers
+(VoucherDate, PaymentMode, TotalAmount, Notes, CreatedBy)
+VALUES
+(@dt, @mode, @total, @notes, @by);
+SELECT last_insert_rowid();
+";
+                            cmd.Parameters.AddWithValue("@dt", date);
+                            cmd.Parameters.AddWithValue("@mode", paymentMode);
+                            cmd.Parameters.AddWithValue("@total", totalAmount);
+                            cmd.Parameters.AddWithValue("@notes", notes);
+                            cmd.Parameters.AddWithValue("@by", createdBy);
+
+                            voucherId = Convert.ToInt64(cmd.ExecuteScalar());
+                        }
+
+                        string voucherNo = $"INC-{voucherId:00000}";
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText =
+                                "UPDATE IncomeVouchers SET VoucherNo=@no WHERE IncomeVoucherId=@id";
+                            cmd.Parameters.AddWithValue("@no", voucherNo);
+                            cmd.Parameters.AddWithValue("@id", voucherId);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // 3️⃣ JOURNAL ENTRY
+                        long jeId = InsertJournalEntry(
+                            conn, tx,
+                            date,
+                            $"Income Voucher {voucherNo}",
+                            "INCOME",
+                            voucherId
+                        );
+
+                        // 4️⃣ CREDIT ACTUAL INCOME ACCOUNTS
+                        foreach (var it in items)
+                        {
+                            InsertJournalLine(
+                                conn, tx,
+                                jeId,
+                                it.AccountId,   // Sales / Service Income / etc.
+                                0,
+                                it.Amount
+                            );
+                        }
+
+                        // 5️⃣ DEBIT SIDE BASED ON PAYMENT MODE
+                        if (paymentMode == "Credit")
+                        {
+                            // Income Receivable
+                            long incomeReceivableAcc =
+                                GetIncomeReceivableAccountId(conn, tx);
+
+                            InsertJournalLine(
+                                conn, tx,
+                                jeId,
+                                incomeReceivableAcc,
+                                totalAmount,
+                                0
+                            );
+                        }
+                        else if (paymentMode == "Cash")
+                        {
+                            long cashAcc = GetCashAccountId(conn, tx);
+
+                            InsertJournalLine(
+                                conn, tx,
+                                jeId,
+                                cashAcc,
+                                totalAmount,
+                                0
+                            );
+                        }
+                        else if (paymentMode == "Bank")
+                        {
+                            long bankAcc = GetBankAccountId(conn, tx);
+
+                            InsertJournalLine(
+                                conn, tx,
+                                jeId,
+                                bankAcc,
+                                totalAmount,
+                                0
+                            );
+                        }
+                        else
+                        {
+                            throw new Exception("Invalid payment mode.");
+                        }
+
+                        tx.Commit();
+                        return (voucherId, voucherNo);
+                    }
+                    catch
+                    {
+                        tx.Rollback();
+                        throw;
+                    }
+                }
+            }
+        }
+
+        private long GetIncomeReceivableAccountId(
+    SQLiteConnection conn,
+    SQLiteTransaction tx
+)
+        {
+            // 1️⃣ Try to find existing account
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+SELECT AccountId FROM Accounts
+WHERE AccountName = 'Income Receivable'
+LIMIT 1;
+";
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value)
+                    return Convert.ToInt64(o);
+            }
+
+            // 2️⃣ Create account if missing
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+INSERT INTO Accounts
+(AccountName, AccountType, NormalSide, IsActive)
+VALUES
+('Income Receivable', 'Asset', 'Debit', 1);
+
+SELECT last_insert_rowid();
+";
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
 
         private void CreateLedgerEntryForSalesPayment(
     SQLiteConnection conn,
@@ -11036,6 +11606,178 @@ ORDER BY AccountName;
                 return Convert.ToInt64(cmd.ExecuteScalar());
             }
         }
+        public (Dictionary<string, bool> Permissions, int Version)
+    LoadRolePermissions(string role)
+        {
+            var permissions = new Dictionary<string, bool>();
+            int version = 0;
+
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+        SELECT PermissionKey, IsAllowed, Version
+        FROM RolePermissions
+        WHERE Role = @role
+    ";
+                    cmd.Parameters.AddWithValue("@role", role);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            permissions[reader.GetString(0)] =
+                                reader.GetInt32(1) == 1;
+
+                            version = reader.GetInt32(2);
+                        }
+
+                        return (permissions, version);
+                    }
+                }
+            }
+        }
+        public int GetRolePermissionVersion(string role)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"
+        SELECT IFNULL(MAX(Version), 0)
+        FROM RolePermissions
+        WHERE Role = @role
+    ";
+                    cmd.Parameters.AddWithValue("@role", role);
+
+                    var result = cmd.ExecuteScalar();
+                    return Convert.ToInt32(result);
+                }
+            }
+        }
+
+        public OperationResult SaveRolePermissions(
+    string role,
+    Dictionary<string, bool> permissions, long changedByUserId)
+        {
+            using (var conn = new SQLiteConnection(_connectionString))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+
+                    try
+                    {
+                        int newVersion;
+                        string createdAt;
+                        string now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
+                        using (var meta = conn.CreateCommand())
+                        {
+                            meta.Transaction = tx;
+                            meta.CommandText = @"
+                SELECT IFNULL(MAX(Version), 0),
+                       MIN(CreatedAt)
+                FROM RolePermissions
+                WHERE Role = @role
+            ";
+                            meta.Parameters.AddWithValue("@role", role);
+
+                            using (var r = meta.ExecuteReader())
+                            {
+                                r.Read();
+
+                                int currentVersion = r.GetInt32(0);
+                                createdAt = r.IsDBNull(1) ? now : r.GetString(1);
+                                newVersion = currentVersion + 1;
+                            }
+
+                            using (var del = conn.CreateCommand())
+                            {
+                                del.Transaction = tx;
+                                del.CommandText =
+                                    "DELETE FROM RolePermissions WHERE Role = @role";
+                                del.Parameters.AddWithValue("@role", role);
+                                del.ExecuteNonQuery();
+                            }
+
+                            foreach (var p in permissions)
+                            {
+                                using (var ins = conn.CreateCommand())
+                                {
+                                    ins.Transaction = tx;
+                                    ins.CommandText = @"
+                INSERT INTO RolePermissions
+                (Role, PermissionKey, IsAllowed,
+                 Version, CreatedAt, UpdatedAt)
+                VALUES
+                (@role, @key, @allowed,
+                 @version, @createdAt, @updatedAt)
+            ";
+
+                                    ins.Parameters.AddWithValue("@role", role);
+                                    ins.Parameters.AddWithValue("@key", p.Key);
+                                    ins.Parameters.AddWithValue("@allowed", p.Value ? 1 : 0);
+                                    ins.Parameters.AddWithValue("@version", newVersion);
+                                    ins.Parameters.AddWithValue("@createdAt", createdAt);
+                                    ins.Parameters.AddWithValue("@updatedAt", now);
+
+                                    ins.ExecuteNonQuery();
+                                }
+                            }
+                            using (var audit = conn.CreateCommand())
+                            {
+                                audit.Transaction = tx;
+                                audit.CommandText = @"
+        INSERT INTO PermissionAuditLog
+        (Role, OldVersion, NewVersion, ChangedByUserId, ChangedAt)
+        VALUES
+        (@role, @oldV, @newV, @by, @at)
+    ";
+
+                                audit.Parameters.AddWithValue("@role", role);
+                                audit.Parameters.AddWithValue("@oldV", newVersion - 1);
+                                audit.Parameters.AddWithValue("@newV", newVersion);
+                                audit.Parameters.AddWithValue("@by", changedByUserId);
+                                audit.Parameters.AddWithValue("@at", now);
+
+                                audit.ExecuteNonQuery();
+                            }
+
+                            tx.Commit();
+                            return OperationResult.Ok();
+                        }
+                    }
+
+                    catch (Exception ex)
+                    {
+                        tx.Rollback();
+                        return OperationResult.Fail(ex.Message);
+                    }
+                }
+            }
+        }
+        public static class PermissionChecker
+        {
+            public static OperationResult Require(
+                Dictionary<string, bool> permissions,
+                string permissionKey)
+            {
+                if (!permissions.TryGetValue(permissionKey, out var allowed) || !allowed)
+                {
+                    return OperationResult.Fail(
+                        $"Access denied. Missing permission: {permissionKey}");
+                }
+
+                return OperationResult.Ok();
+            }
+        }
+
 
         public static class PasswordHelper
         {
@@ -11094,13 +11836,13 @@ ORDER BY AccountName;
                         );
 
 
-                        return OperationResult.Ok(new
-                        {
-                            Id = Convert.ToInt64(r["Id"]),
-                            Username = r["Username"].ToString(),
-                            Role = r["Role"].ToString(),
-                            MustChangePassword = Convert.ToInt32(r["MustChangePassword"]) == 1
-                        });
+                        //return OperationResult.Ok(new
+                        //{
+                        //    Id = Convert.ToInt64(r["Id"]),
+                        //    Username = r["Username"].ToString(),
+                        //    Role = r["Role"].ToString(),
+                        //    MustChangePassword = Convert.ToInt32(r["MustChangePassword"]) == 1
+                        //});
 
                     }
                 }

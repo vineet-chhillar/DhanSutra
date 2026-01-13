@@ -276,6 +276,9 @@
     <Compile Include="Models\ExpenseVoucherDetailDto.cs" />
     <Compile Include="Models\ExpenseVoucherSummaryDto.cs" />
     <Compile Include="Models\GstMaster.cs" />
+    <Compile Include="Models\IncomeItemDto.cs" />
+    <Compile Include="Models\IncomeVoucherDetailDto.cs" />
+    <Compile Include="Models\IncomeVoucherSummaryDto.cs" />
     <Compile Include="Models\InvoiceDto.cs" />
     <Compile Include="Models\InvoiceForReturnDto.cs" />
     <Compile Include="Models\InvoiceFullDto.cs" />
@@ -302,6 +305,7 @@
     <Compile Include="Models\PurchaseInvoiceNumberDto.cs" />
     <Compile Include="Models\PurchasePaymentDto.cs" />
     <Compile Include="Models\PurchaseReturnItemDto.cs" />
+    <Compile Include="Models\RolePermission.cs" />
     <Compile Include="Models\SalesInvoiceDto.cs" />
     <Compile Include="Models\SalesInvoiceEditDto.cs" />
     <Compile Include="Models\SalesInvoiceEditItemDto.cs" />

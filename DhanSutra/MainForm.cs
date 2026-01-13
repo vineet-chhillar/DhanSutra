@@ -4,6 +4,7 @@ using DhanSutra.Pdf;
 using DhanSutra.Validation;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PdfSharpCore.Drawing;
@@ -16,6 +17,7 @@ using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.Remoting.Contexts;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
@@ -28,7 +30,8 @@ namespace DhanSutra
         private readonly string _connectionString1 = "Data Source=billing.db;Version=3;BusyTimeout=5000;";
         private DatabaseService db = new DatabaseService();
         private UserDto _currentUser;
-
+        Dictionary<string, bool> _currentPermissions;
+        private int _currentPermissionVersion;
         public MainForm()
         {
             // ✅ Step 1: Define a safe, user-visible folder
@@ -94,11 +97,14 @@ namespace DhanSutra
                 
                 switch (req.Action)
                 {
+
                     case "AddItem":
+                        if (!EnsurePermission(AppPermissions.MASTERS, "AddItem", webView))
+                            break;
+
                         var item = JsonConvert.DeserializeObject<Item>(req.Payload.ToString());
                         try
                         {
-
                             var errors = db.ValidateItem(item);
                             if (errors.Count > 0)
                             {
@@ -234,6 +240,8 @@ namespace DhanSutra
                     case "GetItems":
                         try
                         {
+                            if (!EnsurePermission(AppPermissions.MASTERS, "GetItems", webView))
+                                break;
                             var items = db.GetItems();
 
                             var response = new
@@ -261,6 +269,8 @@ namespace DhanSutra
                     case "GetItemsForInvoice":
                         try
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetItemsForInvoice", webView))
+                                break;
                             var items = db.GetItemsForInvoice();
 
                             var response = new
@@ -288,6 +298,9 @@ namespace DhanSutra
                     case "GetItemsForPurchaseInvoice":
                         try
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetItemsForPurchaseInvoice", webView))
+                                break;
+
                             var items = db.GetItemsForPurchaseInvoice();
 
                             var response = new
@@ -498,6 +511,8 @@ namespace DhanSutra
 
                     case "deleteItem":
                         {
+                            if (!EnsurePermission(AppPermissions.MASTERS, "deleteItem", webView))
+                                break;
                             var payload = (JObject)req.Payload;
                             int itemid = payload["Item_Id"].Value<int>();
                             bool deleted = db.DeleteItemIfNoInventory(itemid);
@@ -518,6 +533,8 @@ namespace DhanSutra
                         }
                     case "searchItems":
                         {
+                            if (!EnsurePermission(AppPermissions.MASTERS, "searchItems", webView))
+                                break;
                             var payload = JObject.Parse(req.Payload.ToString());
                             string queryText = payload["query"]?.ToString() ?? "";
 
@@ -536,6 +553,8 @@ namespace DhanSutra
                         }
                     case "updateItem":
                         {
+                            if (!EnsurePermission(AppPermissions.MASTERS, "updateItem", webView))
+                                break;
                             var payload = JObject.Parse(req.Payload.ToString());
 
                             int itemId = Convert.ToInt32(payload["id"]);
@@ -745,6 +764,9 @@ namespace DhanSutra
                     //    }
                     case "GetCompanyProfile":
                         {
+                            if (!EnsurePermission(AppPermissions.SETTINGS, "GetCompanyProfile", webView))
+                                break;
+
                             var profile = db.GetCompanyProfile();
 
                             // Convert logo blob → base64
@@ -801,7 +823,8 @@ namespace DhanSutra
 
                     case "SaveCompanyProfile":
                         {
-
+                            if (!EnsurePermission(AppPermissions.SETTINGS, "SaveCompanyProfile", webView))
+                                break;
                             // Convert payload to JObject
                             var p = JObject.FromObject(req.Payload);
                             // -------- Invoice number normalization --------
@@ -930,6 +953,8 @@ namespace DhanSutra
                         }
                     case "SaveOpeningStock":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveOpeningStock", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -962,6 +987,8 @@ namespace DhanSutra
                         }
                     case "GetOpeningStock":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetOpeningStock", webView))
+                                break;
                             var result = db.GetOpeningStock();
 
                             var response = new
@@ -990,8 +1017,77 @@ namespace DhanSutra
                             );
                             break;
                         }
+                    case "GetIncomeAccounts":
+                        {
+                            // 🔒 Permission check (Income falls under Vouchers)
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetIncomeAccounts", webView))
+                                break;
+
+                            try
+                            {
+                                var accounts = db.GetIncomeAccounts();
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "GetIncomeAccountsResponse",
+                                        success = true,
+                                        data = accounts
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "GetIncomeAccountsResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+                    case "GetIncomeVouchers":
+                        {
+                            // 🔒 Permission: Income is under VOUCHERS
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetIncomeVouchers", webView))
+                                break;
+
+                            try
+                            {
+                                var list = db.GetIncomeVouchers();
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "GetIncomeVouchersResponse",
+                                        success = true,
+                                        data = list
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "GetIncomeVouchersResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+
                     case "GetExpenseAccounts":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetExpenseAccounts", webView))
+                                break;
                             var data = db.GetExpenseAccounts();
 
                             webView.CoreWebView2.PostWebMessageAsJson(
@@ -1005,6 +1101,8 @@ namespace DhanSutra
                         }
                     case "GetAccountsForVoucherSide":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetAccountsForVoucherSide", webView))
+                                break;
                             var payload = req.Payload as JObject;
 
                             string voucherType = payload.Value<string>("VoucherType");
@@ -1065,6 +1163,9 @@ namespace DhanSutra
                         }
                     case "SaveVoucher":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveVoucher", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -1115,6 +1216,8 @@ namespace DhanSutra
 
                     case "LoadVoucherById":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "LoadVoucherById", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -1133,6 +1236,9 @@ namespace DhanSutra
                         }
                     case "GetVoucherIdsByDate":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetVoucherIdsByDate", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -1152,6 +1258,8 @@ namespace DhanSutra
 
                     case "ReverseVoucher":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "ReverseVoucher", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -1187,6 +1295,8 @@ namespace DhanSutra
 
                     case "SaveStockAdjustment":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveStockAdjustment", webView))
+                                break;
                             var p = JObject.FromObject(req.Payload);
 
                             try
@@ -1227,6 +1337,9 @@ namespace DhanSutra
                         }
                     case "GetRecentStockAdjustments":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetRecentStockAdjustments", webView))
+                                break;
+
                             var list = db.GetRecentStockAdjustments();
 
                             webView.CoreWebView2.PostWebMessageAsJson(
@@ -1241,6 +1354,8 @@ namespace DhanSutra
 
                     case "LoadStockAdjustment":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetAllSuppliers", webView))
+                                break;
                             var p = JObject.FromObject(req.Payload);
                             long id = p.Value<long>("AdjustmentId");
 
@@ -1273,6 +1388,8 @@ namespace DhanSutra
                         }
                     case "LoadExpenseVoucher":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "LoadExpenseVoucher", webView))
+                                break;
                             var p = JObject.FromObject(req.Payload);
 
                             try
@@ -1306,6 +1423,8 @@ namespace DhanSutra
                         }
                     case "SaveExpensePayment":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveExpensePayment", webView))
+                                break;
                             var p = JObject.FromObject(req.Payload);
 
                             try
@@ -1343,6 +1462,8 @@ namespace DhanSutra
                         }
                     case "ReverseExpenseVoucher":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "ReverseExpenseVoucher", webView))
+                                break;
                             var p = JObject.FromObject(req.Payload);
 
                             try
@@ -1378,6 +1499,8 @@ namespace DhanSutra
                         {
                             try
                             {
+                                if (!EnsurePermission(AppPermissions.VOUCHERS, "GetExpenseVouchers", webView))
+                                    break;
                                 var list = db.GetExpenseVouchers();
 
                                 webView.CoreWebView2.PostWebMessageAsJson(
@@ -1403,9 +1526,294 @@ namespace DhanSutra
 
                             break;
                         }
+                    //case "GetIncomeVouchers":
+                    //    {
+                    //        if (!EnsurePermission(AppPermissions.VOUCHERS, "GetIncomeVouchers", webView))
+                    //            break;
+
+                    //        try
+                    //        {
+                    //            var list = db.GetIncomeVouchers();
+
+                    //            webView.CoreWebView2.PostWebMessageAsJson(
+                    //                JsonConvert.SerializeObject(new
+                    //                {
+                    //                    action = "GetIncomeVouchersResponse",
+                    //                    success = true,
+                    //                    data = list
+                    //                })
+                    //            );
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            webView.CoreWebView2.PostWebMessageAsJson(
+                    //                JsonConvert.SerializeObject(new
+                    //                {
+                    //                    action = "GetIncomeVouchersResponse",
+                    //                    success = false,
+                    //                    message = ex.Message
+                    //                })
+                    //            );
+                    //        }
+
+                    //        break;
+                    //    }
+                    case "ReverseIncomeVoucher":
+                        {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "ReverseIncomeVoucher", webView))
+                                break;
+
+                            if (_currentUser == null)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseIncomeVoucherResponse",
+                                        success = false,
+                                        message = "Session expired."
+                                    })
+                                );
+                                break;
+                            }
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long incomeVoucherId = payload.Value<long>("IncomeVoucherId");
+                            string reversedBy = payload.Value<string>("ReversedBy");
+
+                            try
+                            {
+                                db.ReverseIncomeVoucher(incomeVoucherId, reversedBy);
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseIncomeVoucherResponse",
+                                        success = true
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "ReverseIncomeVoucherResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+
+                    case "SaveIncomePayment":
+                        {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveIncomePayment", webView))
+                                break;
+
+                            if (_currentUser == null)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveIncomePaymentResponse",
+                                        success = false,
+                                        message = "Session expired."
+                                    })
+                                );
+                                break;
+                            }
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            long incomeVoucherId = payload.Value<long>("IncomeVoucherId");
+                            string paymentDate = payload.Value<string>("PaymentDate");
+                            long receivedInAccountId = payload.Value<long>("ReceivedInAccountId");
+                            decimal amount = payload.Value<decimal>("Amount");
+                            string notes = payload.Value<string>("Notes");
+                            string createdBy = payload.Value<string>("CreatedBy");
+
+                            try
+                            {
+                                db.SaveIncomePayment(
+                                    incomeVoucherId,
+                                    paymentDate,
+                                    receivedInAccountId,
+                                    amount,
+                                    notes,
+                                    createdBy
+                                );
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveIncomePaymentResponse",
+                                        success = true
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "SaveIncomePaymentResponse",
+                                        success = false,
+                                        message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+                    case "LoadIncomeVoucher":
+                        {
+                            try
+                            {
+                                // 1️⃣ Must be logged in
+                                if (_currentUser == null)
+                                {
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(new
+                                        {
+                                            Type = "LoadIncomeVoucher",
+                                            Status = "Error",
+                                            Message = "Session expired."
+                                        })
+                                    );
+                                    break;
+                                }
+
+                                // 2️⃣ Permission check (Income is under Vouchers)
+                                if (_currentPermissions == null ||
+                                    !_currentPermissions.TryGetValue("vouchers", out var allowed) ||
+                                    !allowed)
+                                {
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(new
+                                        {
+                                            Type = "LoadIncomeVoucher",
+                                            Status = "Error",
+                                            Message = "Access denied."
+                                        })
+                                    );
+                                    break;
+                                }
+
+                                // 3️⃣ Read payload
+                                var payload = req.Payload as JObject;
+                                if (payload == null)
+                                    throw new Exception("Invalid request.");
+
+                                long incomeVoucherId = payload.Value<long>("IncomeVoucherId");
+
+                                // 4️⃣ Load income voucher
+                                var dto = db.LoadIncomeVoucher(incomeVoucherId);
+
+                                // 5️⃣ Respond
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "LoadIncomeVoucher",
+                                        Status = "Success",
+                                        Data = dto
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "LoadIncomeVoucher",
+                                        Status = "Error",
+                                        Message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+
+                    case "SaveIncomeVoucher":
+                        {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveIncomeVoucher", webView))
+                                break;
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string date = payload.Value<string>("Date");
+                            string paymentMode = payload.Value<string>("PaymentMode");
+                            decimal totalAmount = payload.Value<decimal>("TotalAmount");
+                            string notes = payload.Value<string>("Notes");
+                            string createdBy = payload.Value<string>("CreatedBy");
+
+                            var itemsArr = payload["Items"] as JArray;
+                            if (itemsArr == null || itemsArr.Count == 0)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "SaveIncomeVoucher",
+                                        Status = "Error",
+                                        Message = "No income items provided."
+                                    })
+                                );
+                                break;
+                            }
+
+                            var items = itemsArr.Select(x => new IncomeItemDto
+                            {
+                                AccountId = x.Value<long>("AccountId"),
+                                Amount = x.Value<decimal>("Amount")
+                            }).ToList();
+
+                            try
+                            {
+                                var (id, voucherNo) = db.SaveIncomeVoucher(
+                                    date,
+                                    paymentMode,
+                                    totalAmount,
+                                    notes,
+                                    createdBy,
+                                    items
+                                );
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "SaveIncomeVoucher",
+                                        Status = "Success",
+                                        Message = "Income voucher saved successfully.",
+                                        Data = new { VoucherNo = voucherNo }
+                                    })
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "SaveIncomeVoucher",
+                                        Status = "Error",
+                                        Message = ex.Message
+                                    })
+                                );
+                            }
+
+                            break;
+                        }
+
 
                     case "SaveExpenseVoucher":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveExpenseVoucher", webView))
+                                break;
                             var p = JObject.FromObject(req.Payload);
 
                             try
@@ -1454,6 +1862,8 @@ namespace DhanSutra
 
                     case "ReverseStockAdjustment":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "ReverseStockAdjustment", webView))
+                                break;
                             var p = JObject.FromObject(req.Payload);
 
                             try
@@ -1489,6 +1899,9 @@ namespace DhanSutra
 
                     case "GetCurrentStockForAdjustment":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetCurrentStockForAdjustment", webView))
+                                break;
+
                             var p = JObject.FromObject(req.Payload);
                             long itemId = p.Value<long>("ItemId");
 
@@ -1520,6 +1933,8 @@ namespace DhanSutra
                         {
                             try
                             {
+                                if (!EnsurePermission(AppPermissions.VOUCHERS, "CreateInvoice", webView))
+                                    break;
                                 var payload = req.Payload as JObject;
                                 if (payload == null)
                                 {
@@ -1775,6 +2190,8 @@ namespace DhanSutra
                         }
                     case "PrintInvoice":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "PrintInvoice", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -1899,6 +2316,8 @@ namespace DhanSutra
                         }
                     case "getInvoiceNumbersByDate":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "getInvoiceNumbersByDate", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             string date = payload["date"]?.ToObject<string>() ;
@@ -1946,6 +2365,9 @@ namespace DhanSutra
 
                     case "SaveSalesReturn":
                         {
+
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveSalesReturn", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -2000,6 +2422,8 @@ namespace DhanSutra
                         {
                             try
                             {
+                                if (!EnsurePermission(AppPermissions.VOUCHERS, "UpdateSalesInvoice", webView))
+                                    break;
                                 var payload = req.Payload as JObject;
                                 if (payload == null)
                                     throw new Exception("Invalid payload for UpdateSalesInvoice.");
@@ -2074,6 +2498,8 @@ namespace DhanSutra
 
                     case "LoadSalesInvoice":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "LoadSalesInvoice", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -2114,6 +2540,8 @@ namespace DhanSutra
 
                     case "SavePurchasePayment":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "SavePurchasePayment", webView))
+                                break;
                             //var dto = req.Payload.ToObject<PurchasePaymentDto>();
                             var dto = ((JObject)req.Payload).ToObject<PurchasePaymentDto>();
                             try
@@ -2267,6 +2695,8 @@ namespace DhanSutra
 
                     case "loadCustomer":
                         {
+                            if (!EnsurePermission(AppPermissions.MASTERS, "loadCustomer", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             int id = payload["CustomerId"]?.ToObject<int>() ?? 0;
@@ -2284,7 +2714,8 @@ namespace DhanSutra
 
                     case "saveCustomer":
                         {
-
+                            if (!EnsurePermission(AppPermissions.MASTERS, "saveCustomer", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             var dto = payload?.ToObject<CustomerDto>();
@@ -2305,7 +2736,8 @@ namespace DhanSutra
 
                     case "deleteCustomer":
                         {
-
+                            if (!EnsurePermission(AppPermissions.MASTERS, "deleteCustomer", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             int id = payload["CustomerId"]?.ToObject<int>() ?? 0;
@@ -2324,6 +2756,9 @@ namespace DhanSutra
 
                     case "searchSuppliers":
                         {
+                            if (!EnsurePermission(AppPermissions.MASTERS, "searchSuppliers", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             string keyword = payload["Keyword"]?.ToObject<string>() ?? "";
@@ -2342,7 +2777,8 @@ namespace DhanSutra
                         }
                     case "loadSupplier":
                         {
-                            
+                            if (!EnsurePermission(AppPermissions.MASTERS, "loadSupplier", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             long id = payload["SupplierId"]?.ToObject<long>() ?? 0;
@@ -2375,6 +2811,8 @@ namespace DhanSutra
                             }
                     case "saveSupplier":
                         {
+                            if (!EnsurePermission(AppPermissions.MASTERS, "saveSupplier", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             var dto = payload?.ToObject<SupplierDto>();
@@ -2414,6 +2852,8 @@ namespace DhanSutra
 
                     case "deleteSupplier":
                         {
+                            if (!EnsurePermission(AppPermissions.MASTERS, "deleteSupplier", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             long id = payload["SupplierId"]?.ToObject<long>() ?? 0;
@@ -2452,6 +2892,8 @@ namespace DhanSutra
                         }
                     case "GetAllSuppliers":
                         {
+                            
+
                             var suppliers = db.GetAllSuppliers();
                             var response = new
                             {
@@ -2748,6 +3190,8 @@ namespace DhanSutra
 
                             try
                             {
+                                if (!EnsurePermission(AppPermissions.VOUCHERS, "SavePurchaseInvoice", webView))
+                                    break;
                                 var payload = req.Payload as JObject;
                                 if (payload == null)
                                     break;
@@ -2942,6 +3386,8 @@ namespace DhanSutra
                         }
                     case "GetPurchaseInvoiceNumbersByDate":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetPurchaseInvoiceNumbersByDate", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3008,6 +3454,8 @@ namespace DhanSutra
 
                     case "LoadPurchaseInvoice":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "LoadPurchaseInvoice", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3032,6 +3480,8 @@ namespace DhanSutra
 
                     case "UpdatePurchaseInvoice":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "UpdatePurchaseInvoice", webView))
+                                break;
                             var payload = req.Payload as JObject;
 
                             if (payload == null)
@@ -3074,6 +3524,9 @@ namespace DhanSutra
 
                     case "PrintPurchaseInvoice":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "PrintPurchaseInvoice", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3194,6 +3647,8 @@ namespace DhanSutra
                         {
                             try
                             {
+                                if (!EnsurePermission(AppPermissions.VOUCHERS, "SaveSalesPayment", webView))
+                                    break;
                                 var payload = req.Payload as JObject;
                                 if (payload == null)
                                     throw new Exception("Invalid payload");
@@ -3291,6 +3746,8 @@ namespace DhanSutra
                         {
                             try
                             {
+                                if (!EnsurePermission(AppPermissions.VOUCHERS, "SavePurchaseReturn", webView))
+                                    break;
                                 var payload = req.Payload as JObject;
                                 if (payload == null) break;
 
@@ -3322,6 +3779,8 @@ namespace DhanSutra
                         }
                     case "getTrialBalance":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getTrialBalance", webView))
+                                break;
                             var data = db.GetTrialBalance();
 
                             var response = new
@@ -3336,6 +3795,10 @@ namespace DhanSutra
                         }
                     case "getLedgerReport":
                         {
+
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getLedgerReport", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3355,6 +3818,260 @@ namespace DhanSutra
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
+                    case "SaveRolePermissions":
+                        {
+                            if (!EnsurePermission(AppPermissions.SETTINGS,"SaveRolePermissions", webView))
+                                break;
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string role = payload.Value<string>("role");
+
+                            if (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase))
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "SaveRolePermissions",
+                                        Status = "Error",
+                                        Message = "Admin role permissions are system-managed and cannot be modified."
+                                    })
+                                );
+                                break;
+                            }
+
+                            var permissionsObj = payload["permissions"] as JObject;
+                            if (permissionsObj == null) break;
+
+                            var permissions = new Dictionary<string, bool>();
+                            foreach (var prop in permissionsObj.Properties())
+                                permissions[prop.Name] = prop.Value.Value<bool>();
+
+                            var result = db.SaveRolePermissions(
+                                role,
+                                permissions,
+                                _currentUser.Id
+                            );
+
+                            if (result.Success && _currentUser.Role == role)
+                            {
+                                var (updatedPermissions, updatedVersion) =
+                                    db.LoadRolePermissions(role);
+
+                                _currentPermissions = updatedPermissions;
+                                _currentPermissionVersion = updatedVersion;
+                            }
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Type = "SaveRolePermissions",
+                                    Status = result.Success ? "Success" : "Error",
+                                    Message = result.Message
+                                })
+                            );
+
+                            break;
+                        }
+
+                    case "CheckPermissionVersion":
+                        {
+                            if (_currentUser == null) break;
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            int clientVersion = payload.Value<int>("clientVersion");
+
+                            // 🔍 Get latest version from DB
+                            int latestVersion =
+                                db.GetRolePermissionVersion(_currentUser.Role);
+
+                            // ⛔ No change → no response
+                            if (latestVersion == clientVersion)
+                                break;
+
+                            // 🔁 Reload permissions
+                            var (permissions, version) =
+                                db.LoadRolePermissions(_currentUser.Role);
+
+                            _currentPermissions = permissions;
+                            _currentPermissionVersion = version;
+
+                            // 🔁 Send updated permissions
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Type = "PermissionsUpdated",
+                                    Permissions = permissions,
+                                    PermissionVersion = version
+                                })
+                            );
+
+                            break;
+                        }
+                    case "ResetRolePermissions":
+                        {
+                            if (!EnsurePermission(AppPermissions.SETTINGS, "ResetRolePermissions", webView))
+                                break;
+
+                            // 1️⃣ Must be logged in
+                            if (_currentUser == null)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "ResetRolePermissions",
+                                        Status = "Error",
+                                        Message = "Session expired."
+                                    })
+                                );
+                                break;
+                            }
+
+                            // 2️⃣ Permission check (defensive – OK to keep)
+                            if (_currentPermissions == null ||
+                                !_currentPermissions.TryGetValue("settings", out var allowed) ||
+                                !allowed)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "ResetRolePermissions",
+                                        Status = "Error",
+                                        Message = "Access denied."
+                                    })
+                                );
+                                break;
+                            }
+
+                            // 3️⃣ Read payload
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string role = payload.Value<string>("role");
+
+                            // 🚫 HARD RULE: Admin role is immutable
+                            if (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase))
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "ResetRolePermissions",
+                                        Status = "Error",
+                                        Message = "Admin role permissions are system-managed and cannot be reset."
+                                    })
+                                );
+                                break;
+                            }
+
+                            // 4️⃣ Get default permissions
+                            var defaultPermissions = PermissionDefaults.Get(role);
+                            if (defaultPermissions == null)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "ResetRolePermissions",
+                                        Status = "Error",
+                                        Message = "Invalid role."
+                                    })
+                                );
+                                break;
+                            }
+
+                            // 5️⃣ Save defaults
+                            var result = db.SaveRolePermissions(
+                                role,
+                                defaultPermissions,
+                                _currentUser.Id
+                            );
+
+                            // 🔄 Reload current permissions if same role
+                            if (result.Success && _currentUser.Role == role)
+                            {
+                                var (updatedPermissions, updatedVersion) =
+                                    db.LoadRolePermissions(role);
+
+                                _currentPermissions = updatedPermissions;
+                                _currentPermissionVersion = updatedVersion;
+                            }
+
+                            // 6️⃣ Respond
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Type = "ResetRolePermissions",
+                                    Status = result.Success ? "Success" : "Error",
+                                    Message = result.Message
+                                })
+                            );
+
+                            break;
+                        }
+
+
+                    case "LoadRolePermissions":
+                        {
+                            if (!EnsurePermission(AppPermissions.SETTINGS, "LoadRolePermissions", webView))
+                                break;
+                            // 1️⃣ Must be logged in
+                            if (_currentUser == null)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "LoadRolePermissions",
+                                        Status = "Error",
+                                        Message = "Session expired. Please login again."
+                                    })
+                                );
+                                break;
+                            }
+
+                            // 2️⃣ Permission check
+                            if (_currentPermissions == null ||
+                                !_currentPermissions.TryGetValue("settings", out var allowed) ||
+                                !allowed)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Type = "LoadRolePermissions",
+                                        Status = "Error",
+                                        Message = "Access denied."
+                                    })
+                                );
+                                break;
+                            }
+
+                            // 3️⃣ Read payload
+                            var payload = req.Payload as JObject;
+                            if (payload == null) break;
+
+                            string role = payload.Value<string>("role");
+
+                            // 4️⃣ Load permissions
+                            var (permissions, version) = db.LoadRolePermissions(role);
+
+                            // 5️⃣ Respond
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Type = "LoadRolePermissions",
+                                    Status = "Success",
+                                    Data = new
+                                    {
+                                        Role = role,
+                                        Permissions = permissions,
+                                        PermissionVersion = version
+                                    }
+                                })
+                            );
+
+                            break;
+                        }
 
                     case "Login":
                         {
@@ -3368,7 +4085,42 @@ namespace DhanSutra
 
                             if (result.Success)
                             {
-                                _currentUser = (UserDto)result.Data;   // ✅ STORE LOGGED-IN USER
+                                var user = (UserDto)result.Data;
+
+                                // 🚫 BLOCK INACTIVE USERS
+                                if (!user.IsActive)
+                                {
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(new
+                                        {
+                                            Type = "Login",
+                                            Status = "Error",
+                                            Message = "Your account is disabled. Please contact administrator."
+                                        })
+                                    );
+                                    break;
+                                }
+
+                                _currentUser = user;
+
+                                // 🔒 LOAD ROLE PERMISSIONS
+                                var (permissions, version) =
+                                    db.LoadRolePermissions(_currentUser.Role);
+
+                                _currentPermissions = permissions;
+                                _currentPermissionVersion = version;
+
+                                // 🔁 Attach permissions to response data
+                                result.Data = new
+                                {
+                                    _currentUser.Id,
+                                    _currentUser.Username,
+                                    _currentUser.Role,
+                                    _currentUser.IsActive,
+                                    _currentUser.MustChangePassword,
+                                    PermissionVersion = version,
+                                    Permissions = permissions
+                                };
                             }
 
                             webView.CoreWebView2.PostWebMessageAsJson(
@@ -3380,11 +4132,16 @@ namespace DhanSutra
                                     Data = result.Data
                                 })
                             );
+
                             break;
                         }
 
+
                     case "ChangePassword":
                         {
+                            if (!EnsurePermission(AppPermissions.SETTINGS, "ChangePassword", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
                             long userId = payload.Value<Int16>("userId");
@@ -3407,8 +4164,31 @@ namespace DhanSutra
                         }
                     case "CreateUser":
                         {
+                            if (!EnsurePermission(AppPermissions.USERS, "CreateUser", webView))
+                                break;
+
+                            // 🔒 Permission check FIRST
+                            if (_currentPermissions == null ||
+                                !_currentPermissions.TryGetValue("users", out var allowed) ||
+                                !allowed)
+                            {
+                                var deniedResponse = new
+                                {
+                                    Type = "CreateUser",
+                                    Status = "Error",
+                                    Message = "Access denied. You do not have permission to create users."
+                                };
+
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(deniedResponse)
+                                );
+                                break;
+                            }
+
+                            // 📦 Existing logic (unchanged)
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
+
                             var username = payload.Value<string>("username");
                             var password = payload.Value<string>("password");
                             string role = payload.Value<string>("role");
@@ -3422,13 +4202,19 @@ namespace DhanSutra
                                 Message = result.Message
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            break;
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
 
-                            
+                            break;
                         }
+
+
                     case "GetUsers":
                         {
+                            if (!EnsurePermission(AppPermissions.USERS, "GetUsers", webView))
+                                break;
+
                             var result = db.GetUsers();
 
                             var response = new
@@ -3447,6 +4233,8 @@ namespace DhanSutra
 
                     case "SetUserStatus":
                         {
+                            if (!EnsurePermission(AppPermissions.USERS, "SetUserStatus", webView))
+                                break;
                             if (_currentUser == null)
                             {
                                 webView.CoreWebView2.PostWebMessageAsJson(
@@ -3481,10 +4269,11 @@ namespace DhanSutra
                         }
 
 
-
-
                     case "fetchCoA":
                         {
+
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "fetchCoA", webView))
+                                break;
                             var rows = db.FetchAccounts();
 
                             var response = new
@@ -3499,6 +4288,9 @@ namespace DhanSutra
                         }
                     case "createAccount":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "createAccount", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3522,6 +4314,8 @@ namespace DhanSutra
 
                     case "GetDayBook":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "GetDayBook", webView))
+                                break;
                             var p = req.Payload as JObject;
                             if (p == null) break;
 
@@ -3544,6 +4338,8 @@ namespace DhanSutra
                         }
                     case "getVoucherReport":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getVoucherReport", webView))
+                                break;
                             var p = req.Payload as JObject;
                             var from = p.Value<string>("From");
                             var to = p.Value<string>("To");
@@ -3564,6 +4360,9 @@ namespace DhanSutra
 
                     case "getProfitLoss":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getProfitLoss", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3584,6 +4383,8 @@ namespace DhanSutra
                         }
                     case "GetStockSummary":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "GetStockSummary", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3605,6 +4406,12 @@ namespace DhanSutra
 
                     case "getBalanceSheet":
                         {
+
+
+                            if (!EnsurePermission(AppPermissions.REPORTS,"getBalanceSheet",webView))
+                                break;
+
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3648,6 +4455,8 @@ namespace DhanSutra
 
                     case "getFIFOValuation":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getFIFOValuation", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3670,6 +4479,8 @@ namespace DhanSutra
 
                     case "getFIFOTotals":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getFIFOTotals", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3692,6 +4503,8 @@ namespace DhanSutra
 
                     case "updateAccount":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "updateAccount", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3713,6 +4526,8 @@ namespace DhanSutra
 
                     case "deleteAccount":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "deleteAccount", webView))
+                                break;
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3771,6 +4586,10 @@ namespace DhanSutra
                         }
                     case "getCashBook":
                         {
+
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getCashBook", webView))
+                                break;
+
                             var p = req.Payload as JObject;
                             var from = p.Value<string>("From");
                             var to = p.Value<string>("To");
@@ -3793,6 +4612,9 @@ namespace DhanSutra
 
                     case "getBankBook":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getBankBook", webView))
+                                break;
+
                             var p = req.Payload as JObject;
                             var from = p.Value<string>("From");
                             var to = p.Value<string>("To");
@@ -3815,6 +4637,9 @@ namespace DhanSutra
 
                     case "getOutstandingReport":
                         {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getOutstandingReport", webView))
+                                break;
+
                             var p = req.Payload as JObject;
                             var balanceType = p.Value<string>("BalanceType") ?? "ALL";
 
@@ -3848,6 +4673,9 @@ namespace DhanSutra
 
                     case "GetInvoiceNumbersByDate":
                         {
+                            if (!EnsurePermission(AppPermissions.VOUCHERS, "GetInvoiceNumbersByDate", webView))
+                                break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
@@ -3867,34 +4695,7 @@ namespace DhanSutra
                             break;
                         }
 
-                        //case "GetNextPurchaseInvoiceNum":
-                        //    {
-                        //        try
-                        //        {
-                        //            var next = db.GetNextPurchaseInvoiceNum();
-
-                        //            var res = new
-                        //            {
-                        //                action = "GetNextPurchaseInvoiceNumResponse",
-                        //                next = next
-                        //            };
-
-                        //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(res));
-                        //        }
-                        //        catch (Exception ex)
-                        //        {
-                        //            var res = new
-                        //            {
-                        //                action = "GetNextPurchaseInvoiceNumResponse",
-                        //                next = 0,
-                        //                error = ex.Message
-                        //            };
-
-                        //            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(res));
-                        //        }
-
-                        //        break;
-                        //    }
+                        
 
 
 
@@ -3936,6 +4737,42 @@ namespace DhanSutra
         {
 
         }
+
+        public bool EnsurePermission(string permissionKey,string responseType,WebView2 webView)
+        {
+            // 1️⃣ Must be logged in
+            if (_currentUser == null)
+            {
+                webView.CoreWebView2.PostWebMessageAsJson(
+                    JsonConvert.SerializeObject(new
+                    {
+                        Type = responseType,
+                        Status = "Error",
+                        Message = "Session expired. Please login again."
+                    })
+                );
+                return false;
+            }
+
+            // 2️⃣ Must have permissions loaded
+            if (_currentPermissions == null ||
+                !_currentPermissions.TryGetValue(permissionKey, out var allowed) ||
+                !allowed)
+            {
+                webView.CoreWebView2.PostWebMessageAsJson(
+                    JsonConvert.SerializeObject(new
+                    {
+                        Type = responseType,
+                        Status = "Error",
+                        Message = "Access denied."
+                    })
+                );
+                return false;
+            }
+
+            return true;
+        }
+
         public static byte[] GenerateInvoicePdfBytes(InvoiceFullDto invoice)
         {
             using (var ms = new MemoryStream())
@@ -4006,4 +4843,67 @@ namespace DhanSutra
         public string Action { get; set; }
         public object Payload { get; set; }
     }
+    public static class AppPermissions
+    {
+        public const string USERS = "users";
+        public const string SETTINGS = "settings";
+        public const string MASTERS = "masters";
+        public const string REPORTS = "reports";
+        public const string VOUCHERS = "vouchers";
+    }
+    public static class PermissionDefaults
+    {
+        public static Dictionary<string, bool> Get(string role)
+        {
+            if (role == "Admin")
+            {
+                return new Dictionary<string, bool>
+                {
+                    ["users"] = true,
+                    ["masters"] = true,
+                    ["reports"] = true,
+                    ["vouchers"] = true,
+                    ["settings"] = true
+                };
+            }
+            else if (role == "Accountant")
+            {
+                return new Dictionary<string, bool>
+                {
+                    ["users"] = false,
+                    ["masters"] = true,
+                    ["reports"] = true,
+                    ["vouchers"] = true,
+                    ["settings"] = false
+                };
+            }
+            else if (role == "Staff")
+            {
+                return new Dictionary<string, bool>
+                {
+                    ["users"] = false,
+                    ["masters"] = false,
+                    ["reports"] = false,
+                    ["vouchers"] = true,
+                    ["settings"] = false
+                };
+            }
+            else if (role == "Viewer")
+            {
+                return new Dictionary<string, bool>
+                {
+                    ["users"] = false,
+                    ["masters"] = false,
+                    ["reports"] = true,
+                    ["vouchers"] = false,
+                    ["settings"] = false
+                };
+            }
+            else
+            {
+                return null;
+            }
+        }
+    }
+
 }
