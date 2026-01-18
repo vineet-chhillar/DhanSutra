@@ -2241,7 +2241,7 @@ ORDER BY jl.LineId;
 SELECT
     IncomeVoucherId,
     VoucherNo,
-    VoucherDate,
+    Date,
     PaymentMode,
     TotalAmount
 FROM IncomeVouchers
@@ -6752,7 +6752,7 @@ VALUES
 SELECT
     iv.IncomeVoucherId,
     iv.VoucherNo,
-    iv.VoucherDate,
+    iv.Date,
     iv.Notes,
     iv.PaymentMode,
     iv.TotalAmount,
@@ -6806,7 +6806,7 @@ ORDER BY iv.IncomeVoucherId DESC;
                         {
                             cmd.Transaction = tx;
                             cmd.CommandText = @"
-SELECT VoucherNo, VoucherDate, PaymentMode, TotalAmount
+SELECT VoucherNo, Date, PaymentMode, TotalAmount
 FROM IncomeVouchers
 WHERE IncomeVoucherId = @id;
 ";
@@ -6944,7 +6944,7 @@ WHERE IncomeVoucherId = @id;
                             cmd.Transaction = tx;
                             cmd.CommandText = @"
 INSERT INTO IncomeVouchers
-(VoucherDate, PaymentMode, TotalAmount, Notes, CreatedBy)
+(Date, PaymentMode, TotalAmount, Notes, CreatedBy)
 VALUES
 (@dt, @mode, @total, @notes, @by);
 SELECT last_insert_rowid();

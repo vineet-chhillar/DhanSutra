@@ -1680,9 +1680,9 @@ namespace DhanSutra
                                     webView.CoreWebView2.PostWebMessageAsJson(
                                         JsonConvert.SerializeObject(new
                                         {
-                                            Type = "LoadIncomeVoucher",
-                                            Status = "Error",
-                                            Message = "Session expired."
+                                            action = "LoadIncomeVoucherResponse",
+                                            success = false,
+                                            message = "Session expired."
                                         })
                                     );
                                     break;
@@ -1696,9 +1696,9 @@ namespace DhanSutra
                                     webView.CoreWebView2.PostWebMessageAsJson(
                                         JsonConvert.SerializeObject(new
                                         {
-                                            Type = "LoadIncomeVoucher",
-                                            Status = "Error",
-                                            Message = "Access denied."
+                                            action = "LoadIncomeVoucherResponse",
+                                            success = false,
+                                            message = "Access denied."
                                         })
                                     );
                                     break;
@@ -1718,9 +1718,9 @@ namespace DhanSutra
                                 webView.CoreWebView2.PostWebMessageAsJson(
                                     JsonConvert.SerializeObject(new
                                     {
-                                        Type = "LoadIncomeVoucher",
-                                        Status = "Success",
-                                        Data = dto
+                                        action = "LoadIncomeVoucherResponse",
+                                        success = true,
+                                        data = dto
                                     })
                                 );
                             }
@@ -1729,9 +1729,9 @@ namespace DhanSutra
                                 webView.CoreWebView2.PostWebMessageAsJson(
                                     JsonConvert.SerializeObject(new
                                     {
-                                        Type = "LoadIncomeVoucher",
-                                        Status = "Error",
-                                        Message = ex.Message
+                                        action = "LoadIncomeVoucherResponse",
+                                        success = false,
+                                        message = ex.Message
                                     })
                                 );
                             }
@@ -1787,10 +1787,11 @@ namespace DhanSutra
                                 webView.CoreWebView2.PostWebMessageAsJson(
                                     JsonConvert.SerializeObject(new
                                     {
-                                        Type = "SaveIncomeVoucher",
-                                        Status = "Success",
-                                        Message = "Income voucher saved successfully.",
-                                        Data = new { VoucherNo = voucherNo }
+                                        action = "SaveIncomeVoucherResponse",
+                                        success = true,
+                                        message = "Income voucher saved successfully.",
+                                        VoucherNo = voucherNo
+                                        
                                     })
                                 );
                             }
@@ -1799,9 +1800,9 @@ namespace DhanSutra
                                 webView.CoreWebView2.PostWebMessageAsJson(
                                     JsonConvert.SerializeObject(new
                                     {
-                                        Type = "SaveIncomeVoucher",
-                                        Status = "Error",
-                                        Message = ex.Message
+                                        action = "SaveIncomeVoucher",
+                                        success = false,
+                                        message = ex.Message
                                     })
                                 );
                             }
