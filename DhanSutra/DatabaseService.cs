@@ -484,7 +484,7 @@ i.reorderlevel
 
             return items;
         }
-        public bool UpdateItem(int id, string name, string itemCode, string hsncode, int? categoryId, string date, string description, int? unitId, int? gstId,decimal reorderlevel)
+        public bool UpdateItem(int id, string name, string itemCode, string hsncode, int? categoryId, string date, string description, int? unitId, int? gstId,decimal reorderlevel,string updatedBy)
         {
             string sql = @"
         UPDATE Item
@@ -497,7 +497,8 @@ i.reorderlevel
             description = @description,
             unitid = @unitId,
             gstid = @gstId,
-reorderlevel=@reorderlevel
+reorderlevel=@reorderlevel,
+updatedby=@updatedBy
         WHERE id = @id;
     ";
 
@@ -520,6 +521,7 @@ reorderlevel=@reorderlevel
                     cmd.Parameters.Add("@gstId", DbType.Int32).Value =
                         gstId == null ? (object)DBNull.Value : (object)gstId;
                     cmd.Parameters.AddWithValue("@reorderlevel", reorderlevel);
+                    cmd.Parameters.AddWithValue("@updatedBy", updatedBy);
 
                     int rows = cmd.ExecuteNonQuery();
                     return rows > 0;
@@ -1353,7 +1355,7 @@ reorderlevel=@reorderlevel
 
                         string asOnDate = payload.Value<string>("AsOnDate");
                         string notes = payload.Value<string>("Notes") ?? "";
-
+                        string CreatedBy = payload.Value<string>("CreatedBy") ?? "SYSTEM";
                         var items = payload["Items"] as JArray;
                         if (items == null || items.Count == 0)
                             throw new Exception("No opening stock items provided.");
@@ -1362,7 +1364,7 @@ reorderlevel=@reorderlevel
                         decimal totalValue = 0;
 
                         long openingStockId = InsertOpeningStockHeader(
-                            conn, txn, asOnDate, notes
+                            conn, txn, asOnDate, notes,CreatedBy
                         );
 
                         foreach (var it in items)
@@ -1378,7 +1380,7 @@ reorderlevel=@reorderlevel
                             decimal value = qty * rate;
 
                             InsertOpeningStockItem( conn, txn,openingStockId, itemId, batch, qty, rate,value);
-                            InsertItemLedgerOpening(conn,txn, itemId, batch, qty,rate, asOnDate, openingStockId, payload.Value<string>("CreatedBy") ?? "SYSTEM");
+                            InsertItemLedgerOpening(conn,txn, itemId, batch, qty,rate, asOnDate, openingStockId,CreatedBy);
                             totalQty += qty;
                             totalValue += value;
                             //update or insert itembalance for each item
@@ -1393,7 +1395,7 @@ reorderlevel=@reorderlevel
 
 
 
-                        CreateOpeningStockJournal(conn,txn,asOnDate,totalValue,openingStockId);
+                        CreateOpeningStockJournal(conn,txn,asOnDate,totalValue,openingStockId,CreatedBy);
 
 
                         UpdateOpeningStockTotals(
@@ -1535,17 +1537,18 @@ reorderlevel=@reorderlevel
     SQLiteConnection conn,
     SQLiteTransaction txn,
     string asOnDate,
-    string notes)
+    string notes,string CreatedBy)
         {
             using (var cmd = new SQLiteCommand(@"
         INSERT INTO OpeningStock
-        (AsOnDate, Notes, CreatedAt)
-        VALUES (@dt, @notes, datetime('now'));
+        (AsOnDate, Notes, CreatedAt,CreatedBy)
+        VALUES (@dt, @notes, datetime('now'),@cby);
         SELECT last_insert_rowid();
     ", conn, txn))
             {
                 cmd.Parameters.AddWithValue("@dt", asOnDate);
                 cmd.Parameters.AddWithValue("@notes", notes);
+                cmd.Parameters.AddWithValue("@cby", CreatedBy);
 
                 return Convert.ToInt64(cmd.ExecuteScalar());
             }
@@ -1766,7 +1769,7 @@ SELECT last_insert_rowid();
                 date,
                 $"Stock Adjustment ({adjustmentNo})",
                 "STOCK_ADJUSTMENT",
-                adjustmentId
+                adjustmentId,createdBy
             );
 
             long stockAcc = GetStockAccountId(conn, tx);
@@ -1894,7 +1897,7 @@ SELECT last_insert_rowid();
                             date,
                             $"Expense Voucher {voucherNo}",
                             "EXPENSE",
-                            voucherId
+                            voucherId, createdBy
                         );
 
                         // 4️⃣ DEBIT ACTUAL EXPENSE ACCOUNTS (🔥 THIS IS THE FIX)
@@ -2384,7 +2387,7 @@ VALUES
                             paymentDate,
                             $"Expense Payment (Voucher #{expenseVoucherId})",
                             "EXPENSE_PAYMENT",
-                            expenseVoucherId
+                            expenseVoucherId,createdBy
                         );
 
                         long expensePayableAcc = GetExpensePayableAccountId(conn, tx);
@@ -2651,12 +2654,12 @@ ORDER BY AdjustmentId DESC
         }
 
 
-        private void CreateOpeningStockJournal(SQLiteConnection conn,SQLiteTransaction txn,string asOnDate,decimal amount,long openingStockId)
+        private void CreateOpeningStockJournal(SQLiteConnection conn,SQLiteTransaction txn,string asOnDate,decimal amount,long openingStockId,string CreatedBy)
         {
             long stockAcc = GetStockAccountId(conn, txn);
             long openingBalAcc = GetOpeningBalanceAccountId(conn, txn);
 
-            long jeId = InsertJournalEntry(conn,txn,asOnDate,"Opening Stock Entry","OPENING_STOCK", stockAcc);
+            long jeId = InsertJournalEntry(conn,txn,asOnDate,"Opening Stock Entry","OPENING_STOCK", stockAcc,CreatedBy);
 
             InsertJournalLine(conn, txn, jeId, stockAcc, amount, 0);
             InsertJournalLine(conn, txn, jeId, openingBalAcc, 0, amount);
@@ -3300,7 +3303,7 @@ ORDER BY AdjustmentId DESC
                                 dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd"),
                                 $"Sales Invoice #{invoiceId} ({dto.InvoiceNo})",
                                 "SalesInvoice",
-                                invoiceId
+                                invoiceId,dto.CreatedBy
                             );
 
 
@@ -3438,15 +3441,16 @@ paymentmode,
                 {
                     cmd.CommandText = @"
                 SELECT
-                    ItemId, BatchNo, HsnCode,
-                    Qty, Rate, DiscountPercent,
-                    GstPercent, GstValue,
-                    CgstPercent, CgstValue,
-                    SgstPercent, SgstValue,
-                    IgstPercent, IgstValue,
-                    LineSubTotal, LineTotal
-                FROM InvoiceItems
-                WHERE InvoiceId = @Id
+    ItemId,item.name, BatchNo, InvoiceItems.HsnCode,
+    Qty, Rate, DiscountPercent,
+    GstPercent, GstValue,
+    CgstPercent, CgstValue,
+    SgstPercent, SgstValue,
+    IgstPercent, IgstValue,
+    LineSubTotal, LineTotal
+FROM InvoiceItems
+left join item on item.id=InvoiceItems.itemid
+WHERE InvoiceId = @Id
             ";
                     cmd.Parameters.AddWithValue("@Id", invoiceId);
 
@@ -3457,27 +3461,28 @@ paymentmode,
                             var item = new Models.InvoiceItemDto
                             {
                                 ItemId = r.GetInt32(0),
-                                BatchNo = r.IsDBNull(1) ? "" : r.GetString(1),
-                                HsnCode = r.IsDBNull(2) ? "" : r.GetString(2),
+                                ItemName = r.IsDBNull(1) ? "" : r.GetString(1),
+                                BatchNo = r.IsDBNull(2) ? "" : r.GetString(2),
+                                HsnCode = r.IsDBNull(3) ? "" : r.GetString(3),
 
-                                Qty = r.GetDecimal(3),
-                                Rate = r.GetDecimal(4),
-                                DiscountPercent = r.GetDecimal(5),
+                                Qty = r.GetDecimal(4),
+                                Rate = r.GetDecimal(5),
+                                DiscountPercent = r.GetDecimal(6),
 
-                                GstPercent = r.GetDecimal(6),
-                                GstValue = r.GetDecimal(7),
+                                GstPercent = r.GetDecimal(7),
+                                GstValue = r.GetDecimal(8),
 
-                                CgstPercent = r.GetDecimal(8),
-                                CgstValue = r.GetDecimal(9),
+                                CgstPercent = r.GetDecimal(9),
+                                CgstValue = r.GetDecimal(10),
 
-                                SgstPercent = r.GetDecimal(10),
-                                SgstValue = r.GetDecimal(11),
+                                SgstPercent = r.GetDecimal(11),
+                                SgstValue = r.GetDecimal(12),
 
-                                IgstPercent = r.GetDecimal(12),
-                                IgstValue = r.GetDecimal(13),
+                                IgstPercent = r.GetDecimal(13),
+                                IgstValue = r.GetDecimal(14),
 
-                                LineSubTotal = r.GetDecimal(14),
-                                LineTotal = r.GetDecimal(15)
+                                LineSubTotal = r.GetDecimal(15),
+                                LineTotal = r.GetDecimal(16)
                             };
 
                             dto.Items.Add(item);
@@ -4649,11 +4654,13 @@ UPDATE Customers SET
  ShippingPincode=@ShippingPincode,
  ShippingState=@ShippingState,
  CreditDays=@CreditDays,
- CreditLimit=@CreditLimit
+ CreditLimit=@CreditLimit,
+ UpdatedBy=@UpdatedBy,
+ UpdatedAt=@UpdatedAt
 WHERE CustomerId=@CustomerId";
                 }
-
-                AssignCustomerParams(cmd, dto);
+                    dto.UpdatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                    AssignCustomerParams(cmd, dto);
                 cmd.ExecuteNonQuery();
                 return true;
             }
@@ -4678,28 +4685,46 @@ WHERE CustomerId=@CustomerId";
         {
             return new CustomerDto
             {
-                CustomerId = Convert.ToInt32(rd["CustomerId"]),
+                CustomerId = rd["CustomerId"] == DBNull.Value ? 0 : Convert.ToInt32(rd["CustomerId"]),
                 CustomerName = rd["CustomerName"]?.ToString(),
                 ContactPerson = rd["ContactPerson"]?.ToString(),
                 Mobile = rd["Mobile"]?.ToString(),
                 Email = rd["Email"]?.ToString(),
                 GSTIN = rd["GSTIN"]?.ToString(),
+
                 BillingAddress = rd["BillingAddress"]?.ToString(),
                 BillingCity = rd["BillingCity"]?.ToString(),
                 BillingPincode = rd["BillingPincode"]?.ToString(),
                 BillingState = rd["BillingState"]?.ToString(),
+
                 ShippingAddress = rd["ShippingAddress"]?.ToString(),
                 ShippingCity = rd["ShippingCity"]?.ToString(),
                 ShippingPincode = rd["ShippingPincode"]?.ToString(),
                 ShippingState = rd["ShippingState"]?.ToString(),
-                OpeningBalance = Convert.ToDouble(rd["OpeningBalance"]),
-                Balance = Convert.ToDouble(rd["Balance"]),
-                CreditDays = Convert.ToInt32(rd["CreditDays"]),
-                CreditLimit = Convert.ToDouble(rd["CreditLimit"]),
+
+                OpeningBalance = rd["OpeningBalance"] == DBNull.Value
+                    ? 0
+                    : Convert.ToDouble(rd["OpeningBalance"]),
+
+                Balance = rd["Balance"] == DBNull.Value
+                    ? 0
+                    : Convert.ToDouble(rd["Balance"]),
+
+                CreditDays = rd["CreditDays"] == DBNull.Value
+                    ? 0
+                    : Convert.ToInt32(rd["CreditDays"]),
+
+                CreditLimit = rd["CreditLimit"] == DBNull.Value
+                    ? 0
+                    : Convert.ToDouble(rd["CreditLimit"]),
+
                 CreatedBy = rd["CreatedBy"]?.ToString(),
-                CreatedAt = rd["CreatedAt"]?.ToString()
+                CreatedAt = rd["CreatedAt"]?.ToString(),
+                UpdatedBy = rd["UpdatedBy"]?.ToString(),
+                UpdatedAt = rd["UpdatedAt"]?.ToString(),
             };
         }
+
         public void AssignCustomerParams(SQLiteCommand cmd, CustomerDto dto)
         {
             cmd.Parameters.AddWithValue("@CustomerId", dto.CustomerId);
@@ -4726,6 +4751,8 @@ WHERE CustomerId=@CustomerId";
 
             cmd.Parameters.AddWithValue("@CreatedBy", dto.CreatedBy ?? "");
             cmd.Parameters.AddWithValue("@CreatedAt", dto.CreatedAt ?? "");
+            cmd.Parameters.AddWithValue("@UpdatedBy", dto.CreatedBy ?? "");
+            cmd.Parameters.AddWithValue("@UpdatedAt", dto.CreatedAt ?? "");
         }
 
         public List<SupplierDto> SearchSuppliers(string keyword)
@@ -4831,6 +4858,8 @@ WHERE CustomerId=@CustomerId";
         }
         public long SaveSupplier(SupplierDto supplier)
         {
+            var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
@@ -4923,7 +4952,7 @@ WHERE CustomerId=@CustomerId";
                         cmd.Parameters.AddWithValue("@city", supplier.City ?? "");
                         cmd.Parameters.AddWithValue("@pincode", supplier.Pincode ?? "");
                         cmd.Parameters.AddWithValue("@cby", supplier.CreatedBy ?? "");
-                        cmd.Parameters.AddWithValue("@cat", supplier.CreatedAt.ToString());
+                        cmd.Parameters.AddWithValue("@cat", now);
                         cmd.Parameters.AddWithValue("@state", supplier.State.ToString());
 
                         var id = (long)(long)cmd.ExecuteScalar();
@@ -4946,7 +4975,9 @@ WHERE CustomerId=@CustomerId";
         Address = @addr,
         City = @city,
         Pincode = @pincode,
-State=@state
+State=@state,
+        UpdatedBy = @uby,
+        UpdatedAt = @uat
     WHERE SupplierId = @id;
 ";
 
@@ -4960,7 +4991,8 @@ State=@state
                         cmd.Parameters.AddWithValue("@pincode", supplier.Pincode ?? "");
                         cmd.Parameters.AddWithValue("@state", supplier.State ?? "");
                         cmd.Parameters.AddWithValue("@id", supplier.SupplierId);
-
+                        cmd.Parameters.AddWithValue("@uby", supplier.UpdatedBy ?? "");
+                        cmd.Parameters.AddWithValue("@uat", now);
                         cmd.ExecuteNonQuery();
                         return supplier.SupplierId;
                     }
@@ -5718,7 +5750,7 @@ VALUES
                                 decimal total = dto.TotalAmount;
                                 decimal roundOff = dto.RoundOff;
 
-                                var jid = InsertJournalEntry(conn, tran, dto.InvoiceDate ?? DateTime.Now.ToString("yyyy-MM-dd"), $"Purchase Invoice #{purchaseId} ({dto.InvoiceNo})", "PurchaseInvoice", purchaseId);
+                                var jid = InsertJournalEntry(conn, tran, dto.InvoiceDate ?? DateTime.Now.ToString("yyyy-MM-dd"), $"Purchase Invoice #{purchaseId} ({dto.InvoiceNo})", "PurchaseInvoice", purchaseId,dto.CreatedBy);
 
                                 // Debit Purchase (taxable amount)
                                 if (subTotal != 0) InsertJournalLine(conn, tran, jid, purchaseAccId, subTotal, 0);
@@ -5975,9 +6007,11 @@ VALUES
             return list;
         }
 
-        public PurchaseInvoiceDto GetPurchaseInvoiceDto(long purchaseId)
+        public PurchaseInvoicePdfDto GetPurchaseInvoiceDto(long purchaseId)
         {
-            var dto = new PurchaseInvoiceDto();
+            var dto = new Pdf.PurchaseInvoicePdfDto();
+
+             dto.Items = new List<Pdf.PurchaseInvoiceItemPdfDto>();
 
             using (var con = new SQLiteConnection(_connectionString))
             {
@@ -6033,14 +6067,8 @@ WHERE PurchaseId = @PurchaseId";
 SELECT
     pi.PurchaseItemId,
     pi.ItemId,
-itm.name,
-    pi.Qty,
-    pi.Rate,
-    pi.DiscountPercent,
-    pi.NetRate,
-    pi.GstPercent,
-    pi.GstValue,
-    pi.CgstPercent,
+itm.name,itm.hsncode as HsnCode,pi.batchno as BatchNo,  
+pi.Qty,    pi.Rate,    pi.DiscountPercent,    pi.NetRate,    pi.GstPercent,    pi.GstValue,    pi.CgstPercent,
     pi.CgstValue,
     pi.SgstPercent,
     pi.SgstValue,
@@ -6079,11 +6107,13 @@ ORDER BY pi.PurchaseItemId ASC";
                     {
                         while (rd.Read())
                         {
-                            var item = new PurchaseInvoiceItemDto
+                            var item = new PurchaseInvoiceItemPdfDto
                             {
                                 PurchaseItemId = rd.GetInt64(0),
                                 ItemId = rd.GetInt64(1),
-                                ItemName = rd["Qty"].ToString(),
+                                ItemName = rd["name"].ToString(),
+                                HsnCode = rd["HsnCode"].ToString(),
+                                BatchNo = rd["BatchNo"].ToString(),
                                 Qty = Convert.ToDecimal(rd["Qty"]),
                                 Rate = Convert.ToDecimal(rd["Rate"]),
                                 DiscountPercent = Convert.ToDecimal(rd["DiscountPercent"]),
@@ -6102,8 +6132,7 @@ ORDER BY pi.PurchaseItemId ASC";
                                 Notes = rd["Notes"]?.ToString(),
 
                                 BatchNum = Convert.ToInt32(rd["BatchNum"]),
-                                BatchNo = rd["BatchNo"]?.ToString(),
-
+                                
                                 // OPTIONAL DETAILS
                                 SalesPrice = rd["SalesPrice"] != DBNull.Value ? Convert.ToDecimal(rd["SalesPrice"]) : (decimal?)null,
                                 Mrp = rd["Mrp"] != DBNull.Value ? Convert.ToDecimal(rd["Mrp"]) : (decimal?)null,
@@ -6602,7 +6631,7 @@ WHERE ExpenseVoucherId = @id;
                             DateTime.Now.ToString("yyyy-MM-dd"),
                             $"Reversal of Expense Voucher {voucherNo}",
                             "EXPENSE_REVERSAL",
-                            expenseVoucherId
+                            expenseVoucherId,reversedBy
                         );
 
                         // 4️⃣ Load original expense journal lines
@@ -6704,7 +6733,7 @@ VALUES
                             paymentDate,
                             $"Income Receipt (Voucher #{incomeVoucherId})",
                             "INCOME_PAYMENT",
-                            incomeVoucherId
+                            incomeVoucherId,createdBy
                         );
 
                         long incomeReceivableAcc =
@@ -6848,7 +6877,7 @@ WHERE IncomeVoucherId = @id;
                             DateTime.Now.ToString("yyyy-MM-dd"),
                             $"Reversal of Income Voucher {voucherNo}",
                             "INCOME_REVERSAL",
-                            incomeVoucherId
+                            incomeVoucherId, reversedBy
                         );
 
                         // 4️⃣ Load original income journal lines
@@ -6976,7 +7005,7 @@ SELECT last_insert_rowid();
                             date,
                             $"Income Voucher {voucherNo}",
                             "INCOME",
-                            voucherId
+                            voucherId,createdBy
                         );
 
                         // 4️⃣ CREDIT ACTUAL INCOME ACCOUNTS
@@ -7576,7 +7605,7 @@ SELECT last_insert_rowid();
                                             DateTime.Now.ToString("yyyy-MM-dd"),
                                             $"Reversal of SalesInvoice #{oldInvoiceId}",
                                             "Reversal of SalesInvoice",
-                                            oldInvoiceId
+                                            oldInvoiceId,dto.CreatedBy
                                         );
 
                                         while (rd.Read())
@@ -7694,12 +7723,12 @@ SELECT last_insert_rowid();
                         (InvoiceNo, InvoiceNum, InvoiceDate,
                          CompanyProfileId, CustomerId,
                          SubTotal, TotalTax, TotalAmount, RoundOff,
-                         PaymentMode, PaidVia, CreatedBy, CreatedAt, Status,PaidAmount,BalanceAmount)
+                         PaymentMode, PaidVia, CreatedBy, CreatedAt, Status,PaidAmount,BalanceAmount,Notes)
                         VALUES
                         (@No, @Num, @Date,
                          @Company, @Customer,
                          @Sub, @Tax, @Total, @Round,
-                         @Mode, @Via, @User, @Now, 1,@PaidAmount,@BalanceAmount);
+                         @Mode, @Via, @User, @Now, 1,@PaidAmount,@BalanceAmount,@Notes);
                         SELECT last_insert_rowid();
                     ";
 
@@ -7719,7 +7748,7 @@ SELECT last_insert_rowid();
 
                             cmd.Parameters.AddWithValue("@PaidAmount", dto.PaidAmount);
                             cmd.Parameters.AddWithValue("@BalanceAmount", dto.BalanceAmount);
-
+                            cmd.Parameters.AddWithValue("@Notes", dto.Notes);
                             newInvoiceId = (long)cmd.ExecuteScalar();
                         }
                         // =========================================================
@@ -7839,7 +7868,7 @@ SELECT last_insert_rowid();
                             dto.InvoiceDate,
                             $"Updated Sales Invoice #{newInvoiceId}",
                             "SalesInvoice",
-                            newInvoiceId
+                            newInvoiceId,dto.CreatedBy
                         );
 
                         if (dto.SubTotal != 0)
@@ -7930,7 +7959,7 @@ SELECT last_insert_rowid();
                                             DateTime.Now.ToString("yyyy-MM-dd"),
                                             $"Reversal of PurchaseInvoice #{oldId}",
                                             "Reversal of PurchaseInvoice",
-                                            oldId
+                                            oldId,dto.CreatedBy
                                         );
 
                                         while (rd.Read())
@@ -8203,7 +8232,7 @@ SELECT last_insert_rowid();";
                             dto.InvoiceDate ?? DateTime.UtcNow.ToString("yyyy-MM-dd"),
                             $"Updated Purchase Invoice #{dto.InvoiceNo}",
                             "PurchaseInvoice",
-                            newPurchaseId
+                            newPurchaseId,dto.CreatedBy
                         );
 
                         // Debit Purchases
@@ -8372,8 +8401,8 @@ WHERE AccountId IN (" +
                         cmd.Transaction = tx;
                         cmd.CommandText = @"
 INSERT INTO JournalEntries
-(VoucherType, VoucherNo, Date, Description, VoucherId)
-VALUES (@vt,@vn,@dt,@nar,@ref);
+(VoucherType, VoucherNo, Date, Description, VoucherId,CreatedBy)
+VALUES (@vt,@vn,@dt,@nar,@ref,@cby);
 SELECT last_insert_rowid();";
 
                         cmd.Parameters.AddWithValue("@vt", dto.VoucherType);
@@ -8381,6 +8410,7 @@ SELECT last_insert_rowid();";
                         cmd.Parameters.AddWithValue("@dt", dto.VoucherDate);
                         cmd.Parameters.AddWithValue("@nar", dto.Narration);
                         cmd.Parameters.AddWithValue("@ref", voucherNumericId);
+                        cmd.Parameters.AddWithValue("@cby", dto.CreatedBy);
 
                         journalEntryId = (long)cmd.ExecuteScalar();
                     }
@@ -8791,7 +8821,7 @@ WHERE VoucherType=@vt AND VoucherNo LIKE @fy;
                 }
             }
         }
-        public void ReverseVoucher(long journalEntryId)
+        public void ReverseVoucher(long journalEntryId,string CreatedBy)
         {
             using (var conn = new SQLiteConnection(_connectionString))
             {
@@ -8890,8 +8920,8 @@ WHERE JournalId = @id;
                         cmd.Transaction = tx;
                         cmd.CommandText = @"
 INSERT INTO JournalEntries
-(VoucherType, VoucherNo, Date, Description, VoucherId, IsReversal, SourceJournalId)
-VALUES ('JV',@vn,@dt,@nar,@ref,1,@src);
+(VoucherType, VoucherNo, Date, Description, VoucherId, IsReversal, SourceJournalId,CreatedBy)
+VALUES ('JV',@vn,@dt,@nar,@ref,1,@src,@cby);
 SELECT last_insert_rowid();
 ";
                         cmd.Parameters.AddWithValue("@vn", reversalVoucherNo);
@@ -8903,6 +8933,7 @@ SELECT last_insert_rowid();
                         cmd.Parameters.AddWithValue("@ref", voucherNumericId);
                         cmd.Parameters.AddWithValue("@isrev", 1);
                         cmd.Parameters.AddWithValue("@src", journalEntryId);
+                        cmd.Parameters.AddWithValue("@cby", CreatedBy);
 
                         reversalEntryId = (long)cmd.ExecuteScalar();
                     }
@@ -9780,7 +9811,7 @@ WHERE jl.AccountId IN ({idList})
     DateTime.Now.ToString("yyyy-MM-dd"),
     $"Purchase Return #{newReturnId}",
     "PurchaseReturn",
-    newReturnId
+    newReturnId,dto.CreatedBy
 );
 
 
@@ -9871,7 +9902,7 @@ SELECT last_insert_rowid();
                             date,
                             $"Stock Adjustment ({adjustmentNo})",
                             "STOCK_ADJUSTMENT",
-                            adjustmentId
+                            adjustmentId,createdBy
                         );
 
                         long stockAcc = GetStockAccountId(conn, tx);
@@ -10305,7 +10336,7 @@ SELECT last_insert_rowid();
                         cmd.ExecuteNonQuery();
                     }
                     ///////////////////////////////////////////////////////////////////////////////////
-                    var jid = InsertJournalEntry(conn, tx, DateTime.Now.ToString("yyyy-MM-dd"), $"Sales Return #{newReturnId}", "SalesReturn", newReturnId);
+                    var jid = InsertJournalEntry(conn, tx, DateTime.Now.ToString("yyyy-MM-dd"), $"Sales Return #{newReturnId}", "SalesReturn", newReturnId,dto.CreatedBy);
 
                     // Debit Sales Returns (reverse of sales)
                     if (subTotal != 0) InsertJournalLine(conn, tx, jid, salesReturnAccId, subTotal, 0);
@@ -10453,7 +10484,7 @@ SELECT last_insert_rowid();
     RoundOff,
     paidamount,
     balanceamount,
-Paidvia
+Paidvia,Notes
 FROM Invoice
 left join customers on invoice.customerid=customers.customerid
 WHERE Id = @id;
@@ -10487,6 +10518,7 @@ WHERE Id = @id;
                                 PaidAmount = Convert.ToDecimal(rd.GetDouble(13)),
                                 BalanceAmount = Convert.ToDecimal(rd.GetDouble(14)),
                                 PaidVia = rd.GetString(15),
+                                Notes = rd.GetString(16),
                                 Items = new List<LoadSalesInvoiceItemDto>()
                             };
                         }
@@ -11372,7 +11404,7 @@ ORDER BY AccountName;
 
         // Assumes using System.Data.SQLite;
         // Insert journal header and return JournalId
-        private long InsertJournalEntry(SQLiteConnection conn, SQLiteTransaction tx, string date, string description, string voucherType, long voucherId)
+        private long InsertJournalEntry(SQLiteConnection conn, SQLiteTransaction tx, string date, string description, string voucherType, long voucherId,string CreatedBy)
         {
             using (var cmd = conn.CreateCommand())
             {
@@ -11380,8 +11412,8 @@ ORDER BY AccountName;
 
                 cmd.Transaction = tx;
                 cmd.CommandText = @"
-            INSERT INTO JournalEntries (Date, Description, VoucherType, VoucherId, CreatedAt)
-            VALUES (@Date, @Desc, @VoucherType, @VoucherId, @createdAt);
+            INSERT INTO JournalEntries (Date, Description, VoucherType, VoucherId, CreatedAt,CreatedBy)
+            VALUES (@Date, @Desc, @VoucherType, @VoucherId, @createdAt,@createdBy);
             SELECT last_insert_rowid();
         ";
                 cmd.Parameters.AddWithValue("@Date", date ?? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
@@ -11389,6 +11421,7 @@ ORDER BY AccountName;
                 cmd.Parameters.AddWithValue("@VoucherType", voucherType ?? "");
                 cmd.Parameters.AddWithValue("@VoucherId", voucherId);
                 cmd.Parameters.AddWithValue("@createdAt", createdAt);
+                cmd.Parameters.AddWithValue("@createdBy", CreatedBy);
                 return Convert.ToInt64(cmd.ExecuteScalar());
             }
         }
@@ -12054,7 +12087,11 @@ SELECT
     OpeningBalanceType,
     IsGroup,
     IFNULL(IsSystemAccount,0),
-    IFNULL(IsActive,1)
+    IFNULL(IsActive,1),
+createdby,
+createdat,
+updatedby,
+updatedat
 FROM Accounts
 ORDER BY AccountName;
 ";
@@ -12074,7 +12111,12 @@ ORDER BY AccountName;
                                 OpeningBalanceType = rd.IsDBNull(6) ? "DR" : rd.GetString(6),
                                 IsGroup = rd.GetInt32(7) == 1,
                                 IsSystemAccount = rd.GetInt32(8) == 1,
-                                IsActive = rd.GetInt32(9) == 1
+                                IsActive = rd.GetInt32(9) == 1,
+                                CreatedBy = rd.IsDBNull(10) ? null : rd.GetString(10),
+                                // Fix for CS0266: Add explicit cast to DateTime for nullable assignment
+                                CreatedAt = rd.IsDBNull(11) ? (DateTime?)null : (DateTime?)DateTime.Parse(rd.GetString(11)),
+                                UpdatedBy = rd.IsDBNull(12) ? null : rd.GetString(12),
+                                UpdatedAt = rd.IsDBNull(13) ? (DateTime?)null : DateTime.Parse(rd.GetString(13))
                             });
                         }
                     }
@@ -12129,9 +12171,9 @@ ORDER BY AccountName;
                         cmd.Transaction = tx;
                         cmd.CommandText = @"
 INSERT INTO Accounts
-(AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, OpeningBalanceType, IsSystemAccount, IsGroup)
+(AccountName, AccountType, ParentAccountId, NormalSide, OpeningBalance, OpeningBalanceType, IsSystemAccount, IsGroup,CreatedBy)
 VALUES
-(@name, @type, @parent, @side, @opening, @openingType, 0, @isGroup);
+(@name, @type, @parent, @side, @opening, @openingType, 0, @isGroup,@createdBy);
 ";
 
                         cmd.Parameters.AddWithValue("@name", dto.AccountName.Trim());
@@ -12146,7 +12188,7 @@ VALUES
 
                         // ✅ THIS IS THE KEY LINE
                         cmd.Parameters.AddWithValue("@isGroup", dto.IsGroup ? 1 : 0);
-
+                        cmd.Parameters.AddWithValue("@createdBy", dto.CreatedBy);
                         cmd.ExecuteNonQuery();
                     }
 
@@ -12241,11 +12283,13 @@ WHERE AccountId = @id";
                                 cmd.CommandText = @"
 UPDATE Accounts
 SET OpeningBalance = @opening,
-    OpeningBalanceType = @openingType
+    OpeningBalanceType = @openingType,
+updatedby=@updatedBy
 WHERE AccountId = @id;";
                                 cmd.Parameters.AddWithValue("@opening", dto.OpeningBalance);
                                 cmd.Parameters.AddWithValue("@openingType", openingType);
                                 cmd.Parameters.AddWithValue("@id", dto.AccountId);
+                                cmd.Parameters.AddWithValue("@updatedBy", dto.UpdatedBy);
                                 cmd.ExecuteNonQuery();
                             }
 
@@ -12298,7 +12342,8 @@ SET AccountName = @name,
     NormalSide = @side,
     OpeningBalance = @opening,
     OpeningBalanceType = @openingType,
-    IsGroup = @isGroup
+    IsGroup = @isGroup,
+    UpdatedBy=@updatedBy
 WHERE AccountId = @id;
 ";
 
@@ -12313,7 +12358,7 @@ WHERE AccountId = @id;
                             cmd.Parameters.AddWithValue("@openingType", openingType);
                             cmd.Parameters.AddWithValue("@isGroup", dto.IsGroup ? 1 : 0);
                             cmd.Parameters.AddWithValue("@id", dto.AccountId);
-
+                            cmd.Parameters.AddWithValue("@updatedBy", dto.UpdatedBy);
                             cmd.ExecuteNonQuery();
                         }
 

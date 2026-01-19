@@ -19,7 +19,7 @@ namespace DhanSutra.Models
         public string CustomerState { get; set; }
         public string PaymentMode { get; set; }
 
-       
+        public string Notes { get; set; }
 
         public decimal SubTotal { get; set; }
         public decimal TotalTax { get; set; }

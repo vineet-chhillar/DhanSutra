@@ -328,6 +328,7 @@
     <Compile Include="Models\VoucherViewDto.cs" />
     <Compile Include="Pdf\CompanyProfilePdfDto.cs" />
     <Compile Include="Pdf\PurchaseInvoiceDocument.cs" />
+    <Compile Include="Pdf\PurchaseInvoiceItemPdfDto.cs" />
     <Compile Include="Pdf\PurchaseInvoicePdfDto.cs" />
     <Compile Include="Models\PurchaseItemDetailDto.cs" />
     <Compile Include="Models\PurchaseItemForDateDto.cs" />

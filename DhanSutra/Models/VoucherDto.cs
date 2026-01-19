@@ -13,6 +13,7 @@ namespace DhanSutra.Models
         public DateTime VoucherDate { get; set; }
         public string Narration { get; set; }
         public long? ReferenceId { get; set; }
+        public string CreatedBy { get; set; }
         public List<VoucherLineDto> Lines { get; set; }
     }
 

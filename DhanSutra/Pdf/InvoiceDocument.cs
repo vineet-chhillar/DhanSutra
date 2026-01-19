@@ -150,7 +150,7 @@ namespace DhanSutra.Pdf
                 {
                     col.Item().Text(_company.CompanyName).FontSize(16).SemiBold();
                     col.Item().Text($"{_company.AddressLine1} {_company.AddressLine2}");
-                    col.Item().Text($"{_company.City}  {_company.State} - {_company.Pincode}");
+                    col.Item().Text($"{_company.City} - {_company.State} - {_company.Pincode}");
                     if (!string.IsNullOrEmpty(_company.GSTIN))
                         col.Item().Text($"GSTIN: {_company.GSTIN}");
                     if (!string.IsNullOrEmpty(_company.PAN))
@@ -284,28 +284,21 @@ namespace DhanSutra.Pdf
                     // define columns - adjust widths as needed
                     table.ColumnsDefinition(columns =>
                     {
-                        columns.RelativeColumn(1);   // S.No / item
-                        columns.RelativeColumn(3);   // Item Name
-                        columns.RelativeColumn(1);   // HSN
-                        columns.RelativeColumn(1);   // Batch
-                        columns.RelativeColumn(1);   // Qty
-                        columns.RelativeColumn(1);   // Rate
-                        columns.RelativeColumn(1);   // Disc %
-                        columns.RelativeColumn(1);   // Subtotal
-                        //columns.RelativeColumn(1);   // GST %
-                        //columns.RelativeColumn(1);   // GST Amt
-                        //columns.RelativeColumn(1);   // CGST %
-                        //columns.RelativeColumn(1);   // CGST Amt
-                        //columns.RelativeColumn(1);   // SGST %
-                        //columns.RelativeColumn(1);   // SGST Amt
-                        //columns.RelativeColumn(1);   // IGST %
-                        //columns.RelativeColumn(1);   // IGST Amt
-                        columns.RelativeColumn(1);   // Total
+                        columns.ConstantColumn(30);   // S.No
+                        columns.RelativeColumn(3);    // Item Name
+                        columns.ConstantColumn(60);   // HSN
+                        columns.ConstantColumn(60);   // Batch
+                        columns.ConstantColumn(45);   // Qty
+                        columns.ConstantColumn(55);   // Rate
+                        columns.ConstantColumn(50);   // Disc %
+                        columns.ConstantColumn(70);   // Subtotal
+                        columns.ConstantColumn(70);   // Total
                     });
+
 
                     // Header row
                     table.Cell().Element(CellStyle).Text("S.No").SemiBold();
-                    table.Cell().Element(CellStyle).Text("Item & Description").SemiBold();
+                    table.Cell().Element(CellStyle).Text("Item").SemiBold();
                     table.Cell().Element(CellStyle).Text("HSN").SemiBold();
                     table.Cell().Element(CellStyle).Text("Batch").SemiBold();
                     table.Cell().Element(CellStyle).Text("Qty").SemiBold();
@@ -335,14 +328,6 @@ namespace DhanSutra.Pdf
                         table.Cell().Element(CellStyle).Text(it.Rate.ToString("N2"));
                         table.Cell().Element(CellStyle).Text(it.DiscountPercent.ToString("N2"));
                         table.Cell().Element(CellStyle).Text(it.LineSubTotal.ToString("N2"));
-                        //table.Cell().Element(CellStyle).Text(it.GstPercent.ToString("N2"));
-                        //table.Cell().Element(CellStyle).Text(it.GstValue.ToString("N2"));
-                        //table.Cell().Element(CellStyle).Text(it.CgstPercent.ToString("N2"));
-                        //table.Cell().Element(CellStyle).Text(it.CgstValue.ToString("N2"));
-                        //table.Cell().Element(CellStyle).Text(it.SgstPercent.ToString("N2"));
-                        //table.Cell().Element(CellStyle).Text(it.SgstValue.ToString("N2"));
-                        //table.Cell().Element(CellStyle).Text(it.IgstPercent.ToString("N2"));
-                        //table.Cell().Element(CellStyle).Text(it.IgstValue.ToString("N2"));
                         table.Cell().Element(CellStyle).Text(it.LineTotal.ToString("N2"));
                     }
                 });

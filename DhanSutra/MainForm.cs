@@ -567,6 +567,7 @@ namespace DhanSutra
                             int? unitId = payload["unitid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["unitid"]);
                             int? gstId = payload["gstid"]?.Type == JTokenType.Null ? (int?)null : Convert.ToInt32(payload["gstid"]);
                             decimal reorderlevel = Convert.ToDecimal(payload["reorderlevel"]);
+                            string updatedBy = payload["updatedby"]?.ToString();
 
                             Item itemforvalidation = new Item();
                             itemforvalidation.Name = name;
@@ -594,7 +595,7 @@ namespace DhanSutra
                             else
                             {
 
-                                bool updated = db.UpdateItem(itemId, name, itemCode,hsnCode, categoryId, date, description, unitId, gstId,reorderlevel);
+                                bool updated = db.UpdateItem(itemId, name, itemCode,hsnCode, categoryId, date, description, unitId, gstId,reorderlevel,updatedBy);
 
                                 var result = new
                                 {
@@ -1264,10 +1265,11 @@ namespace DhanSutra
                             if (payload == null) break;
 
                             long journalEntryId = payload.Value<long>("JournalEntryId");
+                            string CreatedBy = payload.Value<string>("CreatedBy");
 
                             try
                             {
-                                db.ReverseVoucher(journalEntryId);
+                                db.ReverseVoucher(journalEntryId,CreatedBy);
 
                                 webView.CoreWebView2.PostWebMessageAsJson(
                                     JsonConvert.SerializeObject(new
@@ -2226,6 +2228,7 @@ namespace DhanSutra
                                 Items = invoice.Items?.ConvertAll(x => new DhanSutra.Pdf.InvoiceItemDto
                                 {
                                     ItemId = x.ItemId,
+                                    ItemName=x.ItemName,
                                     BatchNo = x.BatchNo,
                                     HsnCode = x.HsnCode,
                                     Qty = x.Qty,
@@ -2683,13 +2686,13 @@ namespace DhanSutra
                             if (payload == null) break;
                             var kw = payload["Keyword"]?.ToObject<string>() ?? "";
                                                         
-                            var list = db.SearchCustomers(kw);
+                            var customers = db.SearchCustomers(kw);
                            var response = new
                             {
-                                action = "searchCustomers",
+                                action = "searchCustomersResult",
                                 success = true,
-                                data = list
-                            };
+                                data = customers
+                           };
                             webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
                             break;
                         }
@@ -3583,7 +3586,8 @@ namespace DhanSutra
 
                                     LineSubTotal = x.LineSubTotal,
                                     LineTotal = x.LineTotal,
-                                    BatchNo = x.BatchNo
+                                    BatchNo = x.BatchNo,
+                                    HsnCode=x.HsnCode
                                 }).ToList()
                             };
 
