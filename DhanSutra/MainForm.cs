@@ -1,6 +1,7 @@
 ﻿using DhanSutra;
 using DhanSutra.Models;
 using DhanSutra.Pdf;
+using DhanSutra.Pdf;
 using DhanSutra.Validation;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.Web.WebView2.Core;
@@ -10,10 +11,12 @@ using Newtonsoft.Json.Linq;
 using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
 using QuestPDF.Fluent;
-using QuestPDF.Infrastructure;
+using QuestPDF.Infrastructure;  
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -21,6 +24,7 @@ using System.Runtime.Remoting.Contexts;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
+using static DhanSutra.StockValuationService;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 namespace DhanSutra
@@ -53,7 +57,7 @@ namespace DhanSutra
             // ✅ Step 4: Final connection string
             _connectionString1 = $"Data Source={dbFile};Version=3;";
             Console.WriteLine("📂 Database path: " + dbFile);
-
+            QuestPDF.Settings.License = LicenseType.Community;
             db.EnsureDefaultAdmin();
 
             InitializeComponent();
@@ -3732,10 +3736,28 @@ namespace DhanSutra
                         {
                             var p = req.Payload as JObject;
 
-                            var from = p.Value<string>("From");
-                            var to = p.Value<string>("To");
+                            
+                            if (p == null) break;
 
-                            var data = db.GetDashboardProfitLoss(from, to);
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            if (!DateTime.TryParse(fromStr, out var fromDate) ||
+                                !DateTime.TryParse(toStr, out var toDate))
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format",
+                                        action = "getDashboardProfitLossResult"
+                                    }));
+                                break;
+                            }
+
+                            // ✅ Call with DateTime
+                            var data = db.GetDashboardProfitLoss(fromDate, toDate);
+
 
                             webView.CoreWebView2.PostWebMessageAsJson(
                                 JsonConvert.SerializeObject(new
@@ -3786,7 +3808,30 @@ namespace DhanSutra
                         {
                             if (!EnsurePermission(AppPermissions.REPORTS, "getTrialBalance", webView))
                                 break;
-                            var data = db.GetTrialBalance();
+
+                            var payload = req.Payload as JObject;
+                            if (payload == null)
+                                break;
+
+                            var fromStr = payload.Value<string>("From");
+                            var toStr = payload.Value<string>("To");
+
+                            if (!DateTime.TryParse(fromStr, out var fromDate) ||
+                                !DateTime.TryParse(toStr, out var toDate))
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        action = "getTrialBalanceResult",
+                                        success = false,
+                                        Message = "Invalid date format"
+                                    })
+                                );
+                                break;
+                            }
+
+                            // ✅ Call date-based Trial Balance
+                            var data = db.GetTrialBalance(fromDate, toDate);
 
                             var response = new
                             {
@@ -3795,12 +3840,14 @@ namespace DhanSutra
                                 rows = data
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
                             break;
                         }
+
                     case "getLedgerReport":
                         {
-
                             if (!EnsurePermission(AppPermissions.REPORTS, "getLedgerReport", webView))
                                 break;
 
@@ -3808,21 +3855,280 @@ namespace DhanSutra
                             if (payload == null) break;
 
                             long accountId = payload.Value<long>("AccountId");
-                            string from = payload.Value<string>("From") ?? DateTime.UtcNow.ToString("yyyy-MM-01");
-                            string to = payload.Value<string>("To") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
 
-                            var report = db.GetLedgerReport(accountId, from, to);
+                            var fromStr = payload.Value<string>("From");
+                            var toStr = payload.Value<string>("To");
+
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = string.IsNullOrWhiteSpace(fromStr)
+                                    ? new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)
+                                    : DateTime.ParseExact(fromStr, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+                                toDate = string.IsNullOrWhiteSpace(toStr)
+                                    ? DateTime.Today
+                                    : DateTime.ParseExact(toStr, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                            }
+                            catch
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "getLedgerReportResult"
+                                    }));
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "getLedgerReportResult"
+                                    }));
+                                break;
+                            }
+
+                            // ✅ Call with DateTime
+                            var report = db.GetLedgerReport(accountId, fromDate, toDate);
 
                             var response = new
                             {
                                 action = "getLedgerReportResult",
                                 success = true,
-                                report = report
+                                report
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
+
                             break;
                         }
+                    case "generateLedgerPdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "generateLedgerPdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+                            long accountId = p.Value<long>("AccountId");
+
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+
+                                toDate = DateTime.ParseExact(
+                                    toStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch (FormatException)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        success = false,
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "generateLedgerPdfResult"
+                                    })
+                                );
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        success = false,
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "generateLedgerPdfResult"
+                                    })
+                                );
+                                break;
+                            }
+
+                            // ✅ Build report
+                            var report = db.GetLedgerReport(accountId, fromDate, toDate);
+
+                            // ✅ Generate PDF bytes (same pattern as DayBook)
+                            var doc = new LedgerPdfDocument(report);
+                            var pdfBytes = doc.GeneratePdf();
+
+                            // ✅ Save + open using common helper
+                            SaveAndOpen(
+                                pdfBytes,
+                                $"Ledger_{accountId}_{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.pdf"
+                            );
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    success = true,
+                                    action = "generateLedgerPdfResult"
+                                })
+                            );
+
+                            break;
+                        }
+                    case "exportOutstandingReportPdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "exportOutstandingReportPdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            string balanceType = p.Value<string>("BalanceType") ?? "ALL";
+
+                            // 1️⃣ Get same data as page
+                            var rows = db.GetOutstandingReport(balanceType);
+
+                            // 2️⃣ Create PDF
+                            var doc = new OutstandingReportPdfDocument(rows, balanceType);
+                            var pdfBytes = doc.GeneratePdf();
+
+                            // 3️⃣ Save & open (same pattern as DayBook)
+                            SaveAndOpen(pdfBytes, "OutstandingReport.pdf");
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    success = true,
+                                    action = "generateOutstandingPdfResult"
+                                })
+                            );
+
+                            break;
+                        }
+
+                    case "exportStockSummaryPdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "exportStockSummaryPdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var asOfStr = p.Value<string>("AsOf");
+
+                            DateTime asOfDate;
+                            try
+                            {
+                                asOfDate = DateTime.ParseExact(
+                                    asOfStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "generateStockSummaryPdfResult"
+                                    })
+                                );
+                                break;
+                            }
+
+                            // ✅ USE YOUR EXISTING SERVICE
+                            var stockSvc = new StockValuationService();
+                            var rows = stockSvc.GetStockSummary(asOfDate);
+
+                            var doc = new StockSummaryPdfDocument(rows, asOfDate);
+                            var pdfBytes = doc.GeneratePdf();
+
+                            SaveAndOpen(pdfBytes, $"StockSummary_{asOfDate:yyyyMMdd}.pdf");
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    action = "generateStockSummaryPdfResult",
+                                    success = true
+                                })
+                            );
+
+                            break;
+                        }
+                    case "exportStockValuationPdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "exportStockValuationPdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            DateTime fromDate, toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(fromStr, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                                toDate = DateTime.ParseExact(toStr, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                            }
+                            catch
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format",
+                                        action = "exportStockValuationPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date",
+                                        action = "exportStockValuationPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            var pdfBytes = db.ExportStockValuationPdf(fromDate, toDate);
+
+                            SaveAndOpen(pdfBytes, "StockValuation_FIFO.pdf");
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Status = "Success",
+                                    action = "exportStockValuationPdfResponse"
+                                }));
+
+                            break;
+                        }
+
+
                     case "SaveRolePermissions":
                         {
                             if (!EnsurePermission(AppPermissions.SETTINGS,"SaveRolePermissions", webView))
@@ -4317,37 +4623,316 @@ namespace DhanSutra
                             break;
                         }
 
+
+                    case "exportVoucherReportPdf":
+                        {
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var fromDate = DateTime.ParseExact(
+                                p.Value<string>("From"),
+                                "yyyy-MM-dd",
+                                CultureInfo.InvariantCulture);
+
+                            var toDate = DateTime.ParseExact(
+                                p.Value<string>("To"),
+                                "yyyy-MM-dd",
+                                CultureInfo.InvariantCulture);
+
+                            var voucherType = p.Value<string>("VoucherType");
+
+                            var pdfBytes = db.ExportVoucherReportPdf(
+                                fromDate,
+                                toDate,
+                                voucherType
+                            );
+
+                            SaveAndOpen(pdfBytes, "VoucherReport.pdf");
+                            break;
+                        }
+
                     case "GetDayBook":
                         {
                             if (!EnsurePermission(AppPermissions.REPORTS, "GetDayBook", webView))
                                 break;
+
                             var p = req.Payload as JObject;
                             if (p == null) break;
 
-                            var from = p.Value<string>("From");
-                            var to = p.Value<string>("To");
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
 
-                            var data = db.GetDayBook(from, to);
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+
+                                toDate = DateTime.ParseExact(
+                                    toStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch (FormatException)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "GetDayBookResponse"
+                                    }));
+                                break;
+                            }
+
+                            // Optional but recommended: date range validation
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "GetDayBookResponse"
+                                    }));
+                                break;
+                            }
+
+                            // DB call with DateTime
+                            var data = db.GetDayBook(fromDate, toDate);
 
                             var response = new
                             {
                                 Status = "Success",
                                 Data = data,
-                                action= "GetDayBookResponse"
+                                action = "GetDayBookResponse"
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
-                            break;
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response));
 
-                            
+                            break;
                         }
+
+
+                        
+                    case "exportDayBookPdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "exportDayBookPdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+
+                                toDate = DateTime.ParseExact(
+                                    toStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch (FormatException)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        success = false,
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "exportDayBookPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        success = false,
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "exportDayBookPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            var pdfBytes = db.ExportDayBookPdf(fromDate, toDate);
+
+                            SaveAndOpen(pdfBytes, "DayBook.pdf");
+
+                            // Optional success response (useful for UI feedback)
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    success = true,
+                                    action = "exportDayBookPdfResponse"
+                                }));
+
+                            break;
+                        }
+                    case "exportCashBookPdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "exportCashBookPdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+
+                                toDate = DateTime.ParseExact(
+                                    toStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch (FormatException)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "exportDayBookPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "exportCashBookPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            var pdfBytes = db.ExportCashBookPdf(fromDate, toDate);
+
+                            SaveAndOpen(pdfBytes, "CashBook.pdf");
+
+                            // Optional success response (useful for UI feedback)
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Status = "Success",
+                                    action = "exportCashBookPdfResponse"
+                                }));
+
+                            break;
+                        }
+                    case "exportBankBookPdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "exportBankBookPdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+
+                                toDate = DateTime.ParseExact(
+                                    toStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch (FormatException)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "exportBankBookPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "exportBankBookPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            var pdfBytes = db.ExportBankBookPdf(fromDate, toDate);
+
+                            SaveAndOpen(pdfBytes, "BankBook.pdf");
+
+                            // Optional success response (useful for UI feedback)
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Status = "Success",
+                                    action = "exportBankBookPdfResponse"
+                                }));
+
+                            break;
+                        }
+
                     case "getVoucherReport":
                         {
                             if (!EnsurePermission(AppPermissions.REPORTS, "getVoucherReport", webView))
                                 break;
                             var p = req.Payload as JObject;
-                            var from = p.Value<string>("From");
-                            var to = p.Value<string>("To");
+                            
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            var from = DateTime.ParseExact(fromStr, "yyyy-MM-dd",  CultureInfo.InvariantCulture );
+
+                            var to = DateTime.ParseExact(toStr,"yyyy-MM-dd", CultureInfo.InvariantCulture );
                             var voucherType = p.Value<string>("VoucherType");
 
                             var rows = db.GetVoucherReport(from, to, voucherType);
@@ -4371,10 +4956,52 @@ namespace DhanSutra
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
-                            string from = payload.Value<string>("From");
-                            string to = payload.Value<string>("To");
+                            var fromStr = payload.Value<string>("From");
+                            var toStr = payload.Value<string>("To");
 
-                            var pl = db.GetProfitAndLoss(from, to);
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+
+                                toDate = DateTime.ParseExact(
+                                    toStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch (FormatException)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "getProfitLossResult"
+                                    }));
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "getProfitLossResult"
+                                    }));
+                                break;
+                            }
+
+                            // ✅ Strongly typed call
+                            ProfitLossReportDto pl = db.GetProfitAndLoss(fromDate, toDate);
 
                             var response = new
                             {
@@ -4383,20 +5010,50 @@ namespace DhanSutra
                                 report = pl
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response)
+                            );
                             break;
                         }
+
                     case "GetStockSummary":
                         {
                             if (!EnsurePermission(AppPermissions.REPORTS, "GetStockSummary", webView))
                                 break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
-                            string asOf = payload.Value<string>("AsOf") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+                            // ----------------------------
+                            // Parse AsOf (optional)
+                            // ----------------------------
+                            DateTime asOfDate;
+                            var asOfStr = payload.Value<string>("AsOf");
+
+                            if (!string.IsNullOrEmpty(asOfStr))
+                            {
+                                if (!DateTime.TryParse(asOfStr, out asOfDate))
+                                {
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(new
+                                        {
+                                            success = false,
+                                            message = "Invalid AsOf date",
+                                            action = "StockSummaryResult"
+                                        }));
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                // Default AsOf = today
+                                asOfDate = DateTime.UtcNow.Date;
+                            }
 
                             var stockSvc = new StockValuationService();
-                            var summary = stockSvc.GetStockSummary(asOf);
+
+                            // ✅ DateTime → DateTime
+                            var summary = stockSvc.GetStockSummary(asOfDate);
 
                             var response = new
                             {
@@ -4405,45 +5062,231 @@ namespace DhanSutra
                                 data = summary
                             };
 
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response));
+
                             break;
                         }
+                    case "exportProfitLossPdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "exportProfitLossPdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+
+                                toDate = DateTime.ParseExact(
+                                    toStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch (FormatException)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "exportProfitLossPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "exportProfitLossPdfResponse"
+                                    }));
+                                break;
+                            }
+
+                            // ✅ Get report
+                            var report = db.GetProfitAndLoss(fromDate, toDate);
+
+                            // ✅ Generate PDF bytes
+                            var doc = new ProfitLossPdfDocument(report, fromDate, toDate);
+                            var pdfBytes = doc.GeneratePdf();
+
+                            SaveAndOpen(pdfBytes, "ProfitAndLoss.pdf");
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Status = "Success",
+                                    action = "exportProfitLossPdfResponse"
+                                }));
+
+                            break;
+                        }
+                    case "exportBalanceSheetPdf":
+{
+    if (!EnsurePermission(AppPermissions.REPORTS, "exportBalanceSheetPdf", webView))
+        break;
+
+    var p = req.Payload as JObject;
+    if (p == null) break;
+
+    var fromStr = p.Value<string>("From");
+    var toStr = p.Value<string>("To");
+
+    DateTime fromDate;
+    DateTime toDate;
+
+    try
+    {
+        fromDate = DateTime.ParseExact(
+            fromStr, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        toDate = DateTime.ParseExact(
+            toStr, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+    catch
+    {
+        webView.CoreWebView2.PostWebMessageAsJson(
+            JsonConvert.SerializeObject(new
+            {
+                Status = "Error",
+                Message = "Invalid date format. Expected yyyy-MM-dd.",
+                action = "exportBalanceSheetPdfResponse"
+            }));
+        break;
+    }
+
+    if (fromDate > toDate)
+    {
+        webView.CoreWebView2.PostWebMessageAsJson(
+            JsonConvert.SerializeObject(new
+            {
+                Status = "Error",
+                Message = "'From' date cannot be greater than 'To' date.",
+                action = "exportBalanceSheetPdfResponse"
+            }));
+        break;
+    }
+
+    // -------------------------------------------------
+    // 1️⃣ FIRST: Get Profit & Loss (for retained earnings)
+    // -------------------------------------------------
+    var pl = db.GetProfitAndLoss(fromDate, toDate);
+
+    decimal netProfit = 0;
+    if (pl.NetProfit > 0)
+        netProfit = pl.NetProfit;
+    else if (pl.NetLoss > 0)
+        netProfit = -pl.NetLoss;
+
+    // -------------------------------------------------
+    // 2️⃣ SECOND: Get Balance Sheet (with net profit)
+    // -------------------------------------------------
+    var report = db.GetBalanceSheet(fromDate, toDate, netProfit);
+
+    // -------------------------------------------------
+    // 3️⃣ Generate PDF
+    // -------------------------------------------------
+    var doc = new BalanceSheetPdfDocument(report, fromDate, toDate);
+    var pdfBytes = doc.GeneratePdf();
+
+    SaveAndOpen(pdfBytes, "BalanceSheet.pdf");
+
+    // -------------------------------------------------
+    // 4️⃣ Notify UI
+    // -------------------------------------------------
+    webView.CoreWebView2.PostWebMessageAsJson(
+        JsonConvert.SerializeObject(new
+        {
+            Status = "Success",
+            action = "exportBalanceSheetPdfResponse"
+        }));
+
+    break;
+}
+
+
 
                     case "getBalanceSheet":
                         {
-
-
-                            if (!EnsurePermission(AppPermissions.REPORTS,"getBalanceSheet",webView))
+                            if (!EnsurePermission(AppPermissions.REPORTS, "getBalanceSheet", webView))
                                 break;
-
 
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
-                            string asOf = payload.Value<string>("AsOf");
+                            var fromStr = payload.Value<string>("From");
+                            var toStr = payload.Value<string>("To");
 
-                            // -----------------------------------------
-                            // STEP 1: Calculate Profit & Loss up to AsOf
-                            // -----------------------------------------
-                            // NOTE: fromDate should be your financial year start
-                            string financialYearStart = "2025-04-01"; // adjust as needed
+                            DateTime fromDate;
+                            DateTime toDate;
 
-                            var pl = db.GetProfitAndLoss(financialYearStart, asOf);
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr, "yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-                            // Net profit as signed value
-                            decimal netProfit =
-                                pl.NetProfit > 0
-                                    ? pl.NetProfit
-                                    : -pl.NetLoss;
+                                toDate = DateTime.ParseExact(
+                                    toStr, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                            }
+                            catch
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "getBalanceSheetResult"
+                                    }));
+                                break;
+                            }
 
-                            // -----------------------------------------
-                            // STEP 2: Generate Balance Sheet USING P&L RESULT
-                            // -----------------------------------------
-                            var bs = db.GetBalanceSheet(asOf, netProfit);
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "getBalanceSheetResult"
+                                    }));
+                                break;
+                            }
 
-                            // -----------------------------------------
-                            // STEP 3: Send response
-                            // -----------------------------------------
+                            // -------------------------------------------------
+                            // 1️⃣ FIRST: Get Profit & Loss for the period
+                            // -------------------------------------------------
+                            var pl = db.GetProfitAndLoss(fromDate, toDate);
+
+                            decimal netProfit = 0;
+                            if (pl.NetProfit > 0)
+                                netProfit = pl.NetProfit;
+                            else if (pl.NetLoss > 0)
+                                netProfit = -pl.NetLoss;
+
+                            // -------------------------------------------------
+                            // 2️⃣ SECOND: Get Balance Sheet (with net profit)
+                            // -------------------------------------------------
+                            var bs = db.GetBalanceSheet(fromDate, toDate, netProfit);
+
+                            // -------------------------------------------------
+                            // 3️⃣ Send response
+                            // -------------------------------------------------
                             var response = new
                             {
                                 action = "getBalanceSheetResult",
@@ -4458,19 +5301,95 @@ namespace DhanSutra
                             break;
                         }
 
+
                     case "getFIFOValuation":
                         {
                             if (!EnsurePermission(AppPermissions.REPORTS, "getFIFOValuation", webView))
                                 break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
-                            string asOf = payload.Value<string>("AsOf") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
-                            string from = payload.Value<string>("From"); // optional
-                            string to = payload.Value<string>("To") ?? asOf;
+                            // ----------------------------
+                            // Parse AsOf (required / fallback = today)
+                            // ----------------------------
+                            DateTime asOfDate;
+                            var asOfStr = payload.Value<string>("AsOf");
 
+                            if (!string.IsNullOrEmpty(asOfStr))
+                            {
+                                if (!DateTime.TryParse(asOfStr, out asOfDate))
+                                {
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(new
+                                        {
+                                            success = false,
+                                            message = "Invalid AsOf date",
+                                            action = "getFIFOValuationResult"
+                                        }));
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                asOfDate = DateTime.UtcNow.Date;
+                            }
+
+                            // ----------------------------
+                            // Parse optional From / To
+                            // ----------------------------
+                            DateTime? fromDate = null;
+                            DateTime? toDate = null;
+
+                            var fromStr = payload.Value<string>("From");
+                            var toStr = payload.Value<string>("To");
+
+                            if (!string.IsNullOrEmpty(fromStr))
+                            {
+                                if (!DateTime.TryParse(fromStr, out var fd))
+                                {
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(new
+                                        {
+                                            success = false,
+                                            message = "Invalid From date",
+                                            action = "getFIFOValuationResult"
+                                        }));
+                                    break;
+                                }
+                                fromDate = fd;
+                            }
+
+                            if (!string.IsNullOrEmpty(toStr))
+                            {
+                                if (!DateTime.TryParse(toStr, out var td))
+                                {
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(new
+                                        {
+                                            success = false,
+                                            message = "Invalid To date",
+                                            action = "getFIFOValuationResult"
+                                        }));
+                                    break;
+                                }
+                                toDate = td;
+                            }
+                            else
+                            {
+                                // Default To = AsOf
+                                toDate = asOfDate;
+                            }
+
+                            // ----------------------------
+                            // Call FIFO service (DateTime only)
+                            // ----------------------------
                             var svc = new StockValuationService();
-                            var rows = svc.CalculateStockValuationFIFO(asOf, from, to);
+                            var rows = svc.CalculateStockValuationFIFO(
+                                asOfDate,
+                                fromDate,
+                                toDate
+                            );
 
                             var response = new
                             {
@@ -4478,22 +5397,62 @@ namespace DhanSutra
                                 success = true,
                                 data = rows
                             };
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response));
+
                             break;
                         }
+
 
                     case "getFIFOTotals":
                         {
                             if (!EnsurePermission(AppPermissions.REPORTS, "getFIFOTotals", webView))
                                 break;
+
                             var payload = req.Payload as JObject;
                             if (payload == null) break;
 
-                            string from = payload.Value<string>("From");
-                            string to = payload.Value<string>("To") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+                            var fromStr = payload.Value<string>("From");
+                            var toStr = payload.Value<string>("To");
+
+                            if (!DateTime.TryParse(fromStr, out var fromDate))
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        success = false,
+                                        message = "Invalid From date",
+                                        action = "getFIFOTotalsResult"
+                                    }));
+                                break;
+                            }
+
+                            DateTime toDate;
+                            if (!string.IsNullOrEmpty(toStr))
+                            {
+                                if (!DateTime.TryParse(toStr, out toDate))
+                                {
+                                    webView.CoreWebView2.PostWebMessageAsJson(
+                                        JsonConvert.SerializeObject(new
+                                        {
+                                            success = false,
+                                            message = "Invalid To date",
+                                            action = "getFIFOTotalsResult"
+                                        }));
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                // Default To = today
+                                toDate = DateTime.UtcNow.Date;
+                            }
 
                             var svc = new StockValuationService();
-                            var totals = svc.ComputeTotalsFIFO(from, to);
+
+                            // ✅ DateTime → DateTime
+                            var totals = svc.ComputeTotalsFIFO(fromDate, toDate);
 
                             var response = new
                             {
@@ -4502,9 +5461,13 @@ namespace DhanSutra
                                 closingStock = totals.ClosingStockTotal,
                                 cogs = totals.PeriodCogsTotal
                             };
-                            webView.CoreWebView2.PostWebMessageAsJson(JsonConvert.SerializeObject(response));
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(response));
+
                             break;
                         }
+
 
                     case "updateAccount":
                         {
@@ -4596,10 +5559,27 @@ namespace DhanSutra
                                 break;
 
                             var p = req.Payload as JObject;
-                            var from = p.Value<string>("From");
-                            var to = p.Value<string>("To");
+                            if (p == null) break;
 
-                            CashBookDto dto = db.GetCashBook(from, to);
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            if (!DateTime.TryParse(fromStr, out var fromDate) ||
+                                !DateTime.TryParse(toStr, out var toDate))
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format",
+                                        action = "getCashBookResult"
+                                    }));
+                                break;
+                            }
+
+                            // ✅ Call with DateTime
+                            CashBookDto dto = db.GetCashBook(fromDate, toDate);
+
 
                             var response = new
                             {
@@ -4614,6 +5594,78 @@ namespace DhanSutra
                             );
                             break;
                         }
+                    case "exportTrialBalancePdf":
+                        {
+                            if (!EnsurePermission(AppPermissions.REPORTS, "exportTrialBalancePdf", webView))
+                                break;
+
+                            var p = req.Payload as JObject;
+                            if (p == null) break;
+
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            DateTime fromDate;
+                            DateTime toDate;
+
+                            try
+                            {
+                                fromDate = DateTime.ParseExact(
+                                    fromStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+
+                                toDate = DateTime.ParseExact(
+                                    toStr,
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                );
+                            }
+                            catch (FormatException)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format. Expected yyyy-MM-dd.",
+                                        action = "exportTrialBalancePdfResponse"
+                                    })
+                                );
+                                break;
+                            }
+
+                            if (fromDate > toDate)
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "'From' date cannot be greater than 'To' date.",
+                                        action = "exportTrialBalancePdfResponse"
+                                    })
+                                );
+                                break;
+                            }
+
+                            // ✅ SAME STYLE AS DAY BOOK
+                            var pdfBytes = db.ExportTrialBalancePdf(fromDate, toDate);
+
+                            SaveAndOpen(pdfBytes, "TrialBalance.pdf");
+
+                            webView.CoreWebView2.PostWebMessageAsJson(
+                                JsonConvert.SerializeObject(new
+                                {
+                                    Status = "Success",
+                                    action = "exportTrialBalancePdfResponse"
+                                })
+                            );
+
+                            break;
+                        }
+
+
+
 
                     case "getBankBook":
                         {
@@ -4621,10 +5673,27 @@ namespace DhanSutra
                                 break;
 
                             var p = req.Payload as JObject;
-                            var from = p.Value<string>("From");
-                            var to = p.Value<string>("To");
+                            if (p == null) break;
 
-                            CashBookDto dto = db.GetBankBook(from, to);
+                            var fromStr = p.Value<string>("From");
+                            var toStr = p.Value<string>("To");
+
+                            if (!DateTime.TryParse(fromStr, out var fromDate) ||
+                                !DateTime.TryParse(toStr, out var toDate))
+                            {
+                                webView.CoreWebView2.PostWebMessageAsJson(
+                                    JsonConvert.SerializeObject(new
+                                    {
+                                        Status = "Error",
+                                        Message = "Invalid date format",
+                                        action = "getBankBookResult"
+                                    }));
+                                break;
+                            }
+
+                            // ✅ Call with DateTime
+                            CashBookDto dto = db.GetBankBook(fromDate, toDate);
+
 
                             var response = new
                             {
@@ -4699,11 +5768,7 @@ namespace DhanSutra
                             );
                             break;
                         }
-
                         
-
-
-
                 }
             }
 
@@ -4777,7 +5842,33 @@ namespace DhanSutra
 
             return true;
         }
+        public void SaveAndOpen(byte[] fileBytes, string fileName)
+        {
+            if (fileBytes == null || fileBytes.Length == 0)
+                throw new Exception("File content is empty.");
 
+            // Create Reports folder if not exists
+            var reportsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "BillingApp",
+                "Reports");
+
+            if (!Directory.Exists(reportsDir))
+                Directory.CreateDirectory(reportsDir);
+
+            // Full file path
+            var filePath = Path.Combine(reportsDir, fileName);
+
+            // Write file
+            File.WriteAllBytes(filePath, fileBytes);
+
+            // Open file with default application
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = filePath,
+                UseShellExecute = true
+            });
+        }
         public static byte[] GenerateInvoicePdfBytes(InvoiceFullDto invoice)
         {
             using (var ms = new MemoryStream())
@@ -4843,6 +5934,7 @@ namespace DhanSutra
 
         }
     }
+
     public class WebRequestMessage
     {
         public string Action { get; set; }
@@ -4909,6 +6001,10 @@ namespace DhanSutra
                 return null;
             }
         }
-    }
+       
+
+
+
+}
 
 }

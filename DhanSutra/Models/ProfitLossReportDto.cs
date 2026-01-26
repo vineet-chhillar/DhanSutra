@@ -8,16 +8,22 @@ namespace DhanSutra.Models
 {
     public class ProfitLossReportDto
     {
-        public string From { get; set; }
-        public string To { get; set; }
+        public DateTime From { get; set; }
+        public DateTime To { get; set; }
 
-        public List<ProfitLossRow> Income { get; set; } = new List<ProfitLossRow>();
-        public List<ProfitLossRow> Expenses { get; set; } = new List<ProfitLossRow>();
+        public List<ProfitLossRow> Income { get; set; }
+        public List<ProfitLossRow> Expenses { get; set; }
 
         public decimal TotalIncome { get; set; }
         public decimal TotalExpenses { get; set; }
+        public decimal NetProfit { get; set; }
+        public decimal NetLoss { get; set; }
 
-        public decimal NetProfit { get; set; }   // positive means profit
-        public decimal NetLoss { get; set; }     // positive means loss
+        public ProfitLossReportDto()
+        {
+            Income = new List<ProfitLossRow>();
+            Expenses = new List<ProfitLossRow>();
+        }
     }
+
 }

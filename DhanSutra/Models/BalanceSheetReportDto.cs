@@ -8,7 +8,9 @@ namespace DhanSutra.Models
 {
     public class BalanceSheetReportDto
     {
-        public string AsOf { get; set; }
+        //public DateTime AsOf { get; set; }
+        public DateTime From { get; set; }
+        public DateTime To { get; set; }
         public BalanceSheetGroup Assets { get; set; } = new BalanceSheetGroup();
         public BalanceSheetGroup Liabilities { get; set; } = new BalanceSheetGroup();
         public BalanceSheetGroup Capital { get; set; } = new BalanceSheetGroup();

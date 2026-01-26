@@ -13,8 +13,8 @@ namespace DhanSutra.Models
 
         public string Cust_Supp_Name { get; set; }
         public int Cust_Supp_No { get; set; }
-        public string From { get; set; }    // yyyy-MM-dd
-        public string To { get; set; }      // yyyy-MM-dd
+        public DateTime From { get; set; }    // yyyy-MM-dd
+        public DateTime To { get; set; }      // yyyy-MM-dd
         public decimal OpeningBalance { get; set; } // Dr positive, Cr negative (we'll normalize in UI)
         public string OpeningSide { get; set; }     // "Dr" or "Cr"
         public List<LedgerRowDto> Rows { get; set; } = new List<LedgerRowDto>();

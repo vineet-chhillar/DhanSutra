@@ -7,6 +7,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
+using QuestPDF.Fluent;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -8978,90 +8979,90 @@ VALUES (@jid,@acc,@dr,@cr);
         }
 
 
-//        public List<AccountDto> GetAccountsForVoucher(string voucherType)
-//        {
-//            var list = new List<AccountDto>();
+        //        public List<AccountDto> GetAccountsForVoucher(string voucherType)
+        //        {
+        //            var list = new List<AccountDto>();
 
-//            using (var conn = new SQLiteConnection(_connectionString))
-//            {
-//                conn.Open();
+        //            using (var conn = new SQLiteConnection(_connectionString))
+        //            {
+        //                conn.Open();
 
-//                using (var cmd = conn.CreateCommand())
-//                {
-//                    var sql = @"
-//SELECT AccountId, AccountName, AccountType
-//FROM Accounts
-//WHERE IFNULL(IsActive,1) = 1
-//  AND (
-//        (
-//          ParentAccountId IS NOT NULL
-//          AND AccountId NOT IN (
-//              SELECT DISTINCT ParentAccountId
-//              FROM Accounts
-//              WHERE ParentAccountId IS NOT NULL
-//          )
-//        )
-//        OR AccountName IN ('Cash','Bank')
-//      )
-//";
+        //                using (var cmd = conn.CreateCommand())
+        //                {
+        //                    var sql = @"
+        //SELECT AccountId, AccountName, AccountType
+        //FROM Accounts
+        //WHERE IFNULL(IsActive,1) = 1
+        //  AND (
+        //        (
+        //          ParentAccountId IS NOT NULL
+        //          AND AccountId NOT IN (
+        //              SELECT DISTINCT ParentAccountId
+        //              FROM Accounts
+        //              WHERE ParentAccountId IS NOT NULL
+        //          )
+        //        )
+        //        OR AccountName IN ('Cash','Bank')
+        //      )
+        //";
 
-//                    switch (voucherType)
-//                    {
-//                        case "JV": // Journal Voucher
-//                            sql += @"
-//AND AccountType IN ('Income','Expense','Asset','Liability','Equity')
-//AND AccountName NOT IN ('Cash','Bank')
-//";
-//                            break;
+        //                    switch (voucherType)
+        //                    {
+        //                        case "JV": // Journal Voucher
+        //                            sql += @"
+        //AND AccountType IN ('Income','Expense','Asset','Liability','Equity')
+        //AND AccountName NOT IN ('Cash','Bank')
+        //";
+        //                            break;
 
-//                        case "PV": // Payment Voucher
-//                            sql += @"
-//AND (
-//    AccountType IN ('Expense','Asset','Liability')
-//    OR AccountName IN ('Cash','Bank')
-//)
-//";
-//                            break;
+        //                        case "PV": // Payment Voucher
+        //                            sql += @"
+        //AND (
+        //    AccountType IN ('Expense','Asset','Liability')
+        //    OR AccountName IN ('Cash','Bank')
+        //)
+        //";
+        //                            break;
 
-//                        case "RV": // Receipt Voucher
-//                            sql += @"
-//AND (
-//    AccountType IN ('Income','Asset','Liability')
-//    OR AccountName IN ('Cash','Bank')
-//)
-//";
-//                            break;
+        //                        case "RV": // Receipt Voucher
+        //                            sql += @"
+        //AND (
+        //    AccountType IN ('Income','Asset','Liability')
+        //    OR AccountName IN ('Cash','Bank')
+        //)
+        //";
+        //                            break;
 
-//                        case "CV": // Contra Voucher
-//                            sql += @"
-//AND AccountName IN ('Cash','Bank')
-//";
-//                            break;
+        //                        case "CV": // Contra Voucher
+        //                            sql += @"
+        //AND AccountName IN ('Cash','Bank')
+        //";
+        //                            break;
 
-//                        default:
-//                            throw new Exception("Invalid voucher type.");
-//                    }
+        //                        default:
+        //                            throw new Exception("Invalid voucher type.");
+        //                    }
 
-//                    sql += " ORDER BY AccountName;";
+        //                    sql += " ORDER BY AccountName;";
 
-//                    cmd.CommandText = sql;
+        //                    cmd.CommandText = sql;
 
-//                    using (var r = cmd.ExecuteReader())
-//                    {
-//                        while (r.Read())
-//                        {
-//                            list.Add(new AccountDto
-//                            {
-//                                AccountId = r.GetInt64(0),
-//                                AccountName = r.GetString(1)
-//                            });
-//                        }
-//                    }
-//                }
-//            }
+        //                    using (var r = cmd.ExecuteReader())
+        //                    {
+        //                        while (r.Read())
+        //                        {
+        //                            list.Add(new AccountDto
+        //                            {
+        //                                AccountId = r.GetInt64(0),
+        //                                AccountName = r.GetString(1)
+        //                            });
+        //                        }
+        //                    }
+        //                }
+        //            }
 
-//            return list;
-//        }
+        //            return list;
+        //        }
 
 
 
@@ -9073,7 +9074,7 @@ VALUES (@jid,@acc,@dr,@cr);
         //        : $"{now.Year - 1}-{now.Year.ToString().Substring(2)}";
         //}
 
-        public List<TrialBalanceRowDto> GetTrialBalance()
+        public List<TrialBalanceRowDto> GetTrialBalance(DateTime from, DateTime to)
         {
             var rows = new List<TrialBalanceRowDto>();
 
@@ -9094,15 +9095,20 @@ SELECT
 FROM Accounts a
 LEFT JOIN JournalLines jl 
     ON jl.AccountId = a.AccountId
+LEFT JOIN JournalEntries je
+    ON je.JournalId = jl.JournalId
+   AND je.Date BETWEEN @from AND @to   -- ✅ MOVE HERE
 WHERE a.IsActive = 1
   AND NOT EXISTS (
-      SELECT 1
-      FROM Accounts c
-      WHERE c.ParentAccountId = a.AccountId
+      SELECT 1 FROM Accounts c WHERE c.ParentAccountId = a.AccountId
   )
 GROUP BY a.AccountId, a.AccountName, a.AccountType, a.NormalSide
 ORDER BY a.AccountType, a.AccountName;
+;
 ";
+
+                    cmd.Parameters.AddWithValue("@from", from.Date);
+                    cmd.Parameters.AddWithValue("@to", to.Date);
 
                     using (var rd = cmd.ExecuteReader())
                     {
@@ -9130,6 +9136,7 @@ ORDER BY a.AccountType, a.AccountName;
 
             return rows;
         }
+
 
 
         long GetAccountsReceivableId(SQLiteConnection conn, SQLiteTransaction tx)
@@ -9166,7 +9173,7 @@ ORDER BY a.AccountType, a.AccountName;
             }
         }
 
-        public LedgerReportDto GetLedgerReport(long accountId, string from, string to)
+        public LedgerReportDto GetLedgerReport(long accountId, DateTime from, DateTime to)
         {
             var report = new LedgerReportDto
             {
@@ -9182,37 +9189,19 @@ ORDER BY a.AccountType, a.AccountName;
                 // ─────────────────────────────────────────────
                 // 1️⃣ Load account name
                 // ─────────────────────────────────────────────
-                string accountName;
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT AccountName FROM Accounts WHERE AccountId=@aid;";
+                    cmd.CommandText = "SELECT AccountName FROM Accounts WHERE AccountId = @aid;";
                     cmd.Parameters.AddWithValue("@aid", accountId);
 
-                    var o = cmd.ExecuteScalar();
-                    accountName = o?.ToString() ?? $"Account {accountId}";
-                    report.AccountName = accountName;
+                    report.AccountName =
+                        cmd.ExecuteScalar()?.ToString() ?? $"Account {accountId}";
                 }
 
                 // ─────────────────────────────────────────────
-                // 2️⃣ Detect GROUP account (has children)
-                // ─────────────────────────────────────────────
-                bool isGroupAccount;
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = @"
-                SELECT EXISTS(
-                    SELECT 1 FROM Accounts WHERE ParentAccountId = @aid
-                );
-            ";
-                    cmd.Parameters.AddWithValue("@aid", accountId);
-                    isGroupAccount = Convert.ToInt32(cmd.ExecuteScalar()) == 1;
-                }
-
-                // ─────────────────────────────────────────────
-                // 3️⃣ Build accountId list (leaf or group)
+                // 2️⃣ Build accountId list (self + children)
                 // ─────────────────────────────────────────────
                 var accountIds = new HashSet<long>();
-
                 LoadAccountAndChildren(accountId, accountIds, conn);
 
                 if (accountIds.Count == 0)
@@ -9220,20 +9209,12 @@ ORDER BY a.AccountType, a.AccountName;
 
                 string idList = string.Join(",", accountIds);
 
-                report.AccountName += " (Group)";
-
-
-                
+                if (accountIds.Count > 1)
+                    report.AccountName += " (Group)";
 
                 // ─────────────────────────────────────────────
-                // 4️⃣ Opening balance
+                // 3️⃣ Opening Balance (BEFORE FROM DATE)
                 // ─────────────────────────────────────────────
-                // Ensure FROM is start of day in ISO format
-                //string fromDateTime = DateTime
-                //    .Parse(from)
-                //    .Date
-                //    .ToString("yyyy-MM-dd HH:mm:ss");
-
                 decimal opening;
 
                 using (var cmd = conn.CreateCommand())
@@ -9243,11 +9224,9 @@ SELECT IFNULL(SUM(jl.Debit) - SUM(jl.Credit), 0)
 FROM JournalLines jl
 JOIN JournalEntries je ON jl.JournalId = je.JournalId
 WHERE jl.AccountId IN ({idList})
-  AND substr(je.Date, 1, 10) < @from;
+  AND je.CreatedAt < @from;
 ";
-
-                    // @from MUST be yyyy-MM-dd
-                    cmd.Parameters.AddWithValue("@from", from.Substring(0, 10));
+                    cmd.Parameters.AddWithValue("@from", from);
 
                     opening = Convert.ToDecimal(cmd.ExecuteScalar());
                 }
@@ -9255,25 +9234,29 @@ WHERE jl.AccountId IN ({idList})
                 report.OpeningBalance = Math.Abs(opening);
                 report.OpeningSide = opening >= 0 ? "Dr" : "Cr";
 
-
-
                 // ─────────────────────────────────────────────
-                // 5️⃣ Ledger rows
+                // 4️⃣ Ledger Rows (BETWEEN FROM & TO)
                 // ─────────────────────────────────────────────
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = $@"
-                SELECT jl.LineId, je.Date, je.VoucherType, je.VoucherId,
-                       je.Description, jl.Debit, jl.Credit
-                FROM JournalLines jl
-                JOIN JournalEntries je ON jl.JournalId = je.JournalId
-                WHERE jl.AccountId IN ({idList})
-                 AND substr(je.Date, 1, 10) BETWEEN @from AND @to
+SELECT 
+    jl.LineId,
+    je.CreatedAt,
+    je.VoucherType,
+    je.VoucherId,
+    je.Description,
+    jl.Debit,
+    jl.Credit
+FROM JournalLines jl
+JOIN JournalEntries je ON jl.JournalId = je.JournalId
+WHERE jl.AccountId IN ({idList})
+  AND je.CreatedAt BETWEEN @from AND @to
+ORDER BY je.CreatedAt, jl.LineId;
+";
 
-                ORDER BY substr(je.Date, 1, 10), jl.LineId;
-            ";
-                    cmd.Parameters.AddWithValue("@from", from.Substring(0, 10));
-                    cmd.Parameters.AddWithValue("@to", to.Substring(0, 10));
+                    cmd.Parameters.AddWithValue("@from", from);
+                    cmd.Parameters.AddWithValue("@to", to);
 
                     using (var rd = cmd.ExecuteReader())
                     {
@@ -9284,18 +9267,19 @@ WHERE jl.AccountId IN ({idList})
                             decimal debit = rd.IsDBNull(5) ? 0m : rd.GetDecimal(5);
                             decimal credit = rd.IsDBNull(6) ? 0m : rd.GetDecimal(6);
 
-                            running += (debit - credit);
+                            running += debit - credit;
 
                             report.Rows.Add(new LedgerRowDto
                             {
                                 LineId = rd.GetInt64(0),
-                                Date = rd.IsDBNull(1) ? "" : rd.GetString(1),
-                                VoucherType = rd.IsDBNull(2) ? "" : rd.GetString(2),
-                                VoucherId = rd.IsDBNull(3) ? 0 : rd.GetInt64(3),
+                                Date = rd.GetDateTime(1),          // ✅ DateTime now
+                                VoucherType = rd.GetString(2),
+                                VoucherId = rd.GetInt64(3),
                                 Narration = rd.IsDBNull(4) ? "" : rd.GetString(4),
                                 Debit = debit,
                                 Credit = credit,
-                                RunningBalance = Math.Abs(running)
+                                RunningBalance = Math.Abs(running),
+                                RunningSide = running >= 0 ? "Dr" : "Cr"
                             });
                         }
 
@@ -9307,6 +9291,16 @@ WHERE jl.AccountId IN ({idList})
 
             return report;
         }
+        public byte[] ExportStockValuationPdf(DateTime from, DateTime to)
+        {
+            var stockSvc = new StockValuationService();
+            var rows = stockSvc.CalculateStockValuationFIFO(to, from, to);
+
+            var doc = new StockValuationPdfDocument(rows, from, to);
+
+            return doc.GeneratePdf();
+        }
+
         void LoadAccountAndChildren(
     long accountId,
     HashSet<long> accountIds,
@@ -10597,7 +10591,7 @@ WHERE Id = @id;
             }
             return dto;
         }
-        public List<DayBookRowDto> GetDayBook(string from, string to)
+        public List<DayBookRowDto> GetDayBook(DateTime from, DateTime to)
         {
             var list = new List<DayBookRowDto>();
 
@@ -10612,6 +10606,7 @@ WHERE Id = @id;
                      datetime(je.CreatedAt, '+5 hours', '+30 minutes') AS CreatedAt,
                     je.VoucherType,
                     je.VoucherNo,
+                    je.VoucherId, 
                     a.AccountName,
                     jl.Debit,
                     jl.Credit,
@@ -10625,8 +10620,8 @@ WHERE Id = @id;
                 ORDER BY je.CreatedAt, je.JournalId, jl.LineId;
             ";
 
-                    cmd.Parameters.AddWithValue("@from", from);
-                    cmd.Parameters.AddWithValue("@to", to);
+                    cmd.Parameters.AddWithValue("@from", from.Date);
+                    cmd.Parameters.AddWithValue("@to", to.Date);
 
                     using (var r = cmd.ExecuteReader())
                     {
@@ -10634,13 +10629,14 @@ WHERE Id = @id;
                         {
                             list.Add(new DayBookRowDto
                             {
-                                EntryDate = r.GetString(0),
+                                EntryDate = DateTime.Parse(r.GetString(0)),
                                 VoucherType = r.IsDBNull(1) ? "" : r.GetString(1),
                                 VoucherNo = r.IsDBNull(2) ? "" : r.GetString(2),
-                                AccountName = r.GetString(3),
-                                Debit = r.IsDBNull(4) ? 0 : r.GetDecimal(4),
-                                Credit = r.IsDBNull(5) ? 0 : r.GetDecimal(5),
-                                Description = r.IsDBNull(6) ? "" : r.GetString(6)
+                                VoucherId = r.IsDBNull(3) ? 0 : r.GetInt64(3),
+                                AccountName = r.GetString(4),
+                                Debit = r.IsDBNull(5) ? 0 : r.GetDecimal(5),
+                                Credit = r.IsDBNull(6) ? 0 : r.GetDecimal(6),
+                                Description = r.IsDBNull(7) ? "" : r.GetString(7)
                             });
                         }
                     }
@@ -10649,9 +10645,25 @@ WHERE Id = @id;
 
             return list;
         }
+        public byte[] ExportDayBookPdf(DateTime from, DateTime to)
+        {
+            var data = GetDayBook(from, to);
+
+            var doc = new DayBookPdfDocument(data, from, to);
+
+            return doc.GeneratePdf();
+        }
+        public byte[] ExportTrialBalancePdf(DateTime from, DateTime to)
+        {
+            var data = GetTrialBalance(from, to);
+
+            var doc = new TrialBalancePdfDocument(data, from, to);
+
+            return doc.GeneratePdf();
+        }
         public List<VoucherReportRowDto> GetVoucherReport(
-    string from,
-    string to,
+    DateTime from,
+    DateTime to,
     string voucherType
 )
         {
@@ -10666,9 +10678,10 @@ WHERE Id = @id;
                     cmd.CommandText = @"
                 SELECT
                     je.JournalId,
-                    je.Date,
+                    datetime(je.CreatedAt, '+5 hours', '+30 minutes') AS Date,
                     je.VoucherType,
                     je.VoucherNo,
+                    je.VoucherId,
                     je.Description,
                     jl.LineId,
                     jl.AccountId,
@@ -10679,14 +10692,14 @@ WHERE Id = @id;
                 JOIN JournalLines jl ON jl.JournalId = je.JournalId
                 JOIN Accounts a ON a.AccountId = jl.AccountId
                 WHERE je.Date BETWEEN @from AND @to
-                  --AND IFNULL(je.IsReversed, 0) = 0
-                  --AND IFNULL(je.IsReversal, 0) = 0
                   AND (@voucherType IS NULL OR je.VoucherType = @voucherType)
                 ORDER BY je.Date, je.JournalId, jl.LineId;
             ";
 
-                    cmd.Parameters.AddWithValue("@from", from);
-                    cmd.Parameters.AddWithValue("@to", to);
+                    // ✅ DateTime parameters (NOT strings)
+                    cmd.Parameters.AddWithValue("@from", from.Date);
+                    cmd.Parameters.AddWithValue("@to", to.Date);
+
                     cmd.Parameters.AddWithValue(
                         "@voucherType",
                         string.IsNullOrEmpty(voucherType)
@@ -10701,27 +10714,50 @@ WHERE Id = @id;
                             list.Add(new VoucherReportRowDto
                             {
                                 JournalId = r.GetInt64(0),
-                                Date = r.GetString(1),
+
+                                // CreatedAt converted from SQLite string
+                                Date = DateTime.Parse(r.GetString(1)),
+
                                 VoucherType = r.GetString(2),
                                 VoucherNo = r.IsDBNull(3) ? "" : r.GetString(3),
-                                Description = r.IsDBNull(4) ? "" : r.GetString(4),
+                                VoucherId = r.IsDBNull(4) ? 0 : r.GetInt64(4),
+                                Description = r.IsDBNull(5) ? "" : r.GetString(5),
 
-                                LineId = r.GetInt64(5),
-                                AccountId = r.GetInt64(6),
-                                AccountName = r.GetString(7),
+                                LineId = r.GetInt64(6),
+                                AccountId = r.GetInt64(7),
+                                AccountName = r.GetString(8),
 
-                                Debit = r.IsDBNull(8) ? 0 : r.GetDecimal(8),
-                                Credit = r.IsDBNull(9) ? 0 : r.GetDecimal(9),
+                                Debit = r.IsDBNull(9) ? 0 : r.GetDecimal(9),
+                                Credit = r.IsDBNull(10) ? 0 : r.GetDecimal(10),
                             });
                         }
                     }
                 }
             }
+
             return list;
         }
+        public byte[] ExportVoucherReportPdf(
+    DateTime from,
+    DateTime to,
+    string voucherType
+)
+        {
+            var data = GetVoucherReport(from, to, voucherType);
+
+            var doc = new VoucherReportPdfDocument(
+                data,
+                from,
+                to,
+                voucherType
+            );
+
+            return doc.GeneratePdf();
+        }
+
         public CashBookDto GetCashBook(
-    string from,
-    string to
+    DateTime from,
+    DateTime to
 )
         {
             var dto = new CashBookDto();
@@ -10731,46 +10767,61 @@ WHERE Id = @id;
             {
                 conn.Open();
 
-                // 1️⃣ Get all cash accounts
+                // 1️⃣ Get Cash account IDs
                 var cashAccounts = new List<long>();
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT AccountId FROM Accounts WHERE AccountName = 'Cash'";
+                    cmd.CommandText =
+                        "SELECT AccountId FROM Accounts WHERE AccountName = 'Cash'";
                     using (var r = cmd.ExecuteReader())
                         while (r.Read())
                             cashAccounts.Add(r.GetInt64(0));
                 }
 
-                // 2️⃣ Opening Balance
+                if (!cashAccounts.Any())
+                    return dto;
+
+                // 2️⃣ Opening Balance (cash only)
                 decimal opening = 0;
                 foreach (var acc in cashAccounts)
                     opening += GetOpeningBalance(conn, acc, from);
 
                 dto.OpeningBalance = opening;
 
-                // 3️⃣ Transactions
+                // 3️⃣ Fetch ALL voucher lines where cash is involved
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
                 SELECT
-                    je.JournalId, je.Date, je.VoucherType, je.VoucherNo,
+                    je.JournalId,
+                    je.CreatedAt as Date,
+                    je.VoucherType,
+                    je.VoucherNo,
+                    je.VoucherId,
                     je.Description,
-                    jl.LineId, jl.AccountId, a.AccountName,
-                    jl.Debit, jl.Credit
+                    jl.LineId,
+                    jl.AccountId,
+                    a.AccountName,
+                    jl.Debit,
+                    jl.Credit
                 FROM JournalEntries je
                 JOIN JournalLines jl ON jl.JournalId = je.JournalId
                 JOIN Accounts a ON a.AccountId = jl.AccountId
                 WHERE je.Date BETWEEN @from AND @to
-                  --AND IFNULL(je.IsReversed, 0) = 0
-                  --AND IFNULL(je.IsReversal, 0) = 0
-                  AND jl.AccountId IN (
-                      SELECT AccountId FROM Accounts WHERE AccountName = 'Cash'
+                  AND je.JournalId IN (
+                      SELECT DISTINCT jl2.JournalId
+                      FROM JournalLines jl2
+                      WHERE jl2.AccountId IN (
+                          SELECT AccountId
+                          FROM Accounts
+                          WHERE AccountName = 'Cash'
+                      )
                   )
                 ORDER BY je.Date, je.JournalId, jl.LineId;
             ";
 
-                    cmd.Parameters.AddWithValue("@from", from);
-                    cmd.Parameters.AddWithValue("@to", to);
+                    cmd.Parameters.AddWithValue("@from", from.Date);
+                    cmd.Parameters.AddWithValue("@to", to.Date);
 
                     using (var r = cmd.ExecuteReader())
                     {
@@ -10779,15 +10830,18 @@ WHERE Id = @id;
                             rows.Add(new VoucherReportRowDto
                             {
                                 JournalId = r.GetInt64(0),
-                                Date = r.GetString(1),
+                                Date = DateTime.Parse(r.GetString(1)),
                                 VoucherType = r.GetString(2),
                                 VoucherNo = r.IsDBNull(3) ? "" : r.GetString(3),
-                                Description = r.IsDBNull(4) ? "" : r.GetString(4),
-                                LineId = r.GetInt64(5),
-                                AccountId = r.GetInt64(6),
-                                AccountName = r.GetString(7),
-                                Debit = r.IsDBNull(8) ? 0 : r.GetDecimal(8),
-                                Credit = r.IsDBNull(9) ? 0 : r.GetDecimal(9)
+                                VoucherId = r.IsDBNull(4) ? 0 : r.GetInt64(4),
+                                Description = r.IsDBNull(5) ? "" : r.GetString(5),
+
+                                LineId = r.GetInt64(6),
+                                AccountId = r.GetInt64(7),
+                                AccountName = r.GetString(8),
+
+                                Debit = r.IsDBNull(9) ? 0 : r.GetDecimal(9),
+                                Credit = r.IsDBNull(10) ? 0 : r.GetDecimal(10)
                             });
                         }
                     }
@@ -10795,15 +10849,70 @@ WHERE Id = @id;
 
                 dto.Rows = rows;
 
-                // 4️⃣ Closing Balance
+                // 4️⃣ Closing balance (CASH ONLY)
                 dto.ClosingBalance =
                     opening +
-                    rows.Sum(r => r.Debit) -
-                    rows.Sum(r => r.Credit);
+                    rows.Where(r => cashAccounts.Contains(r.AccountId))
+                        .Sum(r => r.Debit - r.Credit);
             }
+            // AFTER rows are fetched
+            decimal runningBalance = dto.OpeningBalance;
+
+            // IMPORTANT: ensure correct order
+            var orderedRows = rows
+                .OrderBy(r => r.Date)
+                .ThenBy(r => r.JournalId)
+                .ThenBy(r => r.LineId)
+                .ToList();
+
+            foreach (var r in orderedRows)
+            {
+                if (r.AccountName == "Cash")
+                {
+                    runningBalance += r.Debit;
+                    runningBalance -= r.Credit;
+
+                    r.RunningBalance = runningBalance;
+                }
+                else
+                {
+                    r.RunningBalance = null; // show blank in UI / PDF
+                }
+            }
+
+            // assign back
+            dto.Rows = orderedRows;
+            dto.ClosingBalance = runningBalance;
+
+            return dto;
 
             return dto;
         }
+        public byte[] ExportCashBookPdf(DateTime from, DateTime to)
+        {
+            var dto = GetCashBook(from, to);
+
+            var document = new CashBookPdfDocument(
+                dto,
+                from,
+                to
+            );
+
+            return document.GeneratePdf();
+        }
+        public byte[] ExportBankBookPdf(DateTime from, DateTime to)
+        {
+            var dto = GetBankBook(from, to);
+
+            var document = new BankBookPdfDocument(
+                dto,
+                from,
+                to
+            );
+
+            return document.GeneratePdf();
+        }
+
         public DashboardDto GetDashboardSummary()
         {
             var dto = new DashboardDto
@@ -10816,12 +10925,12 @@ WHERE Id = @id;
             {
                 conn.Open();
 
-                var today = DateTime.Today.ToString("yyyy-MM-dd");
-                var monthStart = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)
-                    .ToString("yyyy-MM-dd");
+                var today = DateTime.Today;
+                var monthStart = new DateTime(today.Year, today.Month, 1);
 
-                // 1️⃣ Cash Balance
+                // ✅ PASS DateTime directly
                 dto.CashBalance = GetCashBook(monthStart, today).ClosingBalance;
+
 
                 // 2️⃣ Bank Balance
                 dto.BankBalance = GetBankBook(monthStart, today).ClosingBalance;
@@ -10833,25 +10942,23 @@ WHERE Id = @id;
 
                 // 4️⃣ Today Sales
                 dto.TodaySales = ExecuteScalarDecimal(conn, @"
-            SELECT 
-    IFNULL(SUM(
-        CASE
-            WHEN je.VoucherType = 'SalesInvoice'
-                THEN jl.Credit
+    SELECT 
+        IFNULL(SUM(
+            CASE
+                WHEN je.VoucherType = 'SalesInvoice'
+                    THEN jl.Credit
+                WHEN je.VoucherType = 'Reversal of SalesInvoice'
+                    THEN -jl.Debit
+                WHEN je.VoucherType = 'SalesReturn'
+                    THEN -jl.Debit
+                ELSE 0
+            END
+        ), 0)
+    FROM JournalEntries je
+    JOIN JournalLines jl ON jl.JournalId = je.JournalId
+    WHERE je.Date = @today
+", today);
 
-            WHEN je.VoucherType = 'Reversal of SalesInvoice'
-                THEN -jl.Debit
-
-            WHEN je.VoucherType = 'SalesReturn'
-                THEN -jl.Debit
-
-            ELSE 0
-        END
-    ), 0) AS NetSales
-FROM JournalEntries je
-JOIN JournalLines jl ON jl.JournalId = je.JournalId
-WHERE je.Date = @today
-        ", today);
 
                 // 5️⃣ Today Purchase
                 dto.TodayPurchase = ExecuteScalarDecimal(conn, @"
@@ -10921,22 +11028,36 @@ ORDER BY Week;
                     }
                 }
 
-                // 8️⃣ Cash & Bank Trend (Last 7 Days)
                 for (int i = 6; i >= 0; i--)
                 {
-                    var d = DateTime.Today.AddDays(-i).ToString("yyyy-MM-dd");
+                    var d = DateTime.Today.AddDays(-i);
 
                     dto.CashBankTrend.Add(new CashBankTrendDto
                     {
-                        Date = d,
+                        Date = d.ToString("yyyy-MM-dd"), // for chart/UI
                         Cash = GetCashBook(d, d).ClosingBalance,
                         Bank = GetBankBook(d, d).ClosingBalance
                     });
                 }
+
             }
 
             return dto;
         }
+        decimal ExecuteScalarDecimal(
+    SQLiteConnection conn,
+    string sql,
+    DateTime date
+)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = sql;
+                cmd.Parameters.AddWithValue("@today", date.Date);
+                return Convert.ToDecimal(cmd.ExecuteScalar() ?? 0);
+            }
+        }
+
         private decimal ExecuteScalarDecimal(SQLiteConnection conn, string sql, string date)
         {
             using (var cmd = conn.CreateCommand())
@@ -11022,7 +11143,7 @@ ORDER BY Week;
         }
 
 
-        public DashboardProfitLossDto GetDashboardProfitLoss(string from, string to)
+        public DashboardProfitLossDto GetDashboardProfitLoss(DateTime from, DateTime to)
         {
             var pl = GetProfitAndLoss(from, to);
 
@@ -11112,10 +11233,7 @@ ORDER BY AccountName;
 
 
 
-        public CashBookDto GetBankBook(
-    string from,
-    string to
-)
+        public CashBookDto GetBankBook(DateTime from, DateTime to)
         {
             var dto = new CashBookDto();
             var rows = new List<VoucherReportRowDto>();
@@ -11124,46 +11242,61 @@ ORDER BY AccountName;
             {
                 conn.Open();
 
-                // 1️⃣ Get all cash accounts
-                var cashAccounts = new List<long>();
+                // 1️⃣ Get all Bank account IDs
+                var bankAccounts = new List<long>();
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT AccountId FROM Accounts WHERE AccountName = 'Bank'";
+                    cmd.CommandText =
+                        "SELECT AccountId FROM Accounts WHERE AccountName = 'Bank'";
                     using (var r = cmd.ExecuteReader())
                         while (r.Read())
-                            cashAccounts.Add(r.GetInt64(0));
+                            bankAccounts.Add(r.GetInt64(0));
                 }
 
-                // 2️⃣ Opening Balance
+                if (!bankAccounts.Any())
+                    return dto;
+
+                // 2️⃣ Opening Balance (Bank only)
                 decimal opening = 0;
-                foreach (var acc in cashAccounts)
+                foreach (var acc in bankAccounts)
                     opening += GetOpeningBalance(conn, acc, from);
 
                 dto.OpeningBalance = opening;
 
-                // 3️⃣ Transactions
+                // 3️⃣ Fetch ALL voucher lines where Bank is involved
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
                 SELECT
-                    je.JournalId, je.Date, je.VoucherType, je.VoucherNo,
+                    je.JournalId,
+                    je.CreatedAt AS Date,
+                    je.VoucherType,
+                    je.VoucherNo,
+                    je.VoucherId,
                     je.Description,
-                    jl.LineId, jl.AccountId, a.AccountName,
-                    jl.Debit, jl.Credit
+                    jl.LineId,
+                    jl.AccountId,
+                    a.AccountName,
+                    jl.Debit,
+                    jl.Credit
                 FROM JournalEntries je
                 JOIN JournalLines jl ON jl.JournalId = je.JournalId
                 JOIN Accounts a ON a.AccountId = jl.AccountId
                 WHERE je.Date BETWEEN @from AND @to
-                  --AND IFNULL(je.IsReversed, 0) = 0
-                  --AND IFNULL(je.IsReversal, 0) = 0
-                  AND jl.AccountId IN (
-                      SELECT AccountId FROM Accounts WHERE AccountName = 'Bank'
+                  AND je.JournalId IN (
+                      SELECT DISTINCT jl2.JournalId
+                      FROM JournalLines jl2
+                      WHERE jl2.AccountId IN (
+                          SELECT AccountId
+                          FROM Accounts
+                          WHERE AccountName = 'Bank'
+                      )
                   )
                 ORDER BY je.Date, je.JournalId, jl.LineId;
             ";
 
-                    cmd.Parameters.AddWithValue("@from", from);
-                    cmd.Parameters.AddWithValue("@to", to);
+                    cmd.Parameters.AddWithValue("@from", from.Date);
+                    cmd.Parameters.AddWithValue("@to", to.Date);
 
                     using (var r = cmd.ExecuteReader())
                     {
@@ -11172,15 +11305,18 @@ ORDER BY AccountName;
                             rows.Add(new VoucherReportRowDto
                             {
                                 JournalId = r.GetInt64(0),
-                                Date = r.GetString(1),
+                                Date = DateTime.Parse(r.GetString(1)),
                                 VoucherType = r.GetString(2),
                                 VoucherNo = r.IsDBNull(3) ? "" : r.GetString(3),
-                                Description = r.IsDBNull(4) ? "" : r.GetString(4),
-                                LineId = r.GetInt64(5),
-                                AccountId = r.GetInt64(6),
-                                AccountName = r.GetString(7),
-                                Debit = r.IsDBNull(8) ? 0 : r.GetDecimal(8),
-                                Credit = r.IsDBNull(9) ? 0 : r.GetDecimal(9)
+                                VoucherId = r.IsDBNull(4) ? 0 : r.GetInt64(4),
+                                Description = r.IsDBNull(5) ? "" : r.GetString(5),
+
+                                LineId = r.GetInt64(6),
+                                AccountId = r.GetInt64(7),
+                                AccountName = r.GetString(8),
+
+                                Debit = r.IsDBNull(9) ? 0 : r.GetDecimal(9),
+                                Credit = r.IsDBNull(10) ? 0 : r.GetDecimal(10)
                             });
                         }
                     }
@@ -11188,20 +11324,51 @@ ORDER BY AccountName;
 
                 dto.Rows = rows;
 
-                // 4️⃣ Closing Balance
+                // 4️⃣ Closing Balance (BANK ONLY)
                 dto.ClosingBalance =
                     opening +
-                    rows.Sum(r => r.Debit) -
-                    rows.Sum(r => r.Credit);
+                    rows.Where(r => bankAccounts.Contains(r.AccountId))
+                        .Sum(r => r.Debit - r.Credit);
             }
+            // AFTER rows are fetched
+            decimal runningBalance = dto.OpeningBalance;
+
+            // IMPORTANT: ensure correct order
+            var orderedRows = rows
+                .OrderBy(r => r.Date)
+                .ThenBy(r => r.JournalId)
+                .ThenBy(r => r.LineId)
+                .ToList();
+
+            foreach (var r in orderedRows)
+            {
+                if (r.AccountName == "Bank")
+                {
+                    runningBalance += r.Debit;
+                    runningBalance -= r.Credit;
+
+                    r.RunningBalance = runningBalance;
+                }
+                else
+                {
+                    r.RunningBalance = null; // show blank in UI / PDF
+                }
+            }
+
+            // assign back
+            dto.Rows = orderedRows;
+            dto.ClosingBalance = runningBalance;
+
+            return dto;
 
             return dto;
         }
 
+
         public decimal GetOpeningBalance(
     SQLiteConnection conn,
     long accountId,
-    string fromDate
+    DateTime fromDate
 )
         {
             using (var cmd = conn.CreateCommand())
@@ -12522,7 +12689,7 @@ WHERE LOWER(AccountName) = LOWER(@name)
         //    }
 
 
-        public ProfitLossReportDto GetProfitAndLoss(string from, string to)
+        public ProfitLossReportDto GetProfitAndLoss(DateTime from, DateTime to)
         {
             var report = new ProfitLossReportDto { From = from, To = to };
 
@@ -12533,18 +12700,19 @@ WHERE LOWER(AccountName) = LOWER(@name)
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-                SELECT 
-                    a.AccountId,
-                    a.AccountName,
-                    a.AccountType,
-                    IFNULL(SUM(jl.Debit), 0) AS Debit,
-                    IFNULL(SUM(jl.Credit), 0) AS Credit
-                FROM Accounts a
-                LEFT JOIN JournalLines jl ON jl.AccountId = a.AccountId
-                LEFT JOIN JournalEntries je ON je.JournalId = jl.JournalId
-                WHERE Date(je.Date) BETWEEN Date(@from) AND Date(@to)
-                GROUP BY a.AccountId, a.AccountName, a.AccountType;
-            ";
+SELECT 
+    a.AccountId,
+    a.AccountName,
+    a.AccountType,
+    IFNULL(SUM(jl.Debit), 0) AS Debit,
+    IFNULL(SUM(jl.Credit), 0) AS Credit
+FROM Accounts a
+LEFT JOIN JournalLines jl ON jl.AccountId = a.AccountId
+LEFT JOIN JournalEntries je ON je.JournalId = jl.JournalId
+WHERE je.Date BETWEEN @from AND @to
+GROUP BY a.AccountId, a.AccountName, a.AccountType;
+";           
+  
 
                     cmd.Parameters.AddWithValue("@from", from);
                     cmd.Parameters.AddWithValue("@to", to);
@@ -12603,8 +12771,10 @@ WHERE LOWER(AccountName) = LOWER(@name)
             var stockSvc = new StockValuationService();
             var totals = stockSvc.ComputeTotalsFIFO(from, to);
 
-            decimal issuedCogs = totals.PeriodCogsTotal;
-            decimal closingStock = totals.ClosingStockTotal;
+            decimal closingStock = totals.Item1;
+            decimal issuedCogs = totals.Item2;
+
+
 
             // Show issued COGS
             report.Expenses.Add(new ProfitLossRow
@@ -12657,23 +12827,31 @@ WHERE LOWER(AccountName) = LOWER(@name)
             return report;
         }
 
-        public BalanceSheetReportDto GetBalanceSheet(string asOf, decimal netProfit)
+        public BalanceSheetReportDto GetBalanceSheet(
+    DateTime from,
+    DateTime to,
+    decimal netProfit
+)
         {
-            var report = new BalanceSheetReportDto { AsOf = asOf };
+            var report = new BalanceSheetReportDto
+            {
+                From = from,
+                To = to
+            };
 
             using (var conn = new SQLiteConnection(_connectionString))
             {
                 conn.Open();
 
                 // -------------------------------------------------
-                // STEP 1: FIFO Closing Stock (valuation only)
+                // STEP 1: FIFO Closing Stock (valuation as on TO date)
                 // -------------------------------------------------
                 var stockSvc = new StockValuationService();
-                var fifoRows = stockSvc.CalculateStockValuationFIFO(asOf);
+                var fifoRows = stockSvc.CalculateStockValuationFIFO(to);
                 decimal closingStockValue = fifoRows.Sum(r => r.ClosingValue);
 
                 // -------------------------------------------------
-                // STEP 2: Accumulators
+                // STEP 2: Totals
                 // -------------------------------------------------
                 decimal assetDebitTotal = 0;
                 decimal assetCreditTotal = 0;
@@ -12685,12 +12863,12 @@ WHERE LOWER(AccountName) = LOWER(@name)
                 decimal capitalCreditTotal = 0;
 
                 // -------------------------------------------------
-                // STEP 3: Read Ledger Balances
+                // STEP 3: Ledger balances (UP TO TO DATE)
                 // -------------------------------------------------
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-            WITH RECURSIVE AccountTree AS (
+WITH RECURSIVE AccountTree AS (
     SELECT 
         a.AccountId AS RootAccountId,
         a.AccountId AS ChildAccountId
@@ -12717,7 +12895,7 @@ LEFT JOIN JournalLines jl
     ON jl.AccountId = at.ChildAccountId
 LEFT JOIN JournalEntries je
     ON je.JournalId = jl.JournalId
-   AND Date(je.Date) <= Date(@asOf)
+   AND Date(je.Date) <= Date(@to)
 WHERE root.IsActive = 1
   AND (
         root.ParentAccountId IS NULL
@@ -12729,20 +12907,18 @@ WHERE root.IsActive = 1
       )
 GROUP BY root.AccountId, root.AccountName, root.AccountType
 ORDER BY root.AccountType, root.AccountName;
-;
-        ";
+";
 
-                    cmd.Parameters.AddWithValue("@asOf", asOf);
+                    cmd.Parameters.AddWithValue("@to", to.Date);
 
                     using (var rd = cmd.ExecuteReader())
                     {
                         while (rd.Read())
                         {
-                            string name = rd.GetString(1);        // AccountName
-                            string type = rd.GetString(2);        // AccountType
-                            decimal debit = rd.GetDecimal(3);     // TotalDebit
-                            decimal credit = rd.GetDecimal(4);    // TotalCredit
-
+                            string name = rd.GetString(1);
+                            string type = rd.GetString(2);
+                            decimal debit = rd.GetDecimal(3);
+                            decimal credit = rd.GetDecimal(4);
 
                             // ---------------- ASSETS ----------------
                             if (type == "Asset")
@@ -12760,7 +12936,7 @@ ORDER BY root.AccountType, root.AccountName;
                                 }
 
                                 if (bal > 0) assetDebitTotal += bal;
-                                else if (bal < 0) assetCreditTotal += Math.Abs(bal);
+                                else assetCreditTotal += Math.Abs(bal);
                             }
 
                             // ---------------- LIABILITIES ----------------
@@ -12779,10 +12955,10 @@ ORDER BY root.AccountType, root.AccountName;
                                 }
 
                                 if (bal > 0) liabilityCreditTotal += bal;
-                                else if (bal < 0) liabilityDebitTotal += Math.Abs(bal);
+                                else liabilityDebitTotal += Math.Abs(bal);
                             }
 
-                            // ---------------- CAPITAL (ledger equity only) ----------------
+                            // ---------------- CAPITAL ----------------
                             else if (type == "Equity")
                             {
                                 decimal bal = credit - debit;
@@ -12798,14 +12974,14 @@ ORDER BY root.AccountType, root.AccountName;
                                 }
 
                                 if (bal > 0) capitalCreditTotal += bal;
-                                else if (bal < 0) capitalDebitTotal += Math.Abs(bal);
+                                else capitalDebitTotal += Math.Abs(bal);
                             }
                         }
                     }
                 }
 
                 // -------------------------------------------------
-                // STEP 4: Retained Earnings / Loss (FROM P&L ONLY)
+                // STEP 4: Retained Earnings (FROM P&L)
                 // -------------------------------------------------
                 if (netProfit > 0)
                 {
@@ -12846,15 +13022,16 @@ ORDER BY root.AccountType, root.AccountName;
                 }
 
                 // -------------------------------------------------
-                // STEP 6: Final Totals
+                // STEP 6: Totals
                 // -------------------------------------------------
-                report.Assets.Total = assetDebitTotal; // debit-side total only
+                report.Assets.Total = assetDebitTotal;
                 report.Liabilities.Total = liabilityCreditTotal - liabilityDebitTotal;
                 report.Capital.Total = capitalCreditTotal - capitalDebitTotal;
 
                 return report;
             }
         }
+
 
 
 

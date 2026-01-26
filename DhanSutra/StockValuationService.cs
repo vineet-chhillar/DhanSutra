@@ -24,6 +24,7 @@ namespace DhanSutra
     public class StockValuationService
     {
         private readonly string _connectionString = "Data Source=billing.db;Version=3;BusyTimeout=5000;";
+        
         public StockValuationService() 
         {
             // ✅ Step 1: Define a safe, user-visible folder
@@ -61,7 +62,7 @@ namespace DhanSutra
             public string Status { get; set; }
         }
 
-        public List<StockSummaryRow> GetStockSummary(string asOf)
+        public List<StockSummaryRow> GetStockSummary(DateTime asOf)
         {
             var valuation = CalculateStockValuationFIFO(asOf); // we coded earlier
             var rows = new List<StockSummaryRow>();
@@ -141,7 +142,7 @@ namespace DhanSutra
 
 
         // Helper: load ledger entries up to asOf (inclusive)
-        private List<dynamic> LoadLedgerEntriesUpTo(string asOf)
+        private List<dynamic> LoadLedgerEntriesUpTo(DateTime asOf)
         {
             var entries = new List<dynamic>();
             using (var conn = new SQLiteConnection(_connectionString))
@@ -182,55 +183,61 @@ namespace DhanSutra
         }
 
         // Public: calculate FIFO valuation. periodFrom/periodTo optional — if provided, OutValue is computed for that period.
-        public List<StockValuationRow> CalculateStockValuationFIFO(string asOfDate, string periodFrom = null, string periodTo = null)
+        public List<StockValuationRow> CalculateStockValuationFIFO(
+    DateTime asOfDate,
+    DateTime? periodFrom = null,
+    DateTime? periodTo = null
+)
         {
-            // Normalize date strings (expect yyyy-MM-dd)
+            // Load entries up to "as of" date
             var entries = LoadLedgerEntriesUpTo(asOfDate);
 
             // Group by ItemId
-            var byItem = entries.GroupBy(e => (int)e.ItemId).ToDictionary(g => g.Key, g => g.ToList());
+            var byItem = entries
+                .GroupBy(e => (int)e.ItemId)
+                .ToDictionary(g => g.Key, g => g.ToList());
 
             var results = new List<StockValuationRow>();
 
-            // TxnType logic (exact strings)
-            bool IsInTxn(string tx) => string.Equals(tx, "Purchase", StringComparison.OrdinalIgnoreCase)
-                                     || string.Equals(tx, "Sales Return", StringComparison.OrdinalIgnoreCase);
-            bool IsOutTxn(string tx) => string.Equals(tx, "Sale", StringComparison.OrdinalIgnoreCase)
-                                      || string.Equals(tx, "Purchase Return", StringComparison.OrdinalIgnoreCase);
+            bool IsInTxn(string tx) =>
+                string.Equals(tx, "Purchase", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tx, "Sales Return", StringComparison.OrdinalIgnoreCase);
 
-            DateTime? pf = string.IsNullOrEmpty(periodFrom) ? (DateTime?)null : DateTime.Parse(periodFrom);
-            DateTime? pt = string.IsNullOrEmpty(periodTo) ? (DateTime?)null : DateTime.Parse(periodTo);
+            bool IsOutTxn(string tx) =>
+                string.Equals(tx, "Sale", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tx, "Purchase Return", StringComparison.OrdinalIgnoreCase);
+
+            DateTime? pf = periodFrom;
+            DateTime? pt = periodTo;
 
             foreach (var kv in byItem)
             {
                 int itemId = kv.Key;
                 var list = kv.Value;
 
-                // FIFO queue of lots: each tuple = (qtyRemaining, unitCost)
                 var queue = new LinkedList<(decimal qty, decimal unitCost)>();
 
-                decimal openingQty = 0m;
-                decimal openingValue = 0m;
-                decimal inQty = 0m;
-                decimal inValue = 0m;
-                decimal outQty = 0m;
-                decimal outValue = 0m;
+                decimal openingQty = 0m, openingValue = 0m;
+                decimal inQty = 0m, inValue = 0m;
+                decimal outQty = 0m, outValue = 0m;
 
                 foreach (var e in list)
                 {
                     DateTime dt = DateTime.Parse(e.Date);
-                    string tx = (string)e.TxnType;
+
+                    string tx = e.TxnType;
                     decimal qty = e.Qty;
-                    // treat negative Qty as reversal/outflow; still use TxnType to interpret normally
                     bool isNegativeQty = qty < 0m;
 
                     if (IsInTxn(tx) && !isNegativeQty)
                     {
-                        // IN movement
-                        decimal unitCost = e.NetRate != 0m ? e.NetRate : (e.Qty != 0m ? e.TotalAmount / e.Qty : 0m);
+                        decimal unitCost =
+                            e.NetRate != 0m
+                                ? e.NetRate
+                                : (e.Qty != 0m ? e.TotalAmount / e.Qty : 0m);
+
                         decimal qtyIn = qty;
 
-                        // classify opening vs period in
                         if (pf.HasValue && dt < pf.Value)
                         {
                             openingQty += qtyIn;
@@ -242,12 +249,10 @@ namespace DhanSutra
                             inValue += qtyIn * unitCost;
                         }
 
-                        // push lot at queue tail
                         queue.AddLast((qtyIn, unitCost));
                     }
                     else if (IsOutTxn(tx) && !isNegativeQty)
                     {
-                        // OUT movement (Qty is positive but logically an outflow)
                         decimal qtyToConsume = Math.Abs(qty);
                         decimal consumedCost = 0m;
 
@@ -256,30 +261,18 @@ namespace DhanSutra
                             var first = queue.First.Value;
                             if (first.qty > qtyToConsume)
                             {
-                                // partially consume
                                 consumedCost += qtyToConsume * first.unitCost;
-                                var remaining = (first.qty - qtyToConsume, first.unitCost);
-                                queue.First.Value = remaining; // update
+                                queue.First.Value = (first.qty - qtyToConsume, first.unitCost);
                                 qtyToConsume = 0m;
                             }
                             else
                             {
-                                // consume whole lot
                                 consumedCost += first.qty * first.unitCost;
                                 qtyToConsume -= first.qty;
                                 queue.RemoveFirst();
                             }
                         }
 
-                        // if qtyToConsume still > 0 -> negative stock situation; treat extra consumption at zero cost (or change policy)
-                        if (qtyToConsume > 0m)
-                        {
-                            // fallback: treat remaining consumption at zero cost
-                            consumedCost += 0m;
-                            qtyToConsume = 0m;
-                        }
-
-                        // classify opening vs period out
                         if (pf.HasValue && dt < pf.Value)
                         {
                             openingQty -= Math.Abs(qty);
@@ -292,89 +285,56 @@ namespace DhanSutra
                         }
                         else if (!pf.HasValue)
                         {
-                            // no period specified — count everything as period out
                             outQty += Math.Abs(qty);
                             outValue += consumedCost;
                         }
-                        else
-                        {
-                            // dt > pt (after period) — reduce queue but do not include in period COGS
-                            // already removed from queue above; no change to outValue/outQty
-                        }
                     }
-                    else
+                    else if (qty < 0m)
                     {
-                        // Special case: Qty negative (reversal) or unexpected TxnType
-                        // treat negative Qty as OUT (removal of stock). This covers your edit reversals where you insert negative Qty.
-                        if (qty < 0m)
-                        {
-                            decimal qtyToConsume = Math.Abs(qty);
-                            decimal consumedCost = 0m;
-                            while (qtyToConsume > 0m && queue.Count > 0)
-                            {
-                                var first = queue.First.Value;
-                                if (first.qty > qtyToConsume)
-                                {
-                                    consumedCost += qtyToConsume * first.unitCost;
-                                    var remaining = (first.qty - qtyToConsume, first.unitCost);
-                                    queue.First.Value = remaining;
-                                    qtyToConsume = 0m;
-                                }
-                                else
-                                {
-                                    consumedCost += first.qty * first.unitCost;
-                                    qtyToConsume -= first.qty;
-                                    queue.RemoveFirst();
-                                }
-                            }
+                        decimal qtyToConsume = Math.Abs(qty);
+                        decimal consumedCost = 0m;
 
-                            // classify as reversal of previous movement: this reduces opening or closing depending on date
-                            if (pf.HasValue && dt < pf.Value)
+                        while (qtyToConsume > 0m && queue.Count > 0)
+                        {
+                            var first = queue.First.Value;
+                            if (first.qty > qtyToConsume)
                             {
-                                openingQty -= Math.Abs(qty);
-                                openingValue -= consumedCost;
-                            }
-                            else if (pf.HasValue && pt.HasValue && dt >= pf.Value && dt <= pt.Value)
-                            {
-                                // a negative qty inside period: we consider it reduces Out (COGS) or increases stock depending on your policy;
-                                // simpler: treat negative within period as reducing OutQty/outValue
-                                outQty -= Math.Abs(qty);
-                                outValue -= consumedCost;
+                                consumedCost += qtyToConsume * first.unitCost;
+                                queue.First.Value = (first.qty - qtyToConsume, first.unitCost);
+                                qtyToConsume = 0m;
                             }
                             else
                             {
-                                // dt > pt: affects closing only (queue already reduced)
+                                consumedCost += first.qty * first.unitCost;
+                                qtyToConsume -= first.qty;
+                                queue.RemoveFirst();
                             }
                         }
-                        else
+
+                        if (pf.HasValue && dt < pf.Value)
                         {
-                            // Unexpected TxnType: ignore for valuation (or log)
+                            openingQty -= Math.Abs(qty);
+                            openingValue -= consumedCost;
                         }
-                    }
-                } // per entry
-
-                decimal closingQty = 0m;
-                decimal closingValue = 0m;
-                foreach (var lot in queue) { closingQty += lot.qty; closingValue += lot.qty * lot.unitCost; }
-
-                // Optionally fetch item name
-                string itemName = "";
-                using (var conn = new SQLiteConnection(_connectionString))
-                {
-                    conn.Open();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT Name FROM Item WHERE Id=@id LIMIT 1;";
-                        cmd.Parameters.AddWithValue("@id", itemId);
-                        var o = cmd.ExecuteScalar();
-                        if (o != null) itemName = o.ToString();
+                        else if (pf.HasValue && pt.HasValue && dt >= pf.Value && dt <= pt.Value)
+                        {
+                            outQty -= Math.Abs(qty);
+                            outValue -= consumedCost;
+                        }
                     }
                 }
 
-                var row = new StockValuationRow
+                decimal closingQty = 0m, closingValue = 0m;
+                foreach (var lot in queue)
+                {
+                    closingQty += lot.qty;
+                    closingValue += lot.qty * lot.unitCost;
+                }
+                DatabaseService db = new DatabaseService();
+                results.Add(new StockValuationRow
                 {
                     ItemId = itemId,
-                    ItemName = itemName,
+                    ItemName = db.GetItemNameById(itemId),
                     OpeningQty = Math.Max(0, openingQty),
                     OpeningValue = Math.Max(0, openingValue),
                     InQty = Math.Max(0, inQty),
@@ -383,22 +343,27 @@ namespace DhanSutra
                     OutValue = Math.Max(0, outValue),
                     ClosingQty = Math.Max(0, closingQty),
                     ClosingValue = Math.Max(0, closingValue)
-                };
-
-                results.Add(row);
-            } // per item
+                });
+            }
 
             return results;
         }
 
+
         // Convenience: totals for UI or P&L/Balance sheet
-        public (decimal ClosingStockTotal, decimal PeriodCogsTotal) ComputeTotalsFIFO(string periodFrom, string periodTo)
+        public (decimal ClosingStockTotal, decimal PeriodCogsTotal)
+    ComputeTotalsFIFO(DateTime periodFrom, DateTime periodTo)
         {
-            var asOf = periodTo ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+            // Use periodTo directly (already DateTime)
+            var asOf = periodTo;
+
             var rows = CalculateStockValuationFIFO(asOf, periodFrom, periodTo);
+
             decimal closing = rows.Sum(r => r.ClosingValue);
             decimal cogs = rows.Sum(r => r.OutValue);
+
             return (closing, cogs);
         }
+
     }
 }
